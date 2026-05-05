@@ -1,0 +1,655 @@
+import { useEffect, useMemo, useState } from "react";
+import {
+  CheckCircle2,
+  Droplets,
+  Loader2,
+  Minus,
+  Plus,
+  Save,
+  TrendingDown,
+  TrendingUp,
+} from "lucide-react";
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  CartesianGrid,
+} from "recharts";
+import { supabase } from "@/lib/supabase-client";
+import type { NutritionLogRow } from "@/lib/supabase-types";
+import { calcNutritionStatus } from "@/lib/calculations";
+import { toDateKey } from "@/lib/date-helpers";
+import { useSupabaseSession } from "@/hooks/useSupabaseSession";
+
+type NutritionForm = {
+  bodyweight: number;
+  calories: number;
+  proteinG: number;
+  carbsG: number;
+  fatG: number;
+  waterOz: number;
+  mealsCount: number;
+  trainingDay: boolean;
+  notes: string;
+};
+
+const defaultForm: NutritionForm = {
+  bodyweight: 145,
+  calories: 0,
+  proteinG: 0,
+  carbsG: 0,
+  fatG: 0,
+  waterOz: 0,
+  mealsCount: 0,
+  trainingDay: false,
+  notes: "",
+};
+
+function rowToForm(row: NutritionLogRow): NutritionForm {
+  return {
+    bodyweight: row.bodyweight ?? defaultForm.bodyweight,
+    calories: row.calories ?? 0,
+    proteinG: row.protein_g ?? 0,
+    carbsG: row.carbs_g ?? 0,
+    fatG: row.fat_g ?? 0,
+    waterOz: row.water_oz ?? 0,
+    mealsCount: row.meals_count ?? 0,
+    trainingDay: row.training_day ?? false,
+    notes: row.notes ?? "",
+  };
+}
+
+export default function NutritionPage() {
+  const today = useMemo(() => toDateKey(new Date()), []);
+  const { hasSupabaseConfig, userId } = useSupabaseSession();
+  const [form, setForm] = useState<NutritionForm>(defaultForm);
+  const [history, setHistory] = useState<NutritionLogRow[]>([]);
+  const [surplus, setSurplus] = useState(500);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+
+    const load = async () => {
+      if (!supabase || !userId) {
+        if (!active) return;
+        setIsLoading(false);
+        setNotice(
+          hasSupabaseConfig
+            ? "No Supabase session yet. Nutrition logs stay in local draft mode until auth is connected."
+            : "Supabase env vars are missing. Nutrition logs stay in local draft mode.",
+        );
+        return;
+      }
+
+      setIsLoading(true);
+      setError(null);
+
+      const start = new Date();
+      start.setDate(start.getDate() - 6);
+
+      const [todayNutrition, weekNutrition] = await Promise.all([
+        supabase
+          .from("nutrition_logs")
+          .select("*")
+          .eq("user_id", userId)
+          .eq("date", today)
+          .maybeSingle(),
+        supabase
+          .from("nutrition_logs")
+          .select("*")
+          .eq("user_id", userId)
+          .gte("date", toDateKey(start))
+          .lte("date", today)
+          .order("date", { ascending: true }),
+      ]);
+
+      if (!active) return;
+
+      if (todayNutrition.error) {
+        setError(todayNutrition.error.message);
+      } else if (todayNutrition.data) {
+        setForm(rowToForm(todayNutrition.data as NutritionLogRow));
+      }
+
+      if (weekNutrition.error) {
+        setError(weekNutrition.error.message);
+      } else {
+        setHistory((weekNutrition.data ?? []) as NutritionLogRow[]);
+      }
+
+      setIsLoading(false);
+      setNotice("Loaded from Supabase.");
+    };
+
+    void load();
+
+    return () => {
+      active = false;
+    };
+  }, [hasSupabaseConfig, today, userId]);
+
+  const maintenance = Math.round(form.bodyweight * 15);
+  const targetCalories = maintenance + surplus;
+  const proteinTarget = Math.round(form.bodyweight * 1.0);
+
+  const currentStatus = calcNutritionStatus(
+    form.calories,
+    form.proteinG,
+    form.waterOz,
+    form.mealsCount,
+    form.bodyweight,
+    targetCalories,
+  );
+
+  const weightTrend = history
+    .filter((row) => row.bodyweight != null)
+    .map((row) => ({
+      date: row.date,
+      weight: Number(row.bodyweight ?? 0),
+      calories: Number(row.calories ?? 0),
+    }));
+
+  const weightChange =
+    weightTrend.length >= 2
+      ? Math.round(
+          (weightTrend[weightTrend.length - 1].weight - weightTrend[0].weight) * 100,
+        ) / 100
+      : 0;
+
+  const calorieFeedback =
+    weightChange < 0.25
+      ? { message: "Add 200 calories per day", action: "up" as const }
+      : weightChange <= 1
+        ? { message: "Keep calories the same", action: "same" as const }
+        : { message: "Remove 150 calories per day", action: "down" as const };
+
+  const chartData = history
+    .filter((row) => row.bodyweight != null)
+    .map((row) => ({
+      day: new Date(row.date).toLocaleDateString("en-US", { weekday: "short" }),
+      bodyweight: Number(row.bodyweight ?? 0),
+      calories: Number(row.calories ?? 0),
+    }));
+
+  const handleSave = async () => {
+    const payload = {
+      user_id: userId,
+      date: today,
+      bodyweight: form.bodyweight,
+      calories: form.calories,
+      protein_g: form.proteinG,
+      carbs_g: form.carbsG,
+      fat_g: form.fatG,
+      water_oz: form.waterOz,
+      meals_count: form.mealsCount,
+      training_day: form.trainingDay,
+      notes: form.notes.trim() || null,
+    };
+
+    if (!supabase || !userId) {
+      const localRow: NutritionLogRow = {
+        id: crypto.randomUUID(),
+        user_id: "local-draft",
+        date: today,
+        bodyweight: form.bodyweight,
+        calories: form.calories,
+        protein_g: form.proteinG,
+        carbs_g: form.carbsG,
+        fat_g: form.fatG,
+        water_oz: form.waterOz,
+        meals_count: form.mealsCount,
+        training_day: form.trainingDay,
+        notes: form.notes.trim() || null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      setHistory((current) => {
+        const others = current.filter((row) => row.date !== today);
+        return [...others, localRow];
+      });
+      setNotice("Nutrition log stored in local draft mode.");
+      return;
+    }
+
+    setIsSaving(true);
+    setError(null);
+    setNotice(null);
+
+    const { error: saveError } = await supabase
+      .from("nutrition_logs")
+      .upsert(payload, { onConflict: "user_id,date" });
+
+    if (saveError) {
+      setError(saveError.message);
+    } else {
+      const { data: savedRow } = await supabase
+        .from("nutrition_logs")
+        .select("*")
+        .eq("user_id", userId)
+        .eq("date", today)
+        .maybeSingle();
+
+      if (savedRow) {
+        setForm(rowToForm(savedRow as NutritionLogRow));
+        setHistory((current) => {
+          const others = current.filter((row) => row.date !== today);
+          return [...others, savedRow as NutritionLogRow];
+        });
+      }
+
+      setNotice("Nutrition log saved to Supabase.");
+    }
+
+    setIsSaving(false);
+  };
+
+  const waterRemaining = Math.max(0, 8 - form.waterOz);
+
+  return (
+    <div className="space-y-6">
+      <div className="border-b border-white/[0.06] pb-4">
+        <h1 className="text-2xl font-semibold text-[#eaeaea]">Nutrition</h1>
+        <p className="text-sm text-[#777777] mt-1">
+          Track whether your food supports muscle gain, energy, school, and
+          recovery.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="space-y-4">
+          <div className="card-surface p-4">
+            <h3 className="text-sm font-semibold text-[#eaeaea] mb-3">
+              CALORIE TARGET
+            </h3>
+            <div className="grid grid-cols-2 gap-3 mb-3">
+              <div>
+                <label className="text-[10px] uppercase text-[#777777] block mb-1">
+                  Bodyweight (lbs)
+                </label>
+                <input
+                  type="number"
+                  value={form.bodyweight}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, bodyweight: Number(e.target.value) }))
+                  }
+                  className="input-dark w-full"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] uppercase text-[#777777] block mb-1">
+                  Maintenance
+                </label>
+                <div className="text-sm text-[#777777] py-2">
+                  {maintenance} cal
+                </div>
+              </div>
+            </div>
+            <div className="mb-3">
+              <label className="text-[10px] uppercase text-[#777777] block mb-1">
+                Surplus: +{surplus} cal
+              </label>
+              <input
+                type="range"
+                min={200}
+                max={600}
+                step={50}
+                value={surplus}
+                onChange={(e) => setSurplus(Number(e.target.value))}
+                className="slider-dark"
+              />
+            </div>
+            <div className="text-center">
+              <span className="text-3xl font-bold text-[#3b82f6]">
+                {targetCalories}
+              </span>
+              <span className="text-sm text-[#777777]"> cal/day target</span>
+            </div>
+            <div className="mt-2 flex items-center justify-center gap-1 text-xs">
+              {calorieFeedback.action === "up" ? (
+                <TrendingUp size={12} className="text-[#eab308]" />
+              ) : null}
+              {calorieFeedback.action === "down" ? (
+                <TrendingDown size={12} className="text-[#ef4444]" />
+              ) : null}
+              {calorieFeedback.action === "same" ? (
+                <CheckCircle2 size={12} className="text-[#22c55e]" />
+              ) : null}
+              <span
+                className={
+                  calorieFeedback.action === "up"
+                    ? "text-[#eab308]"
+                    : calorieFeedback.action === "down"
+                      ? "text-[#ef4444]"
+                      : "text-[#22c55e]"
+                }
+              >
+                {calorieFeedback.message}
+              </span>
+            </div>
+          </div>
+
+          <div className="card-surface p-4">
+            <h3 className="text-sm font-semibold text-[#eaeaea] mb-3">
+              DAILY INPUT
+            </h3>
+            <div className="space-y-3">
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[10px] uppercase text-[#777777]">
+                    Calories Eaten
+                  </label>
+                  <span className="font-mono-data text-[10px] text-[#777777]">
+                    {form.calories}/{targetCalories}
+                  </span>
+                </div>
+                <input
+                  type="number"
+                  value={form.calories}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, calories: Number(e.target.value) }))
+                  }
+                  className="input-dark w-full"
+                />
+                <div className="mt-1 h-1 bg-white/[0.06] rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-[#eab308] rounded-full transition-all"
+                    style={{
+                      width: `${Math.min(100, (form.calories / targetCalories) * 100)}%`,
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[10px] uppercase text-[#777777]">
+                    Protein (g)
+                  </label>
+                  <span className="font-mono-data text-[10px] text-[#777777]">
+                    {form.proteinG}/{proteinTarget}g
+                  </span>
+                </div>
+                <input
+                  type="number"
+                  value={form.proteinG}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, proteinG: Number(e.target.value) }))
+                  }
+                  className="input-dark w-full"
+                />
+                <div className="mt-1 h-1 bg-white/[0.06] rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-[#22c55e] rounded-full transition-all"
+                    style={{
+                      width: `${Math.min(100, (form.proteinG / proteinTarget) * 100)}%`,
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[10px] uppercase text-[#777777] block mb-1">
+                    Carbs (g)
+                  </label>
+                  <input
+                    type="number"
+                    value={form.carbsG}
+                    onChange={(e) =>
+                      setForm((p) => ({ ...p, carbsG: Number(e.target.value) }))
+                    }
+                    className="input-dark w-full"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] uppercase text-[#777777] block mb-1">
+                    Fat (g)
+                  </label>
+                  <input
+                    type="number"
+                    value={form.fatG}
+                    onChange={(e) =>
+                      setForm((p) => ({ ...p, fatG: Number(e.target.value) }))
+                    }
+                    className="input-dark w-full"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] uppercase text-[#777777] block mb-2">
+                  Water Glasses
+                </label>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setForm((p) => ({ ...p, waterOz: Math.max(0, p.waterOz - 1) }))}
+                    className="p-1 bg-[#1a1a1a] rounded hover:bg-[#222] transition-colors"
+                  >
+                    <Minus size={14} />
+                  </button>
+                  <div className="flex gap-1 flex-1 justify-center">
+                    {Array.from({ length: 8 }).map((_, i) => (
+                      <Droplets
+                        key={i}
+                        size={16}
+                        className={
+                          i < form.waterOz ? "text-[#3b82f6]" : "text-white/[0.06]"
+                        }
+                      />
+                    ))}
+                  </div>
+                  <button
+                    onClick={() => setForm((p) => ({ ...p, waterOz: Math.min(8, p.waterOz + 1) }))}
+                    className="p-1 bg-[#1a1a1a] rounded hover:bg-[#222] transition-colors"
+                  >
+                    <Plus size={14} />
+                  </button>
+                </div>
+                <div className="mt-1 text-[10px] text-[#777777] text-center">
+                  {waterRemaining} more glasses to hit the target
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] uppercase text-[#777777] block mb-1">
+                  Meals Eaten
+                </label>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() =>
+                      setForm((p) => ({ ...p, mealsCount: Math.max(0, p.mealsCount - 1) }))
+                    }
+                    className="p-1 bg-[#1a1a1a] rounded hover:bg-[#222] transition-colors"
+                  >
+                    <Minus size={14} />
+                  </button>
+                  <span className="text-sm text-[#eaeaea] w-8 text-center">
+                    {form.mealsCount}
+                  </span>
+                  <button
+                    onClick={() =>
+                      setForm((p) => ({ ...p, mealsCount: p.mealsCount + 1 }))
+                    }
+                    className="p-1 bg-[#1a1a1a] rounded hover:bg-[#222] transition-colors"
+                  >
+                    <Plus size={14} />
+                  </button>
+                </div>
+              </div>
+
+              <label className="flex items-center gap-2 text-xs text-[#777777]">
+                <input
+                  type="checkbox"
+                  checked={form.trainingDay}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, trainingDay: e.target.checked }))
+                  }
+                  className="rounded border-white/[0.06] bg-[#1a1a1a]"
+                />
+                Training day
+              </label>
+
+              <div>
+                <label className="text-[10px] uppercase text-[#777777] block mb-1">
+                  Notes
+                </label>
+                <textarea
+                  value={form.notes}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, notes: e.target.value }))
+                  }
+                  className="input-dark w-full h-20 resize-none"
+                  placeholder="Meal timing, appetite, digestion, anything useful"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <div className="card-surface p-4">
+            <h3 className="text-sm font-semibold text-[#eaeaea] mb-3">
+              NUTRITION STATUS
+            </h3>
+            <div className="grid grid-cols-2 gap-3 text-xs">
+              <StatusChip label="Calories" ok={currentStatus.caloriesHit} />
+              <StatusChip label="Protein" ok={currentStatus.proteinHit} />
+              <StatusChip label="Water" ok={currentStatus.waterHit} />
+              <StatusChip label="Meals" ok={currentStatus.timingOk} />
+            </div>
+            <div className="mt-3 text-sm text-[#777777]">
+              Checks: <span className="text-[#eaeaea]">{currentStatus.checks}/4</span>
+            </div>
+            <div className="mt-2 text-sm">
+              Status:{" "}
+              <span
+                className={
+                  currentStatus.status === "green"
+                    ? "text-[#22c55e]"
+                    : currentStatus.status === "yellow"
+                      ? "text-[#eab308]"
+                      : "text-[#ef4444]"
+                }
+              >
+                {currentStatus.status.toUpperCase()}
+              </span>
+            </div>
+          </div>
+
+          <div className="card-surface p-4">
+            <h3 className="text-sm font-semibold text-[#eaeaea] mb-3">
+              SAVE NUTRITION
+            </h3>
+            {!hasSupabaseConfig ? (
+              <div className="mb-3 rounded border border-[#eab308]/30 bg-[#eab308]/10 px-3 py-2 text-xs text-[#eab308]">
+                Supabase env vars are missing. Nutrition logs stay in local draft
+                mode.
+              </div>
+            ) : null}
+            {hasSupabaseConfig && !userId ? (
+              <div className="mb-3 rounded border border-[#3b82f6]/30 bg-[#3b82f6]/10 px-3 py-2 text-xs text-[#3b82f6]">
+                Supabase is configured, but there is no session yet.
+              </div>
+            ) : null}
+            {error ? (
+              <div className="mb-3 rounded border border-[#ef4444]/30 bg-[#ef4444]/10 px-3 py-2 text-xs text-[#ef4444]">
+                {error}
+              </div>
+            ) : null}
+            {notice ? (
+              <div className="mb-3 rounded border border-white/[0.06] bg-[#111111] px-3 py-2 text-xs text-[#777777]">
+                {notice}
+              </div>
+            ) : null}
+            <button
+              onClick={handleSave}
+              className="btn-primary inline-flex w-full items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={isSaving || isLoading}
+            >
+              {isSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+              {isSaving ? "Saving..." : "Save Nutrition"}
+            </button>
+          </div>
+
+          <div className="card-surface p-4">
+            <h3 className="text-sm font-semibold text-[#eaeaea] mb-3">
+              WEIGHT TREND
+            </h3>
+            {chartData.length > 0 ? (
+              <ResponsiveContainer width="100%" height={220}>
+                <LineChart data={chartData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+                  <XAxis dataKey="day" stroke="#444" fontSize={10} />
+                  <YAxis stroke="#444" fontSize={10} />
+                  <Tooltip
+                    contentStyle={{
+                      background: "#1a1a1a",
+                      border: "1px solid rgba(255,255,255,0.06)",
+                      fontSize: "11px",
+                    }}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="bodyweight"
+                    stroke="#3b82f6"
+                    strokeWidth={2}
+                    dot={false}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-[220px] flex items-center justify-center text-sm text-[#444444]">
+                Save a nutrition log to see the trend line.
+              </div>
+            )}
+            <div className="mt-2 flex items-center gap-2 text-xs text-[#777777]">
+              {weightChange < 0.25 ? (
+                <TrendingUp size={12} className="text-[#eab308]" />
+              ) : weightChange > 1 ? (
+                <TrendingDown size={12} className="text-[#ef4444]" />
+              ) : (
+                <CheckCircle2 size={12} className="text-[#22c55e]" />
+              )}
+              <span>{weightChange > 0 ? "+" : ""}
+                {weightChange} lbs over the tracked period
+              </span>
+            </div>
+          </div>
+
+          <div className="card-surface p-4">
+            <h3 className="text-sm font-semibold text-[#eaeaea] mb-3">
+              WEEK SNAPSHOT
+            </h3>
+            <div className="text-xs text-[#777777]">
+              {history.length > 0
+                ? `${history.length} nutrition logs loaded from Supabase.`
+                : "No weekly logs yet."}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StatusChip({ label, ok }: { label: string; ok: boolean }) {
+  return (
+    <div
+      className="flex items-center justify-between rounded px-3 py-2"
+      style={{ backgroundColor: ok ? "rgba(34,197,94,0.08)" : "rgba(239,68,68,0.08)" }}
+    >
+      <span className="text-[#777777]">{label}</span>
+      <span className={ok ? "text-[#22c55e]" : "text-[#ef4444]"}>
+        {ok ? "Hit" : "Miss"}
+      </span>
+    </div>
+  );
+}
