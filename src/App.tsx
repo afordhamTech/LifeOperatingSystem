@@ -3,6 +3,7 @@ import AppLayout from "@/components/layout/AppLayout";
 import Dashboard from "@/pages/Dashboard";
 import SleepPage from "@/pages/SleepPage";
 import AcademicsPage from "@/pages/AcademicsPage";
+import McatFoundationPage from "@/pages/McatFoundationPage";
 import WorkoutPage from "@/pages/WorkoutPage";
 import NutritionPage from "@/pages/NutritionPage";
 import CareerPage from "@/pages/CareerPage";
@@ -13,6 +14,8 @@ import RelationshipsPage from "@/pages/RelationshipsPage";
 import SubstancePage from "@/pages/SubstancePage";
 import WeeklyReviewPage from "@/pages/WeeklyReviewPage";
 import ArchivePage from "@/pages/ArchivePage";
+import TaskCommandPage from "@/pages/TaskCommandPage";
+import CalendarPage from "@/pages/CalendarPage";
 import Login from "@/pages/Login";
 import NotFound from "@/pages/NotFound";
 
@@ -45,6 +48,14 @@ export default function App() {
         element={
           <LayoutWrapper>
             <AcademicsPage />
+          </LayoutWrapper>
+        }
+      />
+      <Route
+        path="/mcat"
+        element={
+          <LayoutWrapper>
+            <McatFoundationPage />
           </LayoutWrapper>
         }
       />
@@ -109,6 +120,22 @@ export default function App() {
         element={
           <LayoutWrapper>
             <SubstancePage />
+          </LayoutWrapper>
+        }
+      />
+      <Route
+        path="/tasks"
+        element={
+          <LayoutWrapper>
+            <TaskCommandPage />
+          </LayoutWrapper>
+        }
+      />
+      <Route
+        path="/calendar"
+        element={
+          <LayoutWrapper>
+            <CalendarPage />
           </LayoutWrapper>
         }
       />

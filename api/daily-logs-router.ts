@@ -2,6 +2,7 @@ import { z } from "zod";
 import { eq, and, desc, gte } from "drizzle-orm";
 import * as schema from "@db/schema";
 import { getDb } from "./queries/connection";
+import { parseDateOnly } from "./queries/date";
 import { createRouter, authedQuery } from "./middleware";
 
 export const dailyLogsRouter = createRouter({
@@ -12,7 +13,7 @@ export const dailyLogsRouter = createRouter({
       const rows = await db
         .select()
         .from(schema.dailyLogs)
-        .where(and(eq(schema.dailyLogs.userId, ctx.user.id), eq(schema.dailyLogs.date, input.date)))
+        .where(and(eq(schema.dailyLogs.userId, ctx.user.id), eq(schema.dailyLogs.date, parseDateOnly(input.date))))
         .limit(1);
       return rows.at(0) ?? null;
     }),
@@ -30,7 +31,7 @@ export const dailyLogsRouter = createRouter({
         .where(
           and(
             eq(schema.dailyLogs.userId, ctx.user.id),
-            gte(schema.dailyLogs.date, start.toISOString().split("T")[0])
+            gte(schema.dailyLogs.date, start)
           )
         )
         .orderBy(schema.dailyLogs.date);
@@ -60,10 +61,10 @@ export const dailyLogsRouter = createRouter({
       const existing = await db
         .select()
         .from(schema.dailyLogs)
-        .where(and(eq(schema.dailyLogs.userId, ctx.user.id), eq(schema.dailyLogs.date, input.date)))
+        .where(and(eq(schema.dailyLogs.userId, ctx.user.id), eq(schema.dailyLogs.date, parseDateOnly(input.date))))
         .limit(1);
 
-      const data: Record<string, unknown> = { ...input, userId: ctx.user.id };
+      const data: Record<string, unknown> = { ...input, date: parseDateOnly(input.date), userId: ctx.user.id };
 
       if (existing.length > 0) {
         await db.update(schema.dailyLogs).set(data).where(eq(schema.dailyLogs.id, existing[0].id));
@@ -83,7 +84,7 @@ export const dailyLogsRouter = createRouter({
       const sleepRows = await db
         .select()
         .from(schema.sleepLogs)
-        .where(and(eq(schema.sleepLogs.userId, ctx.user.id), eq(schema.sleepLogs.date, input.date)))
+        .where(and(eq(schema.sleepLogs.userId, ctx.user.id), eq(schema.sleepLogs.date, parseDateOnly(input.date))))
         .limit(1);
       const sleepReady = Number(sleepRows.at(0)?.readinessScore || 5);
 
@@ -104,7 +105,7 @@ export const dailyLogsRouter = createRouter({
       const workoutRows = await db
         .select()
         .from(schema.workoutLogs)
-        .where(and(eq(schema.workoutLogs.userId, ctx.user.id), eq(schema.workoutLogs.date, input.date)))
+        .where(and(eq(schema.workoutLogs.userId, ctx.user.id), eq(schema.workoutLogs.date, parseDateOnly(input.date))))
         .limit(1);
       const workoutReady = Number(workoutRows.at(0)?.readinessScore || 5);
 

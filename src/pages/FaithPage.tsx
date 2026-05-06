@@ -52,9 +52,9 @@ Help me turn this into a short Bible study, reflection, prayer, and one action s
 
   return (
     <div className="space-y-6">
-      <div className="border-b border-white/[0.06] pb-4">
-        <h1 className="text-2xl font-semibold text-[#eaeaea]">Faith</h1>
-        <p className="text-sm text-[#777777] mt-1">
+      <div className="border-b border-[#ddd4c6] pb-4">
+        <h1 className="text-2xl font-semibold text-[#25313c]">Faith</h1>
+        <p className="text-sm text-[#6f685f] mt-1">
           Track spiritual discipline, Bible study, prayer, and alignment with your values.
         </p>
       </div>
@@ -62,9 +62,9 @@ Help me turn this into a short Bible study, reflection, prayer, and one action s
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Daily Check-in */}
         <div className="lg:col-span-2 card-surface p-4">
-          <h3 className="text-sm font-semibold text-[#eaeaea] mb-3">DAILY CHECK-IN</h3>
+          <h3 className="text-sm font-semibold text-[#25313c] mb-3">DAILY CHECK-IN</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <label className="flex items-center gap-2 text-sm text-[#777777] cursor-pointer">
+            <label className="flex items-center gap-2 text-sm text-[#6f685f] cursor-pointer">
               <input
                 type="checkbox"
                 checked={form.prayerDone}
@@ -73,7 +73,7 @@ Help me turn this into a short Bible study, reflection, prayer, and one action s
               />
               Prayer completed
             </label>
-            <label className="flex items-center gap-2 text-sm text-[#777777] cursor-pointer">
+            <label className="flex items-center gap-2 text-sm text-[#6f685f] cursor-pointer">
               <input
                 type="checkbox"
                 checked={form.churchInvolvement}
@@ -136,21 +136,21 @@ Help me turn this into a short Bible study, reflection, prayer, and one action s
         {/* Consistency Tracker */}
         <div className="space-y-4">
           <div className="card-surface p-4 text-center">
-            <h3 className="text-sm font-semibold text-[#eaeaea] mb-3">FAITH SCORE</h3>
-            <div className="text-4xl font-bold text-[#a855f7]">{score}%</div>
-            <div className="text-xs text-[#777777] mt-1">
+            <h3 className="text-sm font-semibold text-[#25313c] mb-3">FAITH SCORE</h3>
+            <div className="text-4xl font-bold text-[#9a7bbd]">{score}%</div>
+            <div className="text-xs text-[#6f685f] mt-1">
               {score >= 80 ? "Strong" : score >= 50 ? "Growing" : "Needs attention"}
             </div>
           </div>
 
           <div className="card-surface p-4">
-            <h3 className="text-sm font-semibold text-[#eaeaea] mb-3">THIS WEEK</h3>
+            <h3 className="text-sm font-semibold text-[#25313c] mb-3">THIS WEEK</h3>
             <div className="flex gap-1 justify-center">
               {(consistency?.dailyScores ?? []).map((day, i) => (
                 <div
                   key={i}
                   className={`w-8 h-8 rounded flex items-center justify-center text-[10px] font-mono-data ${
-                    day.score >= 75 ? "bg-[#22c55e]/20 text-[#22c55e]" : day.score >= 50 ? "bg-[#eab308]/20 text-[#eab308]" : "bg-white/[0.04] text-[#444444]"
+                    day.score >= 75 ? "bg-[#6a9a74]/20 text-[#6a9a74]" : day.score >= 50 ? "bg-[#c39a4e]/20 text-[#c39a4e]" : "bg-[#f2ece3] text-[#8c8478]"
                   }`}
                   title={`${day.date}: ${day.score}%`}
                 >
@@ -159,12 +159,12 @@ Help me turn this into a short Bible study, reflection, prayer, and one action s
               ))}
               {(!consistency?.dailyScores || consistency.dailyScores.length === 0) &&
                 Array.from({ length: 7 }).map((_, i) => (
-                  <div key={i} className="w-8 h-8 rounded bg-white/[0.04]" />
+                  <div key={i} className="w-8 h-8 rounded bg-[#f2ece3]" />
                 ))}
             </div>
             <div className="mt-3 text-center">
-              <div className="flex items-center justify-center gap-1 text-sm text-[#777777]">
-                <Flame size={14} className="text-[#eab308]" />
+              <div className="flex items-center justify-center gap-1 text-sm text-[#6f685f]">
+                <Flame size={14} className="text-[#c39a4e]" />
                 <span>{consistency?.streak ?? 0} day streak</span>
               </div>
             </div>
@@ -172,7 +172,7 @@ Help me turn this into a short Bible study, reflection, prayer, and one action s
 
           {/* Score Breakdown */}
           <div className="card-surface p-4">
-            <h3 className="text-sm font-semibold text-[#eaeaea] mb-2">BREAKDOWN</h3>
+            <h3 className="text-sm font-semibold text-[#25313c] mb-2">BREAKDOWN</h3>
             <div className="space-y-2 text-xs">
               <ScoreItem label="Prayer" value={form.prayerDone ? 30 : 0} max={30} />
               <ScoreItem label="Bible Study" value={form.bibleReading ? 30 : 0} max={30} />
@@ -191,11 +191,11 @@ Help me turn this into a short Bible study, reflection, prayer, and one action s
 function ScoreItem({ label, value, max }: { label: string; value: number; max: number }) {
   return (
     <div className="flex items-center gap-2">
-      <span className="text-[#777777] w-20">{label}</span>
-      <div className="flex-1 h-1 bg-white/[0.06] rounded-full overflow-hidden">
-        <div className="h-full bg-[#a855f7] rounded-full" style={{ width: `${(value / max) * 100}%` }} />
+      <span className="text-[#6f685f] w-20">{label}</span>
+      <div className="flex-1 h-1 bg-[#ece5da] rounded-full overflow-hidden">
+        <div className="h-full bg-[#9a7bbd] rounded-full" style={{ width: `${(value / max) * 100}%` }} />
       </div>
-      <span className="font-mono-data text-[#777777] w-8">{value}%</span>
+      <span className="font-mono-data text-[#6f685f] w-8">{value}%</span>
     </div>
   );
 }

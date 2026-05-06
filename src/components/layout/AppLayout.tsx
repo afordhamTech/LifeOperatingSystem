@@ -2,8 +2,11 @@ import { Link, useLocation } from "react-router";
 import { useAuth } from "@/hooks/useAuth";
 import {
   LayoutDashboard,
+  ListChecks,
+  CalendarDays,
   Moon,
   GraduationCap,
+  FlaskConical,
   Dumbbell,
   Apple,
   HeartPulse,
@@ -22,20 +25,36 @@ import {
 } from "lucide-react";
 import { useState, useCallback } from "react";
 
-const navItems = [
-  { path: "/", label: "Daily OS", icon: LayoutDashboard },
-  { path: "/sleep", label: "Sleep", icon: Moon },
-  { path: "/academics", label: "Academics", icon: GraduationCap },
-  { path: "/workout", label: "Workout", icon: Dumbbell },
-  { path: "/nutrition", label: "Nutrition", icon: Apple },
-  { path: "/health", label: "Health", icon: HeartPulse },
-  { path: "/career", label: "Career", icon: Briefcase },
-  { path: "/money", label: "Money", icon: Wallet },
-  { path: "/faith", label: "Faith", icon: BookOpen },
-  { path: "/relationships", label: "Relationships", icon: Users },
-  { path: "/substance", label: "Substance", icon: Brain },
-  { path: "/weekly-review", label: "Weekly Review", icon: BarChart3 },
-  { path: "/archive", label: "Archive", icon: Archive },
+type NavItem = { path: string; label: string; icon: React.ComponentType<{ size?: number; className?: string }> };
+type NavSection = { heading: string; items: NavItem[] };
+
+const navSections: NavSection[] = [
+  {
+    heading: "Command",
+    items: [
+      { path: "/", label: "Daily OS", icon: LayoutDashboard },
+      { path: "/tasks", label: "Task Command", icon: ListChecks },
+      { path: "/calendar", label: "Calendar", icon: CalendarDays },
+      { path: "/weekly-review", label: "Weekly Review", icon: BarChart3 },
+      { path: "/archive", label: "Archive", icon: Archive },
+    ],
+  },
+  {
+    heading: "Life Domains",
+    items: [
+      { path: "/sleep", label: "Sleep", icon: Moon },
+      { path: "/academics", label: "Academics", icon: GraduationCap },
+      { path: "/mcat", label: "MCAT", icon: FlaskConical },
+      { path: "/workout", label: "Workout", icon: Dumbbell },
+      { path: "/nutrition", label: "Nutrition", icon: Apple },
+      { path: "/health", label: "Health", icon: HeartPulse },
+      { path: "/career", label: "Career", icon: Briefcase },
+      { path: "/money", label: "Money", icon: Wallet },
+      { path: "/faith", label: "Faith", icon: BookOpen },
+      { path: "/relationships", label: "Relationships", icon: Users },
+      { path: "/substance", label: "Substance", icon: Brain },
+    ],
+  },
 ];
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
@@ -54,11 +73,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   });
 
   return (
-    <div className="flex h-screen bg-[#0a0a0a] overflow-hidden">
+    <div className="flex min-h-svh overflow-hidden bg-background text-foreground">
       {/* Mobile overlay */}
       {mobileOpen && (
         <div
-          className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+          className="fixed inset-0 z-40 bg-[#25313c]/20 backdrop-blur-[1px] lg:hidden"
           onClick={closeMobile}
         />
       )}
@@ -66,63 +85,72 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       {/* Mobile toggle button */}
       <button
         onClick={() => setMobileOpen(!mobileOpen)}
-        className="fixed top-4 left-4 z-50 lg:hidden p-2 bg-[#1a1a1a] rounded-md border border-white/[0.06]"
+        className="fixed left-4 top-4 z-50 rounded-xl border border-border bg-card/95 p-2 text-foreground shadow-sm backdrop-blur lg:hidden"
       >
         {mobileOpen ? <X size={18} /> : <Menu size={18} />}
       </button>
 
       {/* Sidebar */}
       <aside
-        className={`fixed lg:relative z-40 h-full bg-[#0f0f0f] border-r border-white/[0.06] flex flex-col transition-all duration-200 ${
+        className={`fixed z-40 flex h-full flex-col border-r border-border/80 bg-sidebar/95 shadow-[10px_0_32px_rgba(36,49,60,0.05)] backdrop-blur-xl transition-all duration-200 lg:relative ${
           collapsed ? "w-[56px]" : "w-[220px]"
         } ${mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}`}
       >
         {/* Logo */}
-        <div className="px-4 py-4 flex items-center justify-between">
+        <div className="flex items-center justify-between px-4 py-4">
           {!collapsed && (
             <div>
-              <div className="text-[#eaeaea] font-bold text-base tracking-tight">
+              <div className="text-base font-semibold tracking-tight text-foreground">
                 Lifeee
               </div>
-              <div className="text-[#777777] text-[10px] uppercase tracking-wider mt-0.5">
+              <div className="mt-0.5 text-[10px] uppercase tracking-[0.24em] text-muted-foreground">
                 {today}
               </div>
             </div>
           )}
           <button
             onClick={toggleSidebar}
-            className="hidden lg:flex p-1 text-[#444444] hover:text-[#777777] transition-colors"
+            className="hidden rounded-lg p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:flex"
           >
             {collapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
           </button>
         </div>
 
         {/* Nav Items */}
-        <nav className="flex-1 px-2 py-2 space-y-0.5 overflow-y-auto">
-          {navItems.map((item) => {
-            const isActive = location.pathname === item.path;
-            const Icon = item.icon;
-            return (
-              <Link
-                key={item.path}
-                to={item.path}
-                onClick={closeMobile}
-                className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-all duration-150 ${
-                  isActive
-                    ? "bg-[#1a1a1a] text-[#eaeaea] border-l-2 border-[#3b82f6]"
-                    : "text-[#444444] hover:text-[#777777] hover:bg-white/[0.02] border-l-2 border-transparent"
-                } ${collapsed ? "justify-center px-2" : ""}`}
-                title={collapsed ? item.label : undefined}
-              >
-                <Icon size={18} className="flex-shrink-0" />
-                {!collapsed && <span className="truncate">{item.label}</span>}
-              </Link>
-            );
-          })}
+        <nav className="flex-1 space-y-3 overflow-y-auto px-2 py-2">
+          {navSections.map((section) => (
+            <div key={section.heading} className="space-y-1">
+              {!collapsed && (
+                <div className="px-3 pt-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/80">
+                  {section.heading}
+                </div>
+              )}
+              {section.items.map((item) => {
+                const isActive = location.pathname === item.path;
+                const Icon = item.icon;
+                return (
+                  <Link
+                    key={item.path}
+                    to={item.path}
+                    onClick={closeMobile}
+                    className={`flex items-center gap-3 rounded-xl px-3 py-2 text-sm transition-all duration-150 ${
+                      isActive
+                        ? "border-l-2 border-[#6b87ae] bg-primary/10 text-foreground shadow-sm"
+                        : "border-l-2 border-transparent text-muted-foreground hover:bg-muted/70 hover:text-foreground"
+                    } ${collapsed ? "justify-center px-2" : ""}`}
+                    title={collapsed ? item.label : undefined}
+                  >
+                    <Icon size={18} className="flex-shrink-0" />
+                    {!collapsed && <span className="truncate">{item.label}</span>}
+                  </Link>
+                );
+              })}
+            </div>
+          ))}
         </nav>
 
         {/* User section */}
-        <div className="px-3 py-3 border-t border-white/[0.06]">
+        <div className="border-t border-border/80 px-3 py-3">
           {user ? (
             <div className="flex items-center gap-2">
               {user.avatar ? (
@@ -132,20 +160,20 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                   className="w-7 h-7 rounded-full flex-shrink-0"
                 />
               ) : (
-                <div className="w-7 h-7 rounded-full bg-[#3b82f6]/20 flex items-center justify-center flex-shrink-0">
-                  <span className="text-[10px] text-[#3b82f6] font-medium">
+                <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-primary/15">
+                  <span className="text-[10px] font-medium text-primary">
                     {(user.name || "U")[0].toUpperCase()}
                   </span>
                 </div>
               )}
               {!collapsed && (
                 <>
-                  <span className="text-xs text-[#777777] flex-1 truncate">
+                  <span className="flex-1 truncate text-xs text-muted-foreground">
                     {user.name || "User"}
                   </span>
                   <button
                     onClick={logout}
-                    className="text-[#444444] hover:text-[#ef4444] transition-colors p-1"
+                    className="p-1 text-muted-foreground transition-colors hover:text-[#c97a73]"
                   >
                     <LogOut size={14} />
                   </button>
@@ -155,7 +183,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           ) : (
             <Link
               to="/login"
-              className="flex items-center gap-2 px-3 py-2 text-sm text-[#3b82f6] hover:text-[#60a5fa] transition-colors"
+              className="flex items-center gap-2 rounded-xl px-3 py-2 text-sm text-primary transition-colors hover:bg-primary/10 hover:text-[#5e7ea4]"
             >
               <LogOut size={16} />
               {!collapsed && <span>Login</span>}
@@ -165,7 +193,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-y-auto lg:ml-0 ml-0">
+      <main className="flex-1 overflow-y-auto">
         <div className="max-w-[1440px] mx-auto p-4 lg:p-6 pt-16 lg:pt-6">
           {children}
         </div>

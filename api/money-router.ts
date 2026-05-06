@@ -2,6 +2,7 @@ import { z } from "zod";
 import { eq, and, desc, gte } from "drizzle-orm";
 import * as schema from "@db/schema";
 import { getDb } from "./queries/connection";
+import { parseDateOnly } from "./queries/date";
 import { createRouter, authedQuery } from "./middleware";
 
 export const moneyRouter = createRouter({
@@ -12,7 +13,7 @@ export const moneyRouter = createRouter({
       const rows = await db
         .select()
         .from(schema.moneyLogs)
-        .where(and(eq(schema.moneyLogs.userId, ctx.user.id), eq(schema.moneyLogs.date, input.date)))
+        .where(and(eq(schema.moneyLogs.userId, ctx.user.id), eq(schema.moneyLogs.date, parseDateOnly(input.date))))
         .limit(1);
       return rows.at(0) ?? null;
     }),
@@ -22,7 +23,7 @@ export const moneyRouter = createRouter({
     .query(async ({ ctx, input }) => {
       const db = getDb();
       const month = input?.month ?? new Date().toISOString().slice(0, 7) + "-01";
-      const start = month.slice(0, 7) + "-01";
+      const start = parseDateOnly(month.slice(0, 7) + "-01");
       const rows = await db
         .select()
         .from(schema.moneyLogs)
@@ -51,6 +52,7 @@ export const moneyRouter = createRouter({
     )
     .mutation(async ({ ctx, input }) => {
       const db = getDb();
+      const { date, ...rest } = input;
       const income = input.income ?? 0;
       const spending = input.spending ?? 0;
       const savings = input.savings ?? 0;
@@ -60,11 +62,12 @@ export const moneyRouter = createRouter({
       const existing = await db
         .select()
         .from(schema.moneyLogs)
-        .where(and(eq(schema.moneyLogs.userId, ctx.user.id), eq(schema.moneyLogs.date, input.date)))
+        .where(and(eq(schema.moneyLogs.userId, ctx.user.id), eq(schema.moneyLogs.date, parseDateOnly(date))))
         .limit(1);
 
       const data = {
-        ...input,
+        ...rest,
+        date: parseDateOnly(date),
         userId: ctx.user.id,
         netCashFlow,
         savingsRate,
@@ -83,15 +86,15 @@ export const moneyRouter = createRouter({
     const db = getDb();
     const start = new Date();
     start.setDate(1);
-    const rows = await db
-      .select()
-      .from(schema.moneyLogs)
-      .where(
-        and(
-          eq(schema.moneyLogs.userId, ctx.user.id),
-          gte(schema.moneyLogs.date, start.toISOString().split("T")[0])
-        )
-      );
+      const rows = await db
+        .select()
+        .from(schema.moneyLogs)
+        .where(
+          and(
+            eq(schema.moneyLogs.userId, ctx.user.id),
+            gte(schema.moneyLogs.date, start)
+          )
+        );
 
     const totalIncome = rows.reduce((s, r) => s + Number(r.income || 0), 0);
     const totalSpending = rows.reduce((s, r) => s + Number(r.spending || 0), 0);

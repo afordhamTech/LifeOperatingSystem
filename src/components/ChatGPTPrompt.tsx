@@ -37,11 +37,11 @@ export default function ChatGPTPrompt({
   return (
     <div className="card-surface p-4 mt-4">
       <div className="flex items-center gap-2 mb-3">
-        <Wand2 size={16} className="text-[#a855f7]" />
-        <span className="text-sm font-semibold text-[#eaeaea]">{title}</span>
+        <Wand2 size={16} className="text-[#9a7bbd]" />
+        <span className="text-sm font-semibold text-[#25313c]">{title}</span>
       </div>
-      <div className="bg-[#1a1a1a] rounded p-3 mb-3 max-h-[200px] overflow-y-auto">
-        <pre className="font-mono-data text-xs text-[#777777] whitespace-pre-wrap">
+      <div className="bg-[#f0ebe2] rounded p-3 mb-3 max-h-[200px] overflow-y-auto">
+        <pre className="font-mono-data text-xs text-[#6f685f] whitespace-pre-wrap">
           {promptText}
         </pre>
       </div>
@@ -50,8 +50,8 @@ export default function ChatGPTPrompt({
           onClick={handleCopy}
           className={`flex items-center gap-2 px-4 py-2 rounded text-sm font-medium transition-all ${
             copied
-              ? "bg-[#22c55e]/20 text-[#22c55e]"
-              : "bg-[#3b82f6] hover:bg-[#2563eb] text-white"
+              ? "bg-[#6a9a74]/20 text-[#6a9a74]"
+              : "bg-[#6b87ae] hover:bg-[#5e7ea4] text-white"
           }`}
         >
           {copied ? <Check size={14} /> : <Copy size={14} />}

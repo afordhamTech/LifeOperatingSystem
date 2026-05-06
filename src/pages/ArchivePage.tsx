@@ -22,7 +22,7 @@ export default function ArchivePage() {
       title: "Sleep Logs",
       icon: Moon,
       count: sleepLogs?.length ?? 0,
-      color: "#3b82f6",
+      color: "#6b87ae",
       data: sleepLogs?.map((s) => ({
         label: s.date,
         value: `${Number(s.hoursSlept || 0).toFixed(1)}h`,
@@ -33,7 +33,7 @@ export default function ArchivePage() {
       title: "Academic Tasks",
       icon: GraduationCap,
       count: tasks?.length ?? 0,
-      color: "#eab308",
+      color: "#c39a4e",
       data: tasks?.slice(0, 7).map((t) => ({
         label: t.taskName.slice(0, 20),
         value: t.className,
@@ -44,7 +44,7 @@ export default function ArchivePage() {
       title: "Workouts",
       icon: Dumbbell,
       count: workoutLogs?.length ?? 0,
-      color: "#22c55e",
+      color: "#6a9a74",
       data: workoutLogs?.map((w) => ({
         label: w.date,
         value: w.workoutType || "—",
@@ -55,7 +55,7 @@ export default function ArchivePage() {
       title: "Nutrition Logs",
       icon: Apple,
       count: nutritionLogs?.length ?? 0,
-      color: "#f97316",
+      color: "#d38a5d",
       data: nutritionLogs?.map((n) => ({
         label: n.date,
         value: `${n.caloriesEaten ?? 0} cal`,
@@ -66,7 +66,7 @@ export default function ArchivePage() {
       title: "Career Artifacts",
       icon: Briefcase,
       count: careerItems?.length ?? 0,
-      color: "#a855f7",
+      color: "#9a7bbd",
       data: careerItems?.slice(0, 7).map((c) => ({
         label: c.projectName.slice(0, 20),
         value: c.artifactType || "—",
@@ -77,9 +77,9 @@ export default function ArchivePage() {
 
   return (
     <div className="space-y-6">
-      <div className="border-b border-white/[0.06] pb-4">
-        <h1 className="text-2xl font-semibold text-[#eaeaea]">Archive</h1>
-        <p className="text-sm text-[#777777] mt-1">
+      <div className="border-b border-[#ddd4c6] pb-4">
+        <h1 className="text-2xl font-semibold text-[#25313c]">Archive</h1>
+        <p className="text-sm text-[#6f685f] mt-1">
           Historical data from all life modules. Browse and review past entries.
         </p>
       </div>
@@ -91,8 +91,8 @@ export default function ArchivePage() {
           return (
             <div key={section.title} className="card-surface p-4 text-center">
               <Icon size={18} style={{ color: section.color }} className="mx-auto mb-2" />
-              <div className="text-xl font-bold text-[#eaeaea]">{section.count}</div>
-              <div className="text-[10px] text-[#777777]">{section.title}</div>
+              <div className="text-xl font-bold text-[#25313c]">{section.count}</div>
+              <div className="text-[10px] text-[#6f685f]">{section.title}</div>
             </div>
           );
         })}
@@ -102,12 +102,12 @@ export default function ArchivePage() {
       <div className="space-y-4">
         {sections.map((section) => (
           <div key={section.title} className="card-surface p-4">
-            <h3 className="text-sm font-semibold text-[#eaeaea] mb-3">{section.title}</h3>
+            <h3 className="text-sm font-semibold text-[#25313c] mb-3">{section.title}</h3>
             {section.data && section.data.length > 0 ? (
               <div className="overflow-x-auto">
                 <table className="w-full text-xs">
                   <thead>
-                    <tr className="text-[#777777] text-left border-b border-white/[0.06]">
+                    <tr className="text-[#6f685f] text-left border-b border-[#ddd4c6]">
                       <th className="pb-2 font-medium">Entry</th>
                       <th className="pb-2 font-medium">Details</th>
                       <th className="pb-2 font-medium">Score</th>
@@ -115,9 +115,9 @@ export default function ArchivePage() {
                   </thead>
                   <tbody>
                     {section.data.map((row, i) => (
-                      <tr key={i} className="border-b border-white/[0.04]">
-                        <td className="py-2 text-[#eaeaea]">{String(row.label)}</td>
-                        <td className="py-2 text-[#777777]">{String(row.value)}</td>
+                      <tr key={i} className="border-b border-[#e3d8c9]">
+                        <td className="py-2 text-[#25313c]">{String(row.label)}</td>
+                        <td className="py-2 text-[#6f685f]">{String(row.value)}</td>
                         <td className="py-2">
                           <span
                             className="font-mono-data px-1.5 py-0.5 rounded"
@@ -135,8 +135,8 @@ export default function ArchivePage() {
                 </table>
               </div>
             ) : (
-              <div className="text-sm text-[#444444] py-4 text-center">
-                No entries yet
+              <div className="text-sm text-[#8c8478] py-4 text-center">
+                No entries yet. Start logging sleep, tasks, workouts, nutrition, or career proof.
               </div>
             )}
           </div>

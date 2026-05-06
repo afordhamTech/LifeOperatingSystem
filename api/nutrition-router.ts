@@ -1,7 +1,8 @@
 import { z } from "zod";
-import { eq, and, desc, gte } from "drizzle-orm";
+import { eq, and, gte } from "drizzle-orm";
 import * as schema from "@db/schema";
 import { getDb } from "./queries/connection";
+import { parseDateOnly } from "./queries/date";
 import { createRouter, authedQuery } from "./middleware";
 
 function calcNutritionStatus(
@@ -39,9 +40,7 @@ export const nutritionRouter = createRouter({
       const rows = await db
         .select()
         .from(schema.nutritionLogs)
-        .where(
-          and(eq(schema.nutritionLogs.userId, ctx.user.id), eq(schema.nutritionLogs.date, input.date))
-        )
+        .where(and(eq(schema.nutritionLogs.userId, ctx.user.id), eq(schema.nutritionLogs.date, parseDateOnly(input.date))))
         .limit(1);
       return rows.at(0) ?? null;
     }),
@@ -59,7 +58,7 @@ export const nutritionRouter = createRouter({
         .where(
           and(
             eq(schema.nutritionLogs.userId, ctx.user.id),
-            gte(schema.nutritionLogs.date, start.toISOString().split("T")[0])
+            gte(schema.nutritionLogs.date, start)
           )
         )
         .orderBy(schema.nutritionLogs.date);
@@ -85,15 +84,14 @@ export const nutritionRouter = createRouter({
     )
     .mutation(async ({ ctx, input }) => {
       const db = getDb();
+      const { date, ...rest } = input;
       const existing = await db
         .select()
         .from(schema.nutritionLogs)
-        .where(
-          and(eq(schema.nutritionLogs.userId, ctx.user.id), eq(schema.nutritionLogs.date, input.date))
-        )
+        .where(and(eq(schema.nutritionLogs.userId, ctx.user.id), eq(schema.nutritionLogs.date, parseDateOnly(date))))
         .limit(1);
 
-      const data = { ...input, userId: ctx.user.id };
+      const data = { ...rest, date: parseDateOnly(date), userId: ctx.user.id };
 
       if (existing.length > 0) {
         await db
@@ -114,9 +112,7 @@ export const nutritionRouter = createRouter({
       const rows = await db
         .select()
         .from(schema.nutritionLogs)
-        .where(
-          and(eq(schema.nutritionLogs.userId, ctx.user.id), eq(schema.nutritionLogs.date, input.date))
-        )
+        .where(and(eq(schema.nutritionLogs.userId, ctx.user.id), eq(schema.nutritionLogs.date, parseDateOnly(input.date))))
         .limit(1);
 
       const log = rows.at(0);
@@ -135,7 +131,6 @@ export const nutritionRouter = createRouter({
     .input(z.object({ weeks: z.number().default(4) }))
     .query(async ({ ctx, input }) => {
       const db = getDb();
-      const end = new Date();
       const start = new Date();
       start.setDate(start.getDate() - input.weeks * 7);
       const rows = await db
@@ -144,7 +139,7 @@ export const nutritionRouter = createRouter({
         .where(
           and(
             eq(schema.nutritionLogs.userId, ctx.user.id),
-            gte(schema.nutritionLogs.date, start.toISOString().split("T")[0])
+            gte(schema.nutritionLogs.date, start)
           )
         )
         .orderBy(schema.nutritionLogs.date);

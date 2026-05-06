@@ -46,9 +46,9 @@ Calculate my cash flow, savings rate, biggest leak, and give me a simple financi
 
   return (
     <div className="space-y-6">
-      <div className="border-b border-white/[0.06] pb-4">
-        <h1 className="text-2xl font-semibold text-[#eaeaea]">Money</h1>
-        <p className="text-sm text-[#777777] mt-1">
+      <div className="border-b border-[#ddd4c6] pb-4">
+        <h1 className="text-2xl font-semibold text-[#25313c]">Money</h1>
+        <p className="text-sm text-[#6f685f] mt-1">
           Track income, spending, debt, savings, and whether your financial behavior matches your goals.
         </p>
       </div>
@@ -56,48 +56,48 @@ Calculate my cash flow, savings rate, biggest leak, and give me a simple financi
       {/* Dashboard */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div className="card-surface p-4 text-center">
-          <Wallet size={18} className="text-[#3b82f6] mx-auto mb-2" />
-          <div className="text-xl font-bold text-[#eaeaea]">${dashboard?.income ?? 0}</div>
-          <div className="text-[10px] text-[#777777]">Income</div>
+          <Wallet size={18} className="text-[#6b87ae] mx-auto mb-2" />
+          <div className="text-xl font-bold text-[#25313c]">${dashboard?.income ?? 0}</div>
+          <div className="text-[10px] text-[#6f685f]">Income</div>
         </div>
         <div className="card-surface p-4 text-center">
-          <TrendingDown size={18} className="text-[#ef4444] mx-auto mb-2" />
-          <div className="text-xl font-bold text-[#eaeaea]">${dashboard?.spending ?? 0}</div>
-          <div className="text-[10px] text-[#777777]">Spending</div>
+          <TrendingDown size={18} className="text-[#c97a73] mx-auto mb-2" />
+          <div className="text-xl font-bold text-[#25313c]">${dashboard?.spending ?? 0}</div>
+          <div className="text-[10px] text-[#6f685f]">Spending</div>
         </div>
         <div className="card-surface p-4 text-center">
-          <TrendingUp size={18} className="text-[#22c55e] mx-auto mb-2" />
-          <div className="text-xl font-bold text-[#22c55e]">${dashboard?.savings ?? 0}</div>
-          <div className="text-[10px] text-[#777777]">Savings</div>
+          <TrendingUp size={18} className="text-[#6a9a74] mx-auto mb-2" />
+          <div className="text-xl font-bold text-[#6a9a74]">${dashboard?.savings ?? 0}</div>
+          <div className="text-[10px] text-[#6f685f]">Savings</div>
         </div>
         <div className="card-surface p-4 text-center">
-          <div className="text-xl font-bold" style={{ color: netFlow >= 0 ? "#22c55e" : "#ef4444" }}>
+          <div className="text-xl font-bold" style={{ color: netFlow >= 0 ? "#6a9a74" : "#c97a73" }}>
             ${netFlow}
           </div>
-          <div className="text-[10px] text-[#777777]">Net Flow</div>
-          <div className="text-[10px] text-[#777777]">{savingsRate}% saved</div>
+          <div className="text-[10px] text-[#6f685f]">Net Flow</div>
+          <div className="text-[10px] text-[#6f685f]">{savingsRate}% saved</div>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Input Form */}
         <div className="card-surface p-4">
-          <h3 className="text-sm font-semibold text-[#eaeaea] mb-3">LOG TRANSACTIONS</h3>
+          <h3 className="text-sm font-semibold text-[#25313c] mb-3">LOG TRANSACTIONS</h3>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-[10px] uppercase text-[#777777] block mb-1">Income</label>
+              <label className="text-[10px] uppercase text-[#6f685f] block mb-1">Income</label>
               <input type="number" value={income} onChange={(e) => setIncome(Number(e.target.value))} className="input-dark w-full" />
             </div>
             <div>
-              <label className="text-[10px] uppercase text-[#777777] block mb-1">Spending</label>
+              <label className="text-[10px] uppercase text-[#6f685f] block mb-1">Spending</label>
               <input type="number" value={spending} onChange={(e) => setSpending(Number(e.target.value))} className="input-dark w-full" />
             </div>
             <div>
-              <label className="text-[10px] uppercase text-[#777777] block mb-1">Savings</label>
+              <label className="text-[10px] uppercase text-[#6f685f] block mb-1">Savings</label>
               <input type="number" value={savings} onChange={(e) => setSavings(Number(e.target.value))} className="input-dark w-full" />
             </div>
             <div>
-              <label className="text-[10px] uppercase text-[#777777] block mb-1">Debt</label>
+              <label className="text-[10px] uppercase text-[#6f685f] block mb-1">Debt</label>
               <input type="number" value={debt} onChange={(e) => setDebt(Number(e.target.value))} className="input-dark w-full" />
             </div>
           </div>
@@ -108,16 +108,16 @@ Calculate my cash flow, savings rate, biggest leak, and give me a simple financi
 
         {/* Subscriptions */}
         <div className="card-surface p-4">
-          <h3 className="text-sm font-semibold text-[#eaeaea] mb-3">SUBSCRIPTIONS</h3>
+          <h3 className="text-sm font-semibold text-[#25313c] mb-3">SUBSCRIPTIONS</h3>
           <div className="space-y-2 mb-3">
             {(subscriptions ?? []).map((sub) => (
               <div key={sub.id} className="flex items-center justify-between text-xs">
-                <span className="text-[#eaeaea]">{sub.name}</span>
-                <span className="text-[#777777]">${sub.monthlyCost}/mo</span>
+                <span className="text-[#25313c]">{sub.name}</span>
+                <span className="text-[#6f685f]">${sub.monthlyCost}/mo</span>
               </div>
             ))}
             {(!subscriptions || subscriptions.length === 0) && (
-              <div className="text-xs text-[#444444]">No subscriptions tracked</div>
+              <div className="text-xs text-[#8c8478]">No subscriptions tracked yet. Add recurring costs so the leak is visible.</div>
             )}
           </div>
           <div className="flex gap-2">

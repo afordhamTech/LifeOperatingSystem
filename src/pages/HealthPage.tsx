@@ -58,9 +58,9 @@ Help me decide whether to train, modify training, recover, or seek medical help.
 
   return (
     <div className="space-y-6">
-      <div className="border-b border-white/[0.06] pb-4">
-        <h1 className="text-2xl font-semibold text-[#eaeaea]">Health & Injury</h1>
-        <p className="text-sm text-[#777777] mt-1">
+      <div className="border-b border-[#ddd4c6] pb-4">
+        <h1 className="text-2xl font-semibold text-[#25313c]">Health & Injury</h1>
+        <p className="text-sm text-[#6f685f] mt-1">
           Track pain, recurring issues, recovery, and whether you are ignoring warning signals.
         </p>
       </div>
@@ -68,10 +68,10 @@ Help me decide whether to train, modify training, recover, or seek medical help.
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Pain Input */}
         <div className="card-surface p-4">
-          <h3 className="text-sm font-semibold text-[#eaeaea] mb-3">PAIN TRACKER</h3>
+          <h3 className="text-sm font-semibold text-[#25313c] mb-3">PAIN TRACKER</h3>
           <div className="space-y-3">
             <div>
-              <label className="text-[10px] uppercase text-[#777777] block mb-1">Pain Area</label>
+              <label className="text-[10px] uppercase text-[#6f685f] block mb-1">Pain Area</label>
               <input
                 type="text"
                 value={form.painArea}
@@ -82,7 +82,7 @@ Help me decide whether to train, modify training, recover, or seek medical help.
             </div>
             <div>
               <div className="flex items-center justify-between mb-1">
-                <label className="text-[10px] uppercase text-[#777777]">Pain Score</label>
+                <label className="text-[10px] uppercase text-[#6f685f]">Pain Score</label>
                 <span className="font-mono-data text-[10px]" style={{ color: getStatusColor(10 - form.painScore) }}>
                   {form.painScore}/10
                 </span>
@@ -97,7 +97,7 @@ Help me decide whether to train, modify training, recover, or seek medical help.
               />
             </div>
             <div>
-              <label className="text-[10px] uppercase text-[#777777] block mb-1">Pain Type</label>
+              <label className="text-[10px] uppercase text-[#6f685f] block mb-1">Pain Type</label>
               <select
                 value={form.painType}
                 onChange={(e) => setForm((p) => ({ ...p, painType: e.target.value }))}
@@ -110,7 +110,7 @@ Help me decide whether to train, modify training, recover, or seek medical help.
               </select>
             </div>
             <div>
-              <label className="text-[10px] uppercase text-[#777777] block mb-1">Trend</label>
+              <label className="text-[10px] uppercase text-[#6f685f] block mb-1">Trend</label>
               <select
                 value={form.painTrend}
                 onChange={(e) => setForm((p) => ({ ...p, painTrend: e.target.value }))}
@@ -122,7 +122,7 @@ Help me decide whether to train, modify training, recover, or seek medical help.
               </select>
             </div>
             <div>
-              <label className="text-[10px] uppercase text-[#777777] block mb-1">Triggers</label>
+              <label className="text-[10px] uppercase text-[#6f685f] block mb-1">Triggers</label>
               <textarea
                 value={form.painTrigger}
                 onChange={(e) => setForm((p) => ({ ...p, painTrigger: e.target.value }))}
@@ -131,7 +131,7 @@ Help me decide whether to train, modify training, recover, or seek medical help.
               />
             </div>
             <div>
-              <label className="text-[10px] uppercase text-[#777777] block mb-1">Relievers</label>
+              <label className="text-[10px] uppercase text-[#6f685f] block mb-1">Relievers</label>
               <textarea
                 value={form.painReliever}
                 onChange={(e) => setForm((p) => ({ ...p, painReliever: e.target.value }))}
@@ -140,7 +140,7 @@ Help me decide whether to train, modify training, recover, or seek medical help.
               />
             </div>
             <div className="flex items-center gap-4">
-              <label className="flex items-center gap-2 text-xs text-[#777777]">
+              <label className="flex items-center gap-2 text-xs text-[#6f685f]">
                 <input
                   type="checkbox"
                   checked={form.mobilityDone}
@@ -149,7 +149,7 @@ Help me decide whether to train, modify training, recover, or seek medical help.
                 />
                 Mobility done
               </label>
-              <label className="flex items-center gap-2 text-xs text-[#777777]">
+              <label className="flex items-center gap-2 text-xs text-[#6f685f]">
                 <input
                   type="checkbox"
                   checked={form.doctorVisitNeeded}
@@ -167,46 +167,46 @@ Help me decide whether to train, modify training, recover, or seek medical help.
 
         {/* Risk Assessment */}
         <div className="card-surface p-4 flex flex-col items-center">
-          <h3 className="text-sm font-semibold text-[#eaeaea] mb-3 w-full">INJURY RISK</h3>
+          <h3 className="text-sm font-semibold text-[#25313c] mb-3 w-full">INJURY RISK</h3>
           <StatusRing score={riskScore} size={120} strokeWidth={6} />
           <div className="mt-4 w-full space-y-2">
-            <FactorBar label="Pain Score" value={form.painScore} max={10} color="#ef4444" />
+            <FactorBar label="Pain Score" value={form.painScore} max={10} color="#c97a73" />
             <FactorBar
               label="Pain Trend"
               value={form.painTrend === "increasing" ? 8 : form.painTrend === "stable" ? 5 : 2}
               max={10}
-              color="#eab308"
+              color="#c39a4e"
             />
-            <FactorBar label="Training Load" value={5} max={10} color="#3b82f6" />
-            <FactorBar label="Recovery Deficit" value={3} max={10} color="#a855f7" />
+            <FactorBar label="Training Load" value={5} max={10} color="#6b87ae" />
+            <FactorBar label="Recovery Deficit" value={3} max={10} color="#9a7bbd" />
           </div>
         </div>
 
         {/* Recommendations */}
         <div className="card-surface p-4">
-          <h3 className="text-sm font-semibold text-[#eaeaea] mb-3">RECOMMENDATIONS</h3>
+          <h3 className="text-sm font-semibold text-[#25313c] mb-3">RECOMMENDATIONS</h3>
           {riskData?.recommendations && riskData.recommendations.length > 0 ? (
             <div className="space-y-2">
               {riskData.recommendations.map((rec, i) => (
                 <div key={i} className="flex items-start gap-2 text-xs">
-                  <Shield size={12} className="text-[#eab308] mt-0.5 flex-shrink-0" />
-                  <span className="text-[#777777]">{rec}</span>
+                  <Shield size={12} className="text-[#c39a4e] mt-0.5 flex-shrink-0" />
+                  <span className="text-[#6f685f]">{rec}</span>
                 </div>
               ))}
             </div>
           ) : (
-            <p className="text-xs text-[#22c55e]">No specific recommendations. Stay consistent.</p>
+            <p className="text-xs text-[#6a9a74]">No specific recommendations. Stay consistent.</p>
           )}
 
           {/* Red Flags */}
           {(riskData?.redFlags ?? []).length > 0 && (
-            <div className="mt-4 p-3 bg-[#ef4444]/10 rounded">
+            <div className="mt-4 p-3 bg-[#c97a73]/10 rounded">
               <div className="flex items-center gap-2 mb-2">
-                <AlertTriangle size={12} className="text-[#ef4444]" />
-                <span className="text-xs font-semibold text-[#ef4444]">RED FLAGS</span>
+                <AlertTriangle size={12} className="text-[#c97a73]" />
+                <span className="text-xs font-semibold text-[#c97a73]">RED FLAGS</span>
               </div>
               {(riskData?.redFlags ?? []).map((flag, i) => (
-                <div key={i} className="text-xs text-[#ef4444] mb-1">
+                <div key={i} className="text-xs text-[#c97a73] mb-1">
                   {flag}
                 </div>
               ))}
@@ -223,11 +223,11 @@ Help me decide whether to train, modify training, recover, or seek medical help.
 function FactorBar({ label, value, max, color }: { label: string; value: number; max: number; color: string }) {
   return (
     <div className="flex items-center gap-2">
-      <span className="text-[10px] text-[#777777] w-24">{label}</span>
-      <div className="flex-1 h-1.5 bg-white/[0.06] rounded-full overflow-hidden">
+      <span className="text-[10px] text-[#6f685f] w-24">{label}</span>
+      <div className="flex-1 h-1.5 bg-[#ece5da] rounded-full overflow-hidden">
         <div className="h-full rounded-full" style={{ width: `${(value / max) * 100}%`, backgroundColor: color }} />
       </div>
-      <span className="font-mono-data text-[10px] text-[#777777] w-6">{value}</span>
+      <span className="font-mono-data text-[10px] text-[#6f685f] w-6">{value}</span>
     </div>
   );
 }
