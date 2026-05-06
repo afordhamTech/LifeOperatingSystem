@@ -34,9 +34,9 @@ const defaultForm: DailyLogForm = {
 };
 
 const migrationTodos = [
-  "Auth: replace the current Kimi flow with Supabase Auth or a server-side bridge.",
+  "Auth: Supabase session handling is now the source of truth for the dashboard.",
   "Modules: wire sleep, academics, workout, nutrition, and weekly reviews next.",
-  "Backend: remove the MySQL/Drizzle placeholder layer after the Supabase routes land.",
+  "Backend: keep the MySQL profile bridge aligned with the Supabase user id.",
 ];
 
 function rowToForm(

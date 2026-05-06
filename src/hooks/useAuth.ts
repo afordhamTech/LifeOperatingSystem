@@ -1,7 +1,12 @@
-import { trpc } from "@/providers/trpc";
 import { useCallback, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router";
 import { LOGIN_PATH } from "@/const";
+import { useSupabaseSession } from "@/hooks/useSupabaseSession";
+import {
+  buildSupabaseUserProfile,
+  signOutSupabase,
+} from "@/lib/supabase-auth";
+import { supabase } from "@/lib/supabase-client";
 
 type UseAuthOptions = {
   redirectOnUnauthenticated?: boolean;
@@ -13,46 +18,42 @@ export function useAuth(options?: UseAuthOptions) {
     options ?? {};
 
   const navigate = useNavigate();
-
-  const utils = trpc.useUtils();
-
-  const {
-    data: user,
-    isLoading,
-    error,
-    refetch,
-  } = trpc.auth.me.useQuery(undefined, {
-    staleTime: 1000 * 60 * 5,
-    retry: false,
-  });
-
-  const logoutMutation = trpc.auth.logout.useMutation({
-    onSuccess: async () => {
-      await utils.invalidate();
-      navigate(redirectPath);
-    },
-  });
-
-  const logout = useCallback(() => logoutMutation.mutate(), [logoutMutation]);
+  const { session, isLoading: sessionLoading } = useSupabaseSession();
+  const user = useMemo(() => buildSupabaseUserProfile(session?.user), [session]);
+  const logout = useCallback(() => {
+    void (async () => {
+      try {
+        await signOutSupabase();
+      } finally {
+        navigate(redirectPath);
+      }
+    })();
+  }, [navigate, redirectPath]);
 
   useEffect(() => {
-    if (redirectOnUnauthenticated && !isLoading && !user) {
+    if (redirectOnUnauthenticated && !sessionLoading && !user) {
       const currentPath = window.location.pathname;
       if (currentPath !== redirectPath) {
         navigate(redirectPath);
       }
     }
-  }, [redirectOnUnauthenticated, isLoading, user, navigate, redirectPath]);
+  }, [redirectOnUnauthenticated, sessionLoading, user, navigate, redirectPath]);
 
   return useMemo(
     () => ({
       user: user ?? null,
       isAuthenticated: !!user,
-      isLoading: isLoading || logoutMutation.isPending,
-      error,
+      isLoading: sessionLoading,
+      error: null,
       logout,
-      refresh: refetch,
+      refresh: async () => {
+        if (!supabase) {
+          return null;
+        }
+
+        return supabase.auth.getSession();
+      },
     }),
-    [user, isLoading, logoutMutation.isPending, error, logout, refetch],
+    [user, sessionLoading, logout],
   );
 }

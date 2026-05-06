@@ -17,6 +17,7 @@ dist-ssr
 .vscode/*
 !.vscode/extensions.json
 .idea
+.claude/
 .DS_Store
 *.suo
 *.ntvs*
@@ -32,6 +33,7 @@ dist-ssr
 *.sqlite
 *.sqlite3
 db/migrations/*.sql
+!db/migrations/0001_rename_union_id_to_auth_user_id.sql
 # TypeScript cache
 *.tsbuildinfo
 # Build outputs

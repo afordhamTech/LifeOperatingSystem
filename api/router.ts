@@ -1,4 +1,3 @@
-import { authRouter } from "./auth-router";
 import { sleepRouter } from "./sleep-router";
 import { academicsRouter } from "./academics-router";
 import { workoutRouter } from "./workout-router";
@@ -16,7 +15,6 @@ import { createRouter, publicQuery } from "./middleware";
 
 export const appRouter = createRouter({
   ping: publicQuery.query(() => ({ ok: true, ts: Date.now() })),
-  auth: authRouter,
   sleep: sleepRouter,
   academics: academicsRouter,
   workout: workoutRouter,

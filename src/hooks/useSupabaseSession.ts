@@ -1,16 +1,9 @@
 import { useEffect, useState } from "react";
+import type { Session } from "@supabase/supabase-js";
 import { hasSupabaseConfig, supabase } from "@/lib/supabase-client";
 
-type SupabaseSession = {
-  user: {
-    id: string;
-  } | null;
-};
-
 export function useSupabaseSession() {
-  const [session, setSession] = useState<SupabaseSession | null | undefined>(
-    undefined,
-  );
+  const [session, setSession] = useState<Session | null | undefined>(undefined);
 
   useEffect(() => {
     let active = true;
@@ -29,12 +22,12 @@ export function useSupabaseSession() {
 
       if (!active) return;
 
-      setSession(currentSession as SupabaseSession | null);
+      setSession(currentSession);
 
       const {
         data: { subscription },
       } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-        setSession(nextSession as SupabaseSession | null);
+        setSession(nextSession);
       });
 
       return () => {

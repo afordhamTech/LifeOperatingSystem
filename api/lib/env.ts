@@ -1,4 +1,7 @@
-import "dotenv/config";
+import { config } from "dotenv";
+
+config({ path: ".env.local" });
+config();
 
 function required(name: string): string {
   const value = process.env[name];
@@ -8,12 +11,26 @@ function required(name: string): string {
   return value ?? "";
 }
 
+function firstOf(names: string[]): string {
+  for (const name of names) {
+    const value = process.env[name]?.trim();
+    if (value) return value;
+  }
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      `Missing required environment variable: one of ${names.join(", ")}`,
+    );
+  }
+  return "";
+}
+
 export const env = {
-  appId: required("APP_ID"),
-  appSecret: required("APP_SECRET"),
   isProduction: process.env.NODE_ENV === "production",
   databaseUrl: required("DATABASE_URL"),
-  kimiAuthUrl: required("KIMI_AUTH_URL"),
-  kimiOpenUrl: required("KIMI_OPEN_URL"),
-  ownerUnionId: process.env.OWNER_UNION_ID ?? "",
+  supabaseUrl: firstOf(["SUPABASE_URL", "VITE_SUPABASE_URL"]),
+  supabaseAnonKey: firstOf([
+    "SUPABASE_ANON_KEY",
+    "VITE_SUPABASE_PUBLISHABLE_KEY",
+  ]),
+  ownerAuthUserId: process.env.OWNER_SUPABASE_USER_ID?.trim() ?? "",
 };
