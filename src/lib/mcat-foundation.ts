@@ -135,6 +135,40 @@ export type McatSummary = {
 };
 
 const STORAGE_KEY = "lifeee:mcat-foundation-os:v1";
+const ACTIVE_SESSION_KEY = "lifeee:mcat-active-session:v1";
+
+export type ActiveMcatSession = {
+  topicId: string;
+  elapsedMs: number;
+  isRunning: boolean;
+  lastResumedAt: number | null;
+  startedAt: number;
+};
+
+export function loadActiveSession(): ActiveMcatSession | null {
+  if (typeof window === "undefined") return null;
+  const raw = window.localStorage.getItem(ACTIVE_SESSION_KEY);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as ActiveMcatSession;
+  } catch {
+    return null;
+  }
+}
+
+export function saveActiveSession(session: ActiveMcatSession | null) {
+  if (typeof window === "undefined") return;
+  if (!session) {
+    window.localStorage.removeItem(ACTIVE_SESSION_KEY);
+    return;
+  }
+  window.localStorage.setItem(ACTIVE_SESSION_KEY, JSON.stringify(session));
+}
+
+export function activeSessionElapsedMs(session: ActiveMcatSession, now = Date.now()) {
+  if (!session.isRunning || session.lastResumedAt == null) return session.elapsedMs;
+  return session.elapsedMs + Math.max(0, now - session.lastResumedAt);
+}
 
 const STUDY_NOW = new Set([
   "Acid base chemistry",
@@ -789,4 +823,163 @@ export function getMcatDailyNextMove(
 
 export function getTodayDateKey() {
   return toDateKey(new Date());
+}
+
+function dateKeyOffset(today: Date, offsetDays: number) {
+  const d = new Date(today);
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() + offsetDays);
+  return toDateKey(d);
+}
+
+function activityDateKeys(state: McatFoundationState): Set<string> {
+  const keys = new Set<string>();
+  for (const session of state.sessions) keys.add(session.date);
+  for (const entry of state.carsEntries) keys.add(entry.date);
+  return keys;
+}
+
+export function getStudyStreak(state: McatFoundationState, today = new Date()): number {
+  const keys = activityDateKeys(state);
+  if (keys.size === 0) return 0;
+  let streak = 0;
+  const todayKey = toDateKey(today);
+  if (!keys.has(todayKey)) {
+    const yesterdayKey = dateKeyOffset(today, -1);
+    if (!keys.has(yesterdayKey)) return 0;
+  }
+  for (let i = 0; i < 400; i++) {
+    const key = dateKeyOffset(today, -i);
+    if (keys.has(key)) streak += 1;
+    else if (i === 0) continue;
+    else break;
+  }
+  return streak;
+}
+
+export function getDailyMinutes(state: McatFoundationState, dateKey: string): number {
+  const sessionMins = state.sessions
+    .filter((s) => s.date === dateKey)
+    .reduce((sum, s) => sum + s.minutes, 0);
+  const carsMins = state.carsEntries
+    .filter((e) => e.date === dateKey)
+    .reduce((sum, e) => sum + e.minutes, 0);
+  return sessionMins + carsMins;
+}
+
+export function getDailyMinutesSeries(
+  state: McatFoundationState,
+  days = 14,
+  today = new Date(),
+): Array<{ date: string; label: string; minutes: number }> {
+  const series: Array<{ date: string; label: string; minutes: number }> = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const key = dateKeyOffset(today, -i);
+    const d = new Date(`${key}T00:00:00`);
+    series.push({
+      date: key,
+      label: d.toLocaleDateString(undefined, { month: "numeric", day: "numeric" }),
+      minutes: getDailyMinutes(state, key),
+    });
+  }
+  return series;
+}
+
+export function getWeeklyAccuracySeries(
+  state: McatFoundationState,
+  weeks = 6,
+  today = new Date(),
+): Array<{ weekStart: string; label: string; accuracy: number; attempted: number }> {
+  const series: Array<{ weekStart: string; label: string; accuracy: number; attempted: number }> = [];
+  for (let i = weeks - 1; i >= 0; i--) {
+    const ref = new Date(today);
+    ref.setDate(ref.getDate() - i * 7);
+    const start = getWeekStartDate(ref);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 7);
+
+    let attempted = 0;
+    let correct = 0;
+    for (const session of state.sessions) {
+      const d = new Date(`${session.date}T00:00:00`);
+      if (d >= start && d < end) {
+        attempted += session.questionsAttempted;
+        correct += session.questionsCorrect;
+      }
+    }
+    for (const entry of state.carsEntries) {
+      const d = new Date(`${entry.date}T00:00:00`);
+      if (d >= start && d < end) {
+        attempted += entry.questionsAttempted;
+        correct += entry.questionsCorrect;
+      }
+    }
+    const accuracy = attempted > 0 ? Math.round((correct / attempted) * 100) : 0;
+    series.push({
+      weekStart: toDateKey(start),
+      label: start.toLocaleDateString(undefined, { month: "numeric", day: "numeric" }),
+      accuracy,
+      attempted,
+    });
+  }
+  return series;
+}
+
+export function getMistakeBreakdown(
+  state: McatFoundationState,
+  windowDays = 30,
+  today = new Date(),
+): Array<{ type: string; count: number }> {
+  const cutoff = new Date(today);
+  cutoff.setHours(0, 0, 0, 0);
+  cutoff.setDate(cutoff.getDate() - windowDays);
+  const counts: Record<string, number> = {};
+  const inWindow = (dateKey: string) => new Date(`${dateKey}T00:00:00`) >= cutoff;
+  for (const session of state.sessions) {
+    if (!inWindow(session.date)) continue;
+    for (const t of session.mistakeTypes) counts[t] = (counts[t] ?? 0) + 1;
+  }
+  for (const error of state.errors) {
+    if (!inWindow(error.date)) continue;
+    counts[error.type] = (counts[error.type] ?? 0) + 1;
+  }
+  for (const entry of state.carsEntries) {
+    if (!inWindow(entry.date)) continue;
+    for (const t of entry.errorTypes) counts[t] = (counts[t] ?? 0) + 1;
+  }
+  return Object.entries(counts)
+    .map(([type, count]) => ({ type, count }))
+    .sort((a, b) => b.count - a.count);
+}
+
+export function getTopicSessions(state: McatFoundationState, topicId: string): McatSession[] {
+  return state.sessions
+    .filter((s) => s.topicId === topicId)
+    .sort((a, b) => (a.date < b.date ? 1 : -1));
+}
+
+export function getTopicErrors(state: McatFoundationState, topicId: string): McatErrorLog[] {
+  return state.errors
+    .filter((e) => e.topicId === topicId)
+    .sort((a, b) => (a.date < b.date ? 1 : -1));
+}
+
+export function getTopicAccuracy(state: McatFoundationState, topicId: string): {
+  attempted: number;
+  correct: number;
+  accuracy: number;
+} {
+  const sessions = getTopicSessions(state, topicId);
+  const attempted = sessions.reduce((sum, s) => sum + s.questionsAttempted, 0);
+  const correct = sessions.reduce((sum, s) => sum + s.questionsCorrect, 0);
+  return {
+    attempted,
+    correct,
+    accuracy: attempted > 0 ? Math.round((correct / attempted) * 100) : 0,
+  };
+}
+
+export function isCarsTopic(topic: McatTopic | null | undefined): boolean {
+  if (!topic) return false;
+  return topic.unit === "CARS Practice" || topic.priorityLabel === "CARS Always Available";
 }
