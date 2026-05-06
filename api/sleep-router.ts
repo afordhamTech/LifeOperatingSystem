@@ -1,7 +1,8 @@
 import { z } from "zod";
-import { eq, and, desc, gte } from "drizzle-orm";
+import { eq, and, gte } from "drizzle-orm";
 import * as schema from "@db/schema";
 import { getDb } from "./queries/connection";
+import { parseDateOnly } from "./queries/date";
 import { createRouter, authedQuery } from "./middleware";
 
 function calcSleepReadiness(
@@ -45,7 +46,7 @@ export const sleepRouter = createRouter({
         .where(
           and(
             eq(schema.sleepLogs.userId, ctx.user.id),
-            eq(schema.sleepLogs.date, input.date)
+            eq(schema.sleepLogs.date, parseDateOnly(input.date))
           )
         )
         .limit(1);
@@ -65,7 +66,7 @@ export const sleepRouter = createRouter({
         .where(
           and(
             eq(schema.sleepLogs.userId, ctx.user.id),
-            gte(schema.sleepLogs.date, start.toISOString().split("T")[0])
+            gte(schema.sleepLogs.date, start)
           )
         )
         .orderBy(schema.sleepLogs.date);
@@ -90,13 +91,14 @@ export const sleepRouter = createRouter({
     )
     .mutation(async ({ ctx, input }) => {
       const db = getDb();
+      const { date, ...rest } = input;
       const existing = await db
         .select()
         .from(schema.sleepLogs)
         .where(
           and(
             eq(schema.sleepLogs.userId, ctx.user.id),
-            eq(schema.sleepLogs.date, input.date)
+            eq(schema.sleepLogs.date, parseDateOnly(date))
           )
         )
         .limit(1);
@@ -115,7 +117,8 @@ export const sleepRouter = createRouter({
       const sleepDebt = calcSleepDebt(hours);
 
       const data = {
-        ...input,
+        ...rest,
+        date: parseDateOnly(date),
         userId: ctx.user.id,
         readinessScore,
         sleepDebt,
@@ -137,7 +140,6 @@ export const sleepRouter = createRouter({
     .input(z.object({ days: z.number().default(7) }))
     .query(async ({ ctx, input }) => {
       const db = getDb();
-      const end = new Date();
       const start = new Date();
       start.setDate(start.getDate() - input.days + 1);
       const rows = await db
@@ -146,7 +148,7 @@ export const sleepRouter = createRouter({
         .where(
           and(
             eq(schema.sleepLogs.userId, ctx.user.id),
-            gte(schema.sleepLogs.date, start.toISOString().split("T")[0])
+            gte(schema.sleepLogs.date, start)
           )
         )
         .orderBy(schema.sleepLogs.date);
@@ -168,7 +170,7 @@ export const sleepRouter = createRouter({
         .where(
           and(
             eq(schema.sleepLogs.userId, ctx.user.id),
-            eq(schema.sleepLogs.date, input.date)
+            eq(schema.sleepLogs.date, parseDateOnly(input.date))
           )
         )
         .limit(1);

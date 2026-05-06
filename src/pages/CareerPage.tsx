@@ -53,9 +53,9 @@ Tell me what proof is strongest, what I should polish, what I should add to my r
 
   return (
     <div className="space-y-6">
-      <div className="border-b border-white/[0.06] pb-4">
-        <h1 className="text-2xl font-semibold text-[#eaeaea]">Career & Proof</h1>
-        <p className="text-sm text-[#777777] mt-1">
+      <div className="border-b border-[#ddd4c6] pb-4">
+        <h1 className="text-2xl font-semibold text-[#25313c]">Career & Proof</h1>
+        <p className="text-sm text-[#6f685f] mt-1">
           Track whether you are creating evidence that future people can trust.
         </p>
       </div>
@@ -63,7 +63,7 @@ Tell me what proof is strongest, what I should polish, what I should add to my r
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Add Project */}
         <div className="card-surface p-4">
-          <h3 className="text-sm font-semibold text-[#eaeaea] mb-3">ADD PROJECT</h3>
+          <h3 className="text-sm font-semibold text-[#25313c] mb-3">ADD PROJECT</h3>
           <div className="space-y-3">
             <input
               type="text"
@@ -86,7 +86,7 @@ Tell me what proof is strongest, what I should polish, what I should add to my r
             <div className="grid grid-cols-2 gap-3">
               {(["visibility", "difficulty", "relevance", "completion"] as const).map((field) => (
                 <div key={field}>
-                  <label className="text-[10px] uppercase text-[#777777] block mb-1">
+                  <label className="text-[10px] uppercase text-[#6f685f] block mb-1">
                     {field}
                   </label>
                   <input
@@ -99,7 +99,7 @@ Tell me what proof is strongest, what I should polish, what I should add to my r
                     }
                     className="slider-dark"
                   />
-                  <span className="text-[10px] text-[#777777]">{form[field]}/10</span>
+                  <span className="text-[10px] text-[#6f685f]">{form[field]}/10</span>
                 </div>
               ))}
             </div>
@@ -114,41 +114,41 @@ Tell me what proof is strongest, what I should polish, what I should add to my r
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <div className="card-surface p-3 text-center">
-              <div className="text-xl font-bold text-[#eaeaea]">{dashboard?.projects?.length ?? 0}</div>
-              <div className="text-[10px] text-[#777777]">Projects</div>
+              <div className="text-xl font-bold text-[#25313c]">{dashboard?.projects?.length ?? 0}</div>
+              <div className="text-[10px] text-[#6f685f]">Projects</div>
             </div>
             <div className="card-surface p-3 text-center">
-              <div className="text-xl font-bold text-[#eab308]">{dashboard?.bulletsToUpdate ?? 0}</div>
-              <div className="text-[10px] text-[#777777]">Resume Bullets</div>
+              <div className="text-xl font-bold text-[#c39a4e]">{dashboard?.bulletsToUpdate ?? 0}</div>
+              <div className="text-[10px] text-[#6f685f]">Resume Bullets</div>
             </div>
             <div className="card-surface p-3 text-center">
-              <div className="text-xl font-bold text-[#3b82f6]">{dashboard?.linkedInUpdates ?? 0}</div>
-              <div className="text-[10px] text-[#777777]">LinkedIn Updates</div>
+              <div className="text-xl font-bold text-[#6b87ae]">{dashboard?.linkedInUpdates ?? 0}</div>
+              <div className="text-[10px] text-[#6f685f]">LinkedIn Updates</div>
             </div>
             <div className="card-surface p-3 text-center">
-              <div className="text-xl font-bold text-[#a855f7]">
+              <div className="text-xl font-bold text-[#9a7bbd]">
                 {dashboard?.proofScore?.toFixed(1) ?? "0.0"}
               </div>
-              <div className="text-[10px] text-[#777777]">Avg Proof Score</div>
+              <div className="text-[10px] text-[#6f685f]">Avg Proof Score</div>
             </div>
           </div>
           <div className="card-surface p-3">
-            <div className="text-xs text-[#777777]">Next action:</div>
-            <div className="text-sm text-[#3b82f6] mt-1">{dashboard?.nextAction}</div>
+            <div className="text-xs text-[#6f685f]">Next action:</div>
+            <div className="text-sm text-[#6b87ae] mt-1">{dashboard?.nextAction}</div>
           </div>
         </div>
       </div>
 
       {/* Project List */}
       <div className="card-surface p-4">
-        <h3 className="text-sm font-semibold text-[#eaeaea] mb-3">PROJECTS</h3>
+        <h3 className="text-sm font-semibold text-[#25313c] mb-3">PROJECTS</h3>
         <div className="space-y-3">
           {(dashboard?.projects ?? []).map((project) => (
-            <div key={project.id} className="p-3 bg-[#1a1a1a] rounded">
+            <div key={project.id} className="p-3 bg-[#f0ebe2] rounded">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-[#eaeaea]">{project.projectName}</span>
-                  <span className="text-[10px] px-1.5 py-0.5 bg-[#3b82f6]/10 text-[#3b82f6] rounded">
+                  <span className="text-sm font-medium text-[#25313c]">{project.projectName}</span>
+                  <span className="text-[10px] px-1.5 py-0.5 bg-[#6b87ae]/10 text-[#6b87ae] rounded">
                     {project.artifactType}
                   </span>
                 </div>
@@ -170,10 +170,10 @@ Tell me what proof is strongest, what I should polish, what I should add to my r
                   { label: "Completion", value: project.completion ?? 0 },
                 ].map((item) => (
                   <div key={item.label}>
-                    <div className="text-[9px] text-[#777777]">{item.label}</div>
-                    <div className="h-1 bg-white/[0.06] rounded-full mt-0.5 overflow-hidden">
+                    <div className="text-[9px] text-[#6f685f]">{item.label}</div>
+                    <div className="h-1 bg-[#ece5da] rounded-full mt-0.5 overflow-hidden">
                       <div
-                        className="h-full bg-[#a855f7] rounded-full"
+                        className="h-full bg-[#9a7bbd] rounded-full"
                         style={{ width: `${(item.value / 10) * 100}%` }}
                       />
                     </div>
@@ -182,29 +182,29 @@ Tell me what proof is strongest, what I should polish, what I should add to my r
               </div>
               <div className="flex items-center gap-3 mt-2">
                 {project.githubUpdated ? (
-                  <CheckCircle2 size={12} className="text-[#22c55e]" />
+                  <CheckCircle2 size={12} className="text-[#6a9a74]" />
                 ) : (
-                  <Circle size={12} className="text-[#444444]" />
+                  <Circle size={12} className="text-[#8c8478]" />
                 )}
-                <Github size={12} className={project.githubUpdated ? "text-[#22c55e]" : "text-[#444444]"} />
+                <Github size={12} className={project.githubUpdated ? "text-[#6a9a74]" : "text-[#8c8478]"} />
                 {project.linkedinUpdated ? (
-                  <CheckCircle2 size={12} className="text-[#22c55e]" />
+                  <CheckCircle2 size={12} className="text-[#6a9a74]" />
                 ) : (
-                  <Circle size={12} className="text-[#444444]" />
+                  <Circle size={12} className="text-[#8c8478]" />
                 )}
-                <Linkedin size={12} className={project.linkedinUpdated ? "text-[#22c55e]" : "text-[#444444]"} />
+                <Linkedin size={12} className={project.linkedinUpdated ? "text-[#6a9a74]" : "text-[#8c8478]"} />
                 {project.resumeBulletAdded ? (
-                  <CheckCircle2 size={12} className="text-[#22c55e]" />
+                  <CheckCircle2 size={12} className="text-[#6a9a74]" />
                 ) : (
-                  <Circle size={12} className="text-[#444444]" />
+                  <Circle size={12} className="text-[#8c8478]" />
                 )}
-                <FileText size={12} className={project.resumeBulletAdded ? "text-[#22c55e]" : "text-[#444444]"} />
+                <FileText size={12} className={project.resumeBulletAdded ? "text-[#6a9a74]" : "text-[#8c8478]"} />
               </div>
             </div>
           ))}
           {(!dashboard?.projects || dashboard.projects.length === 0) && (
-            <div className="text-center py-8 text-sm text-[#444444]">
-              No projects yet. Add your first artifact above.
+            <div className="text-center py-8 text-sm text-[#8c8478]">
+              No projects yet. Add a proof artifact, shipped feature, or portfolio piece.
             </div>
           )}
         </div>

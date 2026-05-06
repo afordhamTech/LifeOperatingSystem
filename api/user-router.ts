@@ -30,7 +30,6 @@ export const userRouter = createRouter({
 
   getStats: authedQuery.query(async ({ ctx }) => {
     const db = getDb();
-    const today = new Date().toISOString().split("T")[0];
 
     const [sleepCount] = await db
       .select()

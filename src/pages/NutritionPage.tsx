@@ -255,9 +255,9 @@ export default function NutritionPage() {
 
   return (
     <div className="space-y-6">
-      <div className="border-b border-white/[0.06] pb-4">
-        <h1 className="text-2xl font-semibold text-[#eaeaea]">Nutrition</h1>
-        <p className="text-sm text-[#777777] mt-1">
+      <div className="border-b border-[#ddd4c6] pb-4">
+        <h1 className="text-2xl font-semibold text-[#25313c]">Nutrition</h1>
+        <p className="text-sm text-[#6f685f] mt-1">
           Track whether your food supports muscle gain, energy, school, and
           recovery.
         </p>
@@ -266,12 +266,12 @@ export default function NutritionPage() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="space-y-4">
           <div className="card-surface p-4">
-            <h3 className="text-sm font-semibold text-[#eaeaea] mb-3">
+            <h3 className="text-sm font-semibold text-[#25313c] mb-3">
               CALORIE TARGET
             </h3>
             <div className="grid grid-cols-2 gap-3 mb-3">
               <div>
-                <label className="text-[10px] uppercase text-[#777777] block mb-1">
+                <label className="text-[10px] uppercase text-[#6f685f] block mb-1">
                   Bodyweight (lbs)
                 </label>
                 <input
@@ -284,16 +284,16 @@ export default function NutritionPage() {
                 />
               </div>
               <div>
-                <label className="text-[10px] uppercase text-[#777777] block mb-1">
+                <label className="text-[10px] uppercase text-[#6f685f] block mb-1">
                   Maintenance
                 </label>
-                <div className="text-sm text-[#777777] py-2">
+                <div className="text-sm text-[#6f685f] py-2">
                   {maintenance} cal
                 </div>
               </div>
             </div>
             <div className="mb-3">
-              <label className="text-[10px] uppercase text-[#777777] block mb-1">
+              <label className="text-[10px] uppercase text-[#6f685f] block mb-1">
                 Surplus: +{surplus} cal
               </label>
               <input
@@ -307,28 +307,28 @@ export default function NutritionPage() {
               />
             </div>
             <div className="text-center">
-              <span className="text-3xl font-bold text-[#3b82f6]">
+              <span className="text-3xl font-bold text-[#6b87ae]">
                 {targetCalories}
               </span>
-              <span className="text-sm text-[#777777]"> cal/day target</span>
+              <span className="text-sm text-[#6f685f]"> cal/day target</span>
             </div>
             <div className="mt-2 flex items-center justify-center gap-1 text-xs">
               {calorieFeedback.action === "up" ? (
-                <TrendingUp size={12} className="text-[#eab308]" />
+                <TrendingUp size={12} className="text-[#c39a4e]" />
               ) : null}
               {calorieFeedback.action === "down" ? (
-                <TrendingDown size={12} className="text-[#ef4444]" />
+                <TrendingDown size={12} className="text-[#c97a73]" />
               ) : null}
               {calorieFeedback.action === "same" ? (
-                <CheckCircle2 size={12} className="text-[#22c55e]" />
+                <CheckCircle2 size={12} className="text-[#6a9a74]" />
               ) : null}
               <span
                 className={
                   calorieFeedback.action === "up"
-                    ? "text-[#eab308]"
+                    ? "text-[#c39a4e]"
                     : calorieFeedback.action === "down"
-                      ? "text-[#ef4444]"
-                      : "text-[#22c55e]"
+                      ? "text-[#c97a73]"
+                      : "text-[#6a9a74]"
                 }
               >
                 {calorieFeedback.message}
@@ -337,16 +337,16 @@ export default function NutritionPage() {
           </div>
 
           <div className="card-surface p-4">
-            <h3 className="text-sm font-semibold text-[#eaeaea] mb-3">
+            <h3 className="text-sm font-semibold text-[#25313c] mb-3">
               DAILY INPUT
             </h3>
             <div className="space-y-3">
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <label className="text-[10px] uppercase text-[#777777]">
+                  <label className="text-[10px] uppercase text-[#6f685f]">
                     Calories Eaten
                   </label>
-                  <span className="font-mono-data text-[10px] text-[#777777]">
+                  <span className="font-mono-data text-[10px] text-[#6f685f]">
                     {form.calories}/{targetCalories}
                   </span>
                 </div>
@@ -358,9 +358,9 @@ export default function NutritionPage() {
                   }
                   className="input-dark w-full"
                 />
-                <div className="mt-1 h-1 bg-white/[0.06] rounded-full overflow-hidden">
+                <div className="mt-1 h-1 bg-[#ece5da] rounded-full overflow-hidden">
                   <div
-                    className="h-full bg-[#eab308] rounded-full transition-all"
+                    className="h-full bg-[#c39a4e] rounded-full transition-all"
                     style={{
                       width: `${Math.min(100, (form.calories / targetCalories) * 100)}%`,
                     }}
@@ -370,10 +370,10 @@ export default function NutritionPage() {
 
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <label className="text-[10px] uppercase text-[#777777]">
+                  <label className="text-[10px] uppercase text-[#6f685f]">
                     Protein (g)
                   </label>
-                  <span className="font-mono-data text-[10px] text-[#777777]">
+                  <span className="font-mono-data text-[10px] text-[#6f685f]">
                     {form.proteinG}/{proteinTarget}g
                   </span>
                 </div>
@@ -385,9 +385,9 @@ export default function NutritionPage() {
                   }
                   className="input-dark w-full"
                 />
-                <div className="mt-1 h-1 bg-white/[0.06] rounded-full overflow-hidden">
+                <div className="mt-1 h-1 bg-[#ece5da] rounded-full overflow-hidden">
                   <div
-                    className="h-full bg-[#22c55e] rounded-full transition-all"
+                    className="h-full bg-[#6a9a74] rounded-full transition-all"
                     style={{
                       width: `${Math.min(100, (form.proteinG / proteinTarget) * 100)}%`,
                     }}
@@ -397,7 +397,7 @@ export default function NutritionPage() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-[10px] uppercase text-[#777777] block mb-1">
+                  <label className="text-[10px] uppercase text-[#6f685f] block mb-1">
                     Carbs (g)
                   </label>
                   <input
@@ -410,7 +410,7 @@ export default function NutritionPage() {
                   />
                 </div>
                 <div>
-                  <label className="text-[10px] uppercase text-[#777777] block mb-1">
+                  <label className="text-[10px] uppercase text-[#6f685f] block mb-1">
                     Fat (g)
                   </label>
                   <input
@@ -425,13 +425,13 @@ export default function NutritionPage() {
               </div>
 
               <div>
-                <label className="text-[10px] uppercase text-[#777777] block mb-2">
+                <label className="text-[10px] uppercase text-[#6f685f] block mb-2">
                   Water Glasses
                 </label>
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => setForm((p) => ({ ...p, waterOz: Math.max(0, p.waterOz - 1) }))}
-                    className="p-1 bg-[#1a1a1a] rounded hover:bg-[#222] transition-colors"
+                    className="p-1 bg-[#f0ebe2] rounded hover:bg-[#ebe4da] transition-colors"
                   >
                     <Minus size={14} />
                   </button>
@@ -441,25 +441,25 @@ export default function NutritionPage() {
                         key={i}
                         size={16}
                         className={
-                          i < form.waterOz ? "text-[#3b82f6]" : "text-white/[0.06]"
+                          i < form.waterOz ? "text-[#6b87ae]" : "text-white/[0.06]"
                         }
                       />
                     ))}
                   </div>
                   <button
                     onClick={() => setForm((p) => ({ ...p, waterOz: Math.min(8, p.waterOz + 1) }))}
-                    className="p-1 bg-[#1a1a1a] rounded hover:bg-[#222] transition-colors"
+                    className="p-1 bg-[#f0ebe2] rounded hover:bg-[#ebe4da] transition-colors"
                   >
                     <Plus size={14} />
                   </button>
                 </div>
-                <div className="mt-1 text-[10px] text-[#777777] text-center">
+                <div className="mt-1 text-[10px] text-[#6f685f] text-center">
                   {waterRemaining} more glasses to hit the target
                 </div>
               </div>
 
               <div>
-                <label className="text-[10px] uppercase text-[#777777] block mb-1">
+                <label className="text-[10px] uppercase text-[#6f685f] block mb-1">
                   Meals Eaten
                 </label>
                 <div className="flex items-center gap-2">
@@ -467,38 +467,38 @@ export default function NutritionPage() {
                     onClick={() =>
                       setForm((p) => ({ ...p, mealsCount: Math.max(0, p.mealsCount - 1) }))
                     }
-                    className="p-1 bg-[#1a1a1a] rounded hover:bg-[#222] transition-colors"
+                    className="p-1 bg-[#f0ebe2] rounded hover:bg-[#ebe4da] transition-colors"
                   >
                     <Minus size={14} />
                   </button>
-                  <span className="text-sm text-[#eaeaea] w-8 text-center">
+                  <span className="text-sm text-[#25313c] w-8 text-center">
                     {form.mealsCount}
                   </span>
                   <button
                     onClick={() =>
                       setForm((p) => ({ ...p, mealsCount: p.mealsCount + 1 }))
                     }
-                    className="p-1 bg-[#1a1a1a] rounded hover:bg-[#222] transition-colors"
+                    className="p-1 bg-[#f0ebe2] rounded hover:bg-[#ebe4da] transition-colors"
                   >
                     <Plus size={14} />
                   </button>
                 </div>
               </div>
 
-              <label className="flex items-center gap-2 text-xs text-[#777777]">
+              <label className="flex items-center gap-2 text-xs text-[#6f685f]">
                 <input
                   type="checkbox"
                   checked={form.trainingDay}
                   onChange={(e) =>
                     setForm((p) => ({ ...p, trainingDay: e.target.checked }))
                   }
-                  className="rounded border-white/[0.06] bg-[#1a1a1a]"
+                  className="rounded border-[#ddd4c6] bg-[#f0ebe2]"
                 />
                 Training day
               </label>
 
               <div>
-                <label className="text-[10px] uppercase text-[#777777] block mb-1">
+                <label className="text-[10px] uppercase text-[#6f685f] block mb-1">
                   Notes
                 </label>
                 <textarea
@@ -516,7 +516,7 @@ export default function NutritionPage() {
 
         <div className="space-y-4">
           <div className="card-surface p-4">
-            <h3 className="text-sm font-semibold text-[#eaeaea] mb-3">
+            <h3 className="text-sm font-semibold text-[#25313c] mb-3">
               NUTRITION STATUS
             </h3>
             <div className="grid grid-cols-2 gap-3 text-xs">
@@ -525,18 +525,18 @@ export default function NutritionPage() {
               <StatusChip label="Water" ok={currentStatus.waterHit} />
               <StatusChip label="Meals" ok={currentStatus.timingOk} />
             </div>
-            <div className="mt-3 text-sm text-[#777777]">
-              Checks: <span className="text-[#eaeaea]">{currentStatus.checks}/4</span>
+            <div className="mt-3 text-sm text-[#6f685f]">
+              Checks: <span className="text-[#25313c]">{currentStatus.checks}/4</span>
             </div>
             <div className="mt-2 text-sm">
               Status:{" "}
               <span
                 className={
                   currentStatus.status === "green"
-                    ? "text-[#22c55e]"
+                    ? "text-[#6a9a74]"
                     : currentStatus.status === "yellow"
-                      ? "text-[#eab308]"
-                      : "text-[#ef4444]"
+                      ? "text-[#c39a4e]"
+                      : "text-[#c97a73]"
                 }
               >
                 {currentStatus.status.toUpperCase()}
@@ -545,27 +545,27 @@ export default function NutritionPage() {
           </div>
 
           <div className="card-surface p-4">
-            <h3 className="text-sm font-semibold text-[#eaeaea] mb-3">
+            <h3 className="text-sm font-semibold text-[#25313c] mb-3">
               SAVE NUTRITION
             </h3>
             {!hasSupabaseConfig ? (
-              <div className="mb-3 rounded border border-[#eab308]/30 bg-[#eab308]/10 px-3 py-2 text-xs text-[#eab308]">
+              <div className="mb-3 rounded border border-[#c39a4e]/30 bg-[#c39a4e]/10 px-3 py-2 text-xs text-[#c39a4e]">
                 Supabase env vars are missing. Nutrition logs stay in local draft
                 mode.
               </div>
             ) : null}
             {hasSupabaseConfig && !userId ? (
-              <div className="mb-3 rounded border border-[#3b82f6]/30 bg-[#3b82f6]/10 px-3 py-2 text-xs text-[#3b82f6]">
+              <div className="mb-3 rounded border border-[#6b87ae]/30 bg-[#6b87ae]/10 px-3 py-2 text-xs text-[#6b87ae]">
                 Supabase is configured, but there is no session yet.
               </div>
             ) : null}
             {error ? (
-              <div className="mb-3 rounded border border-[#ef4444]/30 bg-[#ef4444]/10 px-3 py-2 text-xs text-[#ef4444]">
+              <div className="mb-3 rounded border border-[#c97a73]/30 bg-[#c97a73]/10 px-3 py-2 text-xs text-[#c97a73]">
                 {error}
               </div>
             ) : null}
             {notice ? (
-              <div className="mb-3 rounded border border-white/[0.06] bg-[#111111] px-3 py-2 text-xs text-[#777777]">
+              <div className="mb-3 rounded border border-[#ddd4c6] bg-[#fdfaf4] px-3 py-2 text-xs text-[#6f685f]">
                 {notice}
               </div>
             ) : null}
@@ -580,43 +580,43 @@ export default function NutritionPage() {
           </div>
 
           <div className="card-surface p-4">
-            <h3 className="text-sm font-semibold text-[#eaeaea] mb-3">
+            <h3 className="text-sm font-semibold text-[#25313c] mb-3">
               WEIGHT TREND
             </h3>
             {chartData.length > 0 ? (
               <ResponsiveContainer width="100%" height={220}>
                 <LineChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
-                  <XAxis dataKey="day" stroke="#444" fontSize={10} />
-                  <YAxis stroke="#444" fontSize={10} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(111,104,95,0.14)" />
+                  <XAxis dataKey="day" stroke="#8c8478" fontSize={10} />
+                  <YAxis stroke="#8c8478" fontSize={10} />
                   <Tooltip
                     contentStyle={{
-                      background: "#1a1a1a",
-                      border: "1px solid rgba(255,255,255,0.06)",
+                      background: "#f0ebe2",
+                      border: "1px solid rgba(111,104,95,0.18)",
                       fontSize: "11px",
                     }}
                   />
                   <Line
                     type="monotone"
                     dataKey="bodyweight"
-                    stroke="#3b82f6"
+                    stroke="#6b87ae"
                     strokeWidth={2}
                     dot={false}
                   />
                 </LineChart>
               </ResponsiveContainer>
             ) : (
-              <div className="h-[220px] flex items-center justify-center text-sm text-[#444444]">
+              <div className="h-[220px] flex items-center justify-center text-sm text-[#8c8478]">
                 Save a nutrition log to see the trend line.
               </div>
             )}
-            <div className="mt-2 flex items-center gap-2 text-xs text-[#777777]">
+            <div className="mt-2 flex items-center gap-2 text-xs text-[#6f685f]">
               {weightChange < 0.25 ? (
-                <TrendingUp size={12} className="text-[#eab308]" />
+                <TrendingUp size={12} className="text-[#c39a4e]" />
               ) : weightChange > 1 ? (
-                <TrendingDown size={12} className="text-[#ef4444]" />
+                <TrendingDown size={12} className="text-[#c97a73]" />
               ) : (
-                <CheckCircle2 size={12} className="text-[#22c55e]" />
+                <CheckCircle2 size={12} className="text-[#6a9a74]" />
               )}
               <span>{weightChange > 0 ? "+" : ""}
                 {weightChange} lbs over the tracked period
@@ -625,13 +625,13 @@ export default function NutritionPage() {
           </div>
 
           <div className="card-surface p-4">
-            <h3 className="text-sm font-semibold text-[#eaeaea] mb-3">
+            <h3 className="text-sm font-semibold text-[#25313c] mb-3">
               WEEK SNAPSHOT
             </h3>
-            <div className="text-xs text-[#777777]">
+            <div className="text-xs text-[#6f685f]">
               {history.length > 0
                 ? `${history.length} nutrition logs loaded from Supabase.`
-                : "No weekly logs yet."}
+                : "No weekly logs yet. Add a few days of entries to see weight and calorie trends."}
             </div>
           </div>
         </div>
@@ -646,8 +646,8 @@ function StatusChip({ label, ok }: { label: string; ok: boolean }) {
       className="flex items-center justify-between rounded px-3 py-2"
       style={{ backgroundColor: ok ? "rgba(34,197,94,0.08)" : "rgba(239,68,68,0.08)" }}
     >
-      <span className="text-[#777777]">{label}</span>
-      <span className={ok ? "text-[#22c55e]" : "text-[#ef4444]"}>
+      <span className="text-[#6f685f]">{label}</span>
+      <span className={ok ? "text-[#6a9a74]" : "text-[#c97a73]"}>
         {ok ? "Hit" : "Miss"}
       </span>
     </div>

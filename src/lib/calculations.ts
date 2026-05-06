@@ -65,11 +65,11 @@ export function calcTrainingReadiness(
 }
 
 export function getWorkoutDecision(readiness: number, pain: number) {
-  if (pain > 6) return { decision: "STOP", label: "Stop — Pain too high", color: "#ef4444" as const };
-  if (readiness >= 8) return { decision: "FULL", label: "Full Workout", color: "#22c55e" as const };
-  if (readiness >= 6.5) return { decision: "NORMAL", label: "Normal Day", color: "#3b82f6" as const };
-  if (readiness >= 5) return { decision: "LIGHT", label: "Light Day", color: "#eab308" as const };
-  return { decision: "RECOVERY", label: "Recovery Day", color: "#ef4444" as const };
+  if (pain > 6) return { decision: "STOP", label: "Stop — Pain too high", color: "#c97a73" as const };
+  if (readiness >= 8) return { decision: "FULL", label: "Full Workout", color: "#6a9a74" as const };
+  if (readiness >= 6.5) return { decision: "NORMAL", label: "Normal Day", color: "#6b87ae" as const };
+  if (readiness >= 5) return { decision: "LIGHT", label: "Light Day", color: "#c39a4e" as const };
+  return { decision: "RECOVERY", label: "Recovery Day", color: "#6b87ae" as const };
 }
 
 // ─── Nutrition Calculations ───

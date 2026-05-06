@@ -218,34 +218,34 @@ export default function DailyLogPanel() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
-            <Sparkles size={16} className="text-[#a855f7]" />
-            <span className="text-sm font-semibold text-[#eaeaea]">
+            <Sparkles size={16} className="text-[#9a7bbd]" />
+            <span className="text-sm font-semibold text-[#25313c]">
               Daily Log
             </span>
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/[0.06] text-[#777777] uppercase tracking-wider">
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#ece5da] text-[#6f685f] uppercase tracking-wider">
               {statusLabel}
             </span>
           </div>
-          <p className="text-xs text-[#777777] mt-1">
+          <p className="text-xs text-[#6f685f] mt-1">
             Capture the plan for today. This is the first Supabase-backed page
             in the migration.
           </p>
         </div>
-        <div className="flex items-center gap-2 text-xs text-[#777777]">
+        <div className="flex items-center gap-2 text-xs text-[#6f685f]">
           <CalendarDays size={14} />
           <span>{today}</span>
         </div>
       </div>
 
       {sessionLoading ? (
-        <div className="flex items-center gap-2 text-sm text-[#777777]">
+        <div className="flex items-center gap-2 text-sm text-[#6f685f]">
           <Loader2 size={14} className="animate-spin" />
           Checking Supabase session...
         </div>
       ) : null}
 
       {!supabaseConfigured ? (
-        <div className="flex items-start gap-2 rounded border border-[#eab308]/30 bg-[#eab308]/10 px-3 py-2 text-xs text-[#eab308]">
+        <div className="flex items-start gap-2 rounded border border-[#c39a4e]/30 bg-[#c39a4e]/10 px-3 py-2 text-xs text-[#c39a4e]">
           <CloudOff size={14} className="mt-0.5" />
           <span>
             Supabase env vars are missing. The form still works locally, but
@@ -255,7 +255,7 @@ export default function DailyLogPanel() {
       ) : null}
 
       {supabaseConfigured && !userId ? (
-        <div className="flex items-start gap-2 rounded border border-[#3b82f6]/30 bg-[#3b82f6]/10 px-3 py-2 text-xs text-[#3b82f6]">
+        <div className="flex items-start gap-2 rounded border border-[#6b87ae]/30 bg-[#6b87ae]/10 px-3 py-2 text-xs text-[#6b87ae]">
           <ShieldAlert size={14} className="mt-0.5" />
           <span>
             No Supabase session yet. You can still draft the log here, and it
@@ -265,13 +265,13 @@ export default function DailyLogPanel() {
       ) : null}
 
       {error ? (
-        <div className="rounded border border-[#ef4444]/30 bg-[#ef4444]/10 px-3 py-2 text-xs text-[#ef4444]">
+        <div className="rounded border border-[#c97a73]/30 bg-[#c97a73]/10 px-3 py-2 text-xs text-[#c97a73]">
           {error}
         </div>
       ) : null}
 
       {notice ? (
-        <div className="rounded border border-white/[0.06] bg-[#1a1a1a] px-3 py-2 text-xs text-[#777777]">
+        <div className="rounded border border-[#ddd4c6] bg-[#f0ebe2] px-3 py-2 text-xs text-[#6f685f]">
           {notice}
         </div>
       ) : null}
@@ -321,7 +321,7 @@ export default function DailyLogPanel() {
           </div>
 
           <div>
-            <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-[#777777]">
+            <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-[#6f685f]">
               Notes
             </label>
             <textarea
@@ -345,7 +345,7 @@ export default function DailyLogPanel() {
               )}
               Save Daily Log
             </button>
-            <span className="text-xs text-[#777777]">
+            <span className="text-xs text-[#6f685f]">
               {canPersist
                 ? "RLS will scope this row to the signed-in Supabase user."
                 : "Saving is disabled until Supabase auth is connected."}
@@ -354,9 +354,9 @@ export default function DailyLogPanel() {
         </div>
 
         <div className="space-y-3">
-          <div className="rounded border border-white/[0.06] bg-[#0f0f0f] p-3">
-            <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-[#777777]">
-              <CheckCircle2 size={12} className="text-[#22c55e]" />
+          <div className="rounded border border-[#ddd4c6] bg-[#f8f4ed] p-3">
+            <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-[#6f685f]">
+              <CheckCircle2 size={12} className="text-[#6a9a74]" />
               Snapshot
             </div>
             <div className="mt-3 space-y-2 text-sm">
@@ -378,11 +378,11 @@ export default function DailyLogPanel() {
             </div>
           </div>
 
-          <div className="rounded border border-white/[0.06] bg-[#0f0f0f] p-3">
-            <div className="text-xs font-medium uppercase tracking-wider text-[#777777]">
+          <div className="rounded border border-[#ddd4c6] bg-[#f8f4ed] p-3">
+            <div className="text-xs font-medium uppercase tracking-wider text-[#6f685f]">
               Migration TODO
             </div>
-            <ul className="mt-2 space-y-1 text-xs text-[#777777]">
+            <ul className="mt-2 space-y-1 text-xs text-[#6f685f]">
               {migrationTodos.map((item) => (
                 <li key={item}>- {item}</li>
               ))}
@@ -409,7 +409,7 @@ function Field({
 }) {
   return (
     <div className={className}>
-      <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-[#777777]">
+      <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-[#6f685f]">
         {label}
       </label>
       <input
@@ -434,10 +434,10 @@ function SliderField({
   return (
     <div>
       <div className="mb-1 flex items-center justify-between">
-        <label className="text-[10px] font-medium uppercase tracking-wider text-[#777777]">
+        <label className="text-[10px] font-medium uppercase tracking-wider text-[#6f685f]">
           {label}
         </label>
-        <span className="font-mono-data text-[10px] text-[#3b82f6]">
+        <span className="font-mono-data text-[10px] text-[#6b87ae]">
           {value}/10
         </span>
       </div>
@@ -463,10 +463,10 @@ function SummaryLine({
 }) {
   return (
     <div className="flex items-start justify-between gap-3">
-      <span className="text-xs uppercase tracking-wider text-[#777777]">
+      <span className="text-xs uppercase tracking-wider text-[#6f685f]">
         {label}
       </span>
-      <span className="text-right text-xs text-[#eaeaea]">{value}</span>
+      <span className="text-right text-xs text-[#25313c]">{value}</span>
     </div>
   );
 }

@@ -268,9 +268,9 @@ export default function SleepPage() {
 
   return (
     <div className="space-y-6">
-      <div className="border-b border-white/[0.06] pb-4">
-        <h1 className="text-2xl font-semibold text-[#eaeaea]">Sleep</h1>
-        <p className="text-sm text-[#777777] mt-1">
+      <div className="border-b border-[#ddd4c6] pb-4">
+        <h1 className="text-2xl font-semibold text-[#25313c]">Sleep</h1>
+        <p className="text-sm text-[#6f685f] mt-1">
           Track sleep quality, debt, recovery, and whether your body is ready to
           perform.
         </p>
@@ -296,9 +296,17 @@ export default function SleepPage() {
               value={10 - form.stressBeforeBed}
               weight={0.15}
             />
-            <div className="mt-2 flex items-center justify-between text-xs text-[#777777]">
+            <div className="mt-2 flex items-center justify-between text-xs text-[#6f685f]">
               <span>Sleep debt</span>
-              <span className={sleepDebt > 0 ? "text-[#ef4444]" : "text-[#22c55e]"}>
+              <span
+                className={
+                  sleepDebt > 2
+                    ? "text-[#c97a73]"
+                    : sleepDebt > 0
+                      ? "text-[#c39a4e]"
+                      : "text-[#6a9a74]"
+                }
+              >
                 {sleepDebt.toFixed(1)}h
               </span>
             </div>
@@ -310,7 +318,7 @@ export default function SleepPage() {
             >
               {sleepReadiness.toFixed(2)}
             </span>
-            <span className="text-sm text-[#777777]"> / 10</span>
+            <span className="text-sm text-[#6f685f]"> / 10</span>
           </div>
           <span
             className="mt-1 text-xs px-2 py-0.5 rounded-full"
@@ -324,39 +332,39 @@ export default function SleepPage() {
         </div>
 
         <div className="card-surface p-5 lg:col-span-2">
-          <h3 className="text-sm font-semibold text-[#eaeaea] mb-4">
+          <h3 className="text-sm font-semibold text-[#25313c] mb-4">
             LOG LAST NIGHT&apos;S SLEEP
           </h3>
 
           {!supabaseConfigured ? (
-            <div className="mb-4 rounded border border-[#eab308]/30 bg-[#eab308]/10 px-3 py-2 text-xs text-[#eab308]">
+            <div className="mb-4 rounded border border-[#c39a4e]/30 bg-[#c39a4e]/10 px-3 py-2 text-xs text-[#c39a4e]">
               Supabase env vars are missing. This form stays local until they are
               added.
             </div>
           ) : null}
 
           {supabaseConfigured && !userId ? (
-            <div className="mb-4 rounded border border-[#3b82f6]/30 bg-[#3b82f6]/10 px-3 py-2 text-xs text-[#3b82f6]">
+            <div className="mb-4 rounded border border-[#6b87ae]/30 bg-[#6b87ae]/10 px-3 py-2 text-xs text-[#6b87ae]">
               Supabase is configured, but there is no session yet. Draft mode is
               still available.
             </div>
           ) : null}
 
           {error ? (
-            <div className="mb-4 rounded border border-[#ef4444]/30 bg-[#ef4444]/10 px-3 py-2 text-xs text-[#ef4444]">
+            <div className="mb-4 rounded border border-[#c97a73]/30 bg-[#c97a73]/10 px-3 py-2 text-xs text-[#c97a73]">
               {error}
             </div>
           ) : null}
 
           {notice ? (
-            <div className="mb-4 rounded border border-white/[0.06] bg-[#111111] px-3 py-2 text-xs text-[#777777]">
+            <div className="mb-4 rounded border border-[#ddd4c6] bg-[#fdfaf4] px-3 py-2 text-xs text-[#6f685f]">
               {notice}
             </div>
           ) : null}
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-[10px] uppercase tracking-wider text-[#777777] block mb-1">
+              <label className="text-[10px] uppercase tracking-wider text-[#6f685f] block mb-1">
                 Bedtime
               </label>
               <input
@@ -367,7 +375,7 @@ export default function SleepPage() {
               />
             </div>
             <div>
-              <label className="text-[10px] uppercase tracking-wider text-[#777777] block mb-1">
+              <label className="text-[10px] uppercase tracking-wider text-[#6f685f] block mb-1">
                 Wake Time
               </label>
               <input
@@ -405,12 +413,12 @@ export default function SleepPage() {
                 onChange={(e) =>
                   setForm((p) => ({ ...p, caffeineAfter3pm: e.target.checked }))
                 }
-                className="rounded border-white/[0.06] bg-[#1a1a1a]"
+                className="rounded border-[#ddd4c6] bg-[#f0ebe2]"
               />
-              <span className="text-xs text-[#777777]">Caffeine after 3pm</span>
+              <span className="text-xs text-[#6f685f]">Caffeine after 3pm</span>
             </div>
             <div>
-              <label className="text-[10px] uppercase tracking-wider text-[#777777] block mb-1">
+              <label className="text-[10px] uppercase tracking-wider text-[#6f685f] block mb-1">
                 Nap (min)
               </label>
               <input
@@ -423,7 +431,7 @@ export default function SleepPage() {
               />
             </div>
             <div className="col-span-2">
-              <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-[#777777]">
+              <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-[#6f685f]">
                 Notes
               </label>
               <textarea
@@ -434,7 +442,7 @@ export default function SleepPage() {
               />
             </div>
             <div className="flex items-end">
-              <span className="font-mono-data text-xs text-[#777777] pb-2">
+              <span className="font-mono-data text-xs text-[#6f685f] pb-2">
                 {hoursSlept}h duration
               </span>
             </div>
@@ -452,19 +460,19 @@ export default function SleepPage() {
       </div>
 
       <div className="card-surface p-5">
-        <h3 className="text-sm font-semibold text-[#eaeaea] mb-4">
+        <h3 className="text-sm font-semibold text-[#25313c] mb-4">
           7-DAY TREND
         </h3>
         {chartData.length > 0 ? (
           <ResponsiveContainer width="100%" height={200}>
             <LineChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
-              <XAxis dataKey="day" stroke="#444" fontSize={10} />
-              <YAxis domain={[0, 10]} stroke="#444" fontSize={10} />
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(111,104,95,0.14)" />
+              <XAxis dataKey="day" stroke="#8c8478" fontSize={10} />
+              <YAxis domain={[0, 10]} stroke="#8c8478" fontSize={10} />
               <Tooltip
                 contentStyle={{
-                  background: "#1a1a1a",
-                  border: "1px solid rgba(255,255,255,0.06)",
+                  background: "#f0ebe2",
+                  border: "1px solid rgba(111,104,95,0.18)",
                   borderRadius: "4px",
                   fontSize: "11px",
                 }}
@@ -472,15 +480,15 @@ export default function SleepPage() {
               <Line
                 type="monotone"
                 dataKey="readiness"
-                stroke="#3b82f6"
+                stroke="#6b87ae"
                 strokeWidth={2}
-                dot={{ r: 3, fill: "#3b82f6" }}
+                dot={{ r: 3, fill: "#6b87ae" }}
                 name="Readiness"
               />
               <Line
                 type="monotone"
                 dataKey="hours"
-                stroke="#22c55e"
+                stroke="#6a9a74"
                 strokeWidth={2}
                 strokeDasharray="5 5"
                 dot={false}
@@ -489,40 +497,42 @@ export default function SleepPage() {
             </LineChart>
           </ResponsiveContainer>
         ) : (
-          <div className="h-[200px] flex items-center justify-center text-sm text-[#444444]">
-            Log sleep data to see trends
+          <div className="h-[200px] flex items-center justify-center text-sm text-[#8c8478]">
+            No sleep logged yet. Add tonight&apos;s sleep to calculate readiness.
           </div>
         )}
-        <div className="mt-3 flex items-center justify-between text-xs text-[#777777]">
-          <span>7-day debt: {weekDebt.toFixed(1)}h</span>
-          <span
-            className="font-mono-data"
-            style={{ color: weekDebt > 3 ? "#ef4444" : "#22c55e" }}
-          >
-            {weekDebt > 3 ? "High" : "Manageable"}
-          </span>
-        </div>
+          <div className="mt-3 flex items-center justify-between text-xs text-[#6f685f]">
+            <span>7-day debt: {weekDebt.toFixed(1)}h</span>
+            <span
+              className="font-mono-data"
+              style={{
+                color: weekDebt > 3 ? "#c97a73" : weekDebt > 0 ? "#c39a4e" : "#6a9a74",
+              }}
+            >
+            {weekDebt > 3 ? "High" : weekDebt > 0 ? "Watch" : "Manageable"}
+            </span>
+          </div>
       </div>
 
       <div className="card-surface p-4">
-        <h3 className="text-sm font-semibold text-[#eaeaea] mb-3">
+        <h3 className="text-sm font-semibold text-[#25313c] mb-3">
           SLEEP RECOVERY TASKS
         </h3>
         <div className="space-y-2">
           {recoveryTasks.map((task) => (
             <div key={task} className="flex items-center gap-2">
-              <Circle size={14} className="text-[#444444] flex-shrink-0" />
-              <span className="text-sm text-[#777777]">{task}</span>
+              <Circle size={14} className="text-[#8c8478] flex-shrink-0" />
+              <span className="text-sm text-[#6f685f]">{task}</span>
             </div>
           ))}
         </div>
       </div>
 
       <div className="card-surface p-4 overflow-x-auto">
-        <h3 className="text-sm font-semibold text-[#eaeaea] mb-3">HISTORY</h3>
+        <h3 className="text-sm font-semibold text-[#25313c] mb-3">HISTORY</h3>
         <table className="w-full text-xs">
           <thead>
-            <tr className="text-[#777777] text-left border-b border-white/[0.06]">
+            <tr className="text-[#6f685f] text-left border-b border-[#ddd4c6]">
               <th className="pb-2 font-medium">Date</th>
               <th className="pb-2 font-medium">Bedtime</th>
               <th className="pb-2 font-medium">Wake</th>
@@ -538,20 +548,20 @@ export default function SleepPage() {
             {history.map((row) => (
               <tr
                 key={row.id}
-                className="border-b border-white/[0.04] hover:bg-white/[0.02]"
+                className="border-b border-[#e3d8c9] hover:bg-[#f7f3ed]"
               >
-                <td className="py-2 text-[#eaeaea]">{row.date}</td>
-                <td className="py-2 text-[#777777]">{toTimeInputValue(row.bedtime)}</td>
-                <td className="py-2 text-[#777777]">{toTimeInputValue(row.wake_time)}</td>
-                <td className="py-2 text-[#777777]">
+                <td className="py-2 text-[#25313c]">{row.date}</td>
+                <td className="py-2 text-[#6f685f]">{toTimeInputValue(row.bedtime)}</td>
+                <td className="py-2 text-[#6f685f]">{toTimeInputValue(row.wake_time)}</td>
+                <td className="py-2 text-[#6f685f]">
                   {Number(row.hours_slept ?? 0).toFixed(1)}h
                 </td>
-                <td className="py-2 text-[#777777]">{row.sleep_quality}/10</td>
-                <td className="py-2 text-[#777777]">{row.wake_energy}/10</td>
-                <td className="py-2 text-[#777777]">{row.stress_before_bed}/10</td>
+                <td className="py-2 text-[#6f685f]">{row.sleep_quality}/10</td>
+                <td className="py-2 text-[#6f685f]">{row.wake_energy}/10</td>
+                <td className="py-2 text-[#6f685f]">{row.stress_before_bed}/10</td>
                 <td
                   className="py-2 font-mono-data"
-                  style={{ color: Number(row.sleep_debt ?? 0) > 0 ? "#ef4444" : "#22c55e" }}
+                  style={{ color: Number(row.sleep_debt ?? 0) > 0 ? "#c97a73" : "#6a9a74" }}
                 >
                   {Number(row.sleep_debt ?? 0).toFixed(1)}h
                 </td>
@@ -570,8 +580,8 @@ export default function SleepPage() {
             ))}
             {history.length === 0 ? (
               <tr>
-                <td colSpan={9} className="py-8 text-center text-[#444444]">
-                  No sleep logs yet. Log your first night above.
+                <td colSpan={9} className="py-8 text-center text-[#8c8478]">
+                  No sleep logs yet. Add your first night to establish a baseline.
                 </td>
               </tr>
             ) : null}
@@ -594,12 +604,12 @@ function ScoreBreakdown({
   const weighted = Math.round(value * weight * 100) / 100;
   return (
     <div className="flex items-center justify-between text-xs">
-      <span className="text-[#777777]">
+      <span className="text-[#6f685f]">
         {label}: {value.toFixed(1)} × {weight} = {weighted.toFixed(2)}
       </span>
-      <div className="w-16 h-1 bg-white/[0.06] rounded-full overflow-hidden">
+      <div className="w-16 h-1 bg-[#ece5da] rounded-full overflow-hidden">
         <div
-          className="h-full bg-[#3b82f6] rounded-full transition-all"
+          className="h-full bg-[#6b87ae] rounded-full transition-all"
           style={{ width: `${Math.max(0, Math.min(100, (value / 10) * 100))}%` }}
         />
       </div>
@@ -623,10 +633,10 @@ function SliderInput({
   return (
     <div>
       <div className="flex items-center justify-between mb-1">
-        <label className="text-[10px] uppercase tracking-wider text-[#777777]">
+        <label className="text-[10px] uppercase tracking-wider text-[#6f685f]">
           {label}
         </label>
-        <span className="font-mono-data text-[10px] text-[#3b82f6]">
+        <span className="font-mono-data text-[10px] text-[#6b87ae]">
           {value}/{max}
         </span>
       </div>

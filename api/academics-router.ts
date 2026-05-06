@@ -2,6 +2,7 @@ import { z } from "zod";
 import { eq, and, desc, gte } from "drizzle-orm";
 import * as schema from "@db/schema";
 import { getDb } from "./queries/connection";
+import { parseDateOnly } from "./queries/date";
 import { createRouter, authedQuery } from "./middleware";
 
 function calcPriorityScore(
@@ -53,8 +54,9 @@ export const academicsRouter = createRouter({
     )
     .mutation(async ({ ctx, input }) => {
       const db = getDb();
+      const { dueDate, ...rest } = input;
       const now = new Date();
-      const due = new Date(input.dueDate);
+      const due = new Date(dueDate);
       const daysUntilDue = Math.ceil((due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
 
       const priorityScore = calcPriorityScore(
@@ -65,7 +67,8 @@ export const academicsRouter = createRouter({
       );
 
       const data = {
-        ...input,
+        ...rest,
+        dueDate: parseDateOnly(dueDate),
         userId: ctx.user.id,
         priorityScore,
       };
@@ -94,12 +97,16 @@ export const academicsRouter = createRouter({
     )
     .mutation(async ({ ctx, input }) => {
       const db = getDb();
-      const { id, ...data } = input;
+      const { id, dueDate, ...rest } = input;
+      const normalizedData = {
+        ...rest,
+        ...(dueDate ? { dueDate: parseDateOnly(dueDate) } : {}),
+      };
       await db
         .update(schema.academicTasks)
-        .set(data)
+        .set(normalizedData)
         .where(and(eq(schema.academicTasks.id, id), eq(schema.academicTasks.userId, ctx.user.id)));
-      return { id, ...data };
+      return { id, ...normalizedData };
     }),
 
   delete: authedQuery
@@ -140,7 +147,7 @@ export const academicsRouter = createRouter({
     .query(async ({ ctx, input }) => {
       const db = getDb();
       const start = input?.weekStart
-        ? new Date(input.weekStart)
+        ? parseDateOnly(input.weekStart)
         : new Date();
       if (!input?.weekStart) {
         const day = start.getDay();
@@ -156,7 +163,7 @@ export const academicsRouter = createRouter({
         .where(
           and(
             eq(schema.academicTasks.userId, ctx.user.id),
-            gte(schema.academicTasks.dueDate, start.toISOString().split("T")[0])
+            gte(schema.academicTasks.dueDate, start)
           )
         );
 

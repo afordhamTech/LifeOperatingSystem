@@ -1,7 +1,8 @@
 import { z } from "zod";
-import { eq, and, desc, gte } from "drizzle-orm";
+import { eq, and, gte } from "drizzle-orm";
 import * as schema from "@db/schema";
 import { getDb } from "./queries/connection";
+import { parseDateOnly } from "./queries/date";
 import { createRouter, authedQuery } from "./middleware";
 
 function calcFaithScore(log: Partial<schema.FaithLog>) {
@@ -20,7 +21,7 @@ export const faithRouter = createRouter({
       const rows = await db
         .select()
         .from(schema.faithLogs)
-        .where(and(eq(schema.faithLogs.userId, ctx.user.id), eq(schema.faithLogs.date, input.date)))
+        .where(and(eq(schema.faithLogs.userId, ctx.user.id), eq(schema.faithLogs.date, parseDateOnly(input.date))))
         .limit(1);
       return rows.at(0) ?? null;
     }),
@@ -38,7 +39,7 @@ export const faithRouter = createRouter({
         .where(
           and(
             eq(schema.faithLogs.userId, ctx.user.id),
-            gte(schema.faithLogs.date, start.toISOString().split("T")[0])
+            gte(schema.faithLogs.date, start)
           )
         )
         .orderBy(schema.faithLogs.date);
@@ -62,14 +63,15 @@ export const faithRouter = createRouter({
     )
     .mutation(async ({ ctx, input }) => {
       const db = getDb();
+      const { date, ...rest } = input;
       const existing = await db
         .select()
         .from(schema.faithLogs)
-        .where(and(eq(schema.faithLogs.userId, ctx.user.id), eq(schema.faithLogs.date, input.date)))
+        .where(and(eq(schema.faithLogs.userId, ctx.user.id), eq(schema.faithLogs.date, parseDateOnly(date))))
         .limit(1);
 
-      const score = calcFaithScore(input);
-      const data = { ...input, userId: ctx.user.id, faithScore: score };
+      const score = calcFaithScore(rest);
+      const data = { ...rest, date: parseDateOnly(date), userId: ctx.user.id, faithScore: score };
 
       if (existing.length > 0) {
         await db.update(schema.faithLogs).set(data).where(eq(schema.faithLogs.id, existing[0].id));
@@ -82,19 +84,18 @@ export const faithRouter = createRouter({
 
   getConsistency: authedQuery.query(async ({ ctx }) => {
     const db = getDb();
-    const end = new Date();
-    const start = new Date(end);
+    const start = new Date();
     start.setDate(start.getDate() - 6);
-    const rows = await db
-      .select()
-      .from(schema.faithLogs)
-      .where(
-        and(
-          eq(schema.faithLogs.userId, ctx.user.id),
-          gte(schema.faithLogs.date, start.toISOString().split("T")[0])
+      const rows = await db
+        .select()
+        .from(schema.faithLogs)
+        .where(
+          and(
+            eq(schema.faithLogs.userId, ctx.user.id),
+            gte(schema.faithLogs.date, start)
+          )
         )
-      )
-      .orderBy(schema.faithLogs.date);
+        .orderBy(schema.faithLogs.date);
 
     const avgScore = rows.length > 0 ? Math.round(rows.reduce((s, r) => s + Number(r.faithScore || 0), 0) / rows.length) : 0;
     let streak = 0;

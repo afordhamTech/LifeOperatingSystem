@@ -1,7 +1,8 @@
 import { z } from "zod";
-import { eq, and, desc, gte } from "drizzle-orm";
+import { eq, and, gte } from "drizzle-orm";
 import * as schema from "@db/schema";
 import { getDb } from "./queries/connection";
+import { parseDateOnly } from "./queries/date";
 import { createRouter, authedQuery } from "./middleware";
 
 function calcSubstanceScore(log: Partial<schema.LearningLog>) {
@@ -21,7 +22,7 @@ export const learningRouter = createRouter({
       const rows = await db
         .select()
         .from(schema.learningLogs)
-        .where(and(eq(schema.learningLogs.userId, ctx.user.id), eq(schema.learningLogs.date, input.date)))
+        .where(and(eq(schema.learningLogs.userId, ctx.user.id), eq(schema.learningLogs.date, parseDateOnly(input.date))))
         .limit(1);
       return rows.at(0) ?? null;
     }),
@@ -39,7 +40,7 @@ export const learningRouter = createRouter({
         .where(
           and(
             eq(schema.learningLogs.userId, ctx.user.id),
-            gte(schema.learningLogs.date, start.toISOString().split("T")[0])
+            gte(schema.learningLogs.date, start)
           )
         )
         .orderBy(schema.learningLogs.date);
@@ -63,14 +64,15 @@ export const learningRouter = createRouter({
     )
     .mutation(async ({ ctx, input }) => {
       const db = getDb();
+      const { date, ...rest } = input;
       const existing = await db
         .select()
         .from(schema.learningLogs)
-        .where(and(eq(schema.learningLogs.userId, ctx.user.id), eq(schema.learningLogs.date, input.date)))
+        .where(and(eq(schema.learningLogs.userId, ctx.user.id), eq(schema.learningLogs.date, parseDateOnly(date))))
         .limit(1);
 
-      const score = calcSubstanceScore(input);
-      const data = { ...input, userId: ctx.user.id, substanceScore: score };
+      const score = calcSubstanceScore(rest);
+      const data = { ...rest, date: parseDateOnly(date), userId: ctx.user.id, substanceScore: score };
 
       if (existing.length > 0) {
         await db.update(schema.learningLogs).set(data).where(eq(schema.learningLogs.id, existing[0].id));
@@ -83,19 +85,18 @@ export const learningRouter = createRouter({
 
   getSubstanceScore: authedQuery.query(async ({ ctx }) => {
     const db = getDb();
-    const end = new Date();
-    const start = new Date(end);
+    const start = new Date();
     start.setDate(start.getDate() - 6);
-    const rows = await db
-      .select()
-      .from(schema.learningLogs)
-      .where(
-        and(
-          eq(schema.learningLogs.userId, ctx.user.id),
-          gte(schema.learningLogs.date, start.toISOString().split("T")[0])
+      const rows = await db
+        .select()
+        .from(schema.learningLogs)
+        .where(
+          and(
+            eq(schema.learningLogs.userId, ctx.user.id),
+            gte(schema.learningLogs.date, start)
+          )
         )
-      )
-      .orderBy(schema.learningLogs.date);
+        .orderBy(schema.learningLogs.date);
 
     const avgScore = rows.length > 0 ? Math.round((rows.reduce((s, r) => s + Number(r.substanceScore || 0), 0) / rows.length) * 100) / 100 : 0;
 

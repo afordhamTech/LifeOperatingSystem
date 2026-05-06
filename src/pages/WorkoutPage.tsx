@@ -276,9 +276,9 @@ export default function WorkoutPage() {
 
   return (
     <div className="space-y-6">
-      <div className="border-b border-white/[0.06] pb-4">
-        <h1 className="text-2xl font-semibold text-[#eaeaea]">Workout</h1>
-        <p className="text-sm text-[#777777] mt-1">
+      <div className="border-b border-[#ddd4c6] pb-4">
+        <h1 className="text-2xl font-semibold text-[#25313c]">Workout</h1>
+        <p className="text-sm text-[#6f685f] mt-1">
           Track training, athletic development, fatigue, progression, and injury
           risk.
         </p>
@@ -297,7 +297,7 @@ export default function WorkoutPage() {
             >
               {decision.label}
             </div>
-            <div className="mt-2 text-xs text-[#777777]">
+            <div className="mt-2 text-xs text-[#6f685f]">
               Training Readiness: {readinessScore.toFixed(1)}/10
             </div>
           </div>
@@ -308,7 +308,7 @@ export default function WorkoutPage() {
                 label={factor.label}
                 value={factor.value}
                 max={10}
-                color="#3b82f6"
+                color="#6b87ae"
               />
             ))}
           </div>
@@ -333,7 +333,7 @@ export default function WorkoutPage() {
             onChange={(value) => setForm((p) => ({ ...p, pain: value }))}
           />
           {form.pain > 4 ? (
-            <div className="mt-2 flex items-center gap-1 text-[10px] text-[#ef4444]">
+            <div className="mt-2 flex items-center gap-1 text-[10px] text-[#c97a73]">
               <AlertTriangle size={10} />
               Pain above 4 - consider modifying training
             </div>
@@ -343,7 +343,7 @@ export default function WorkoutPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="card-surface p-4">
-          <h3 className="text-sm font-semibold text-[#eaeaea] mb-3">
+          <h3 className="text-sm font-semibold text-[#25313c] mb-3">
             ADD EXERCISE
           </h3>
           <div className="grid grid-cols-2 gap-3">
@@ -373,7 +373,7 @@ export default function WorkoutPage() {
               />
             ) : null}
             <div>
-              <label className="text-[10px] uppercase text-[#777777] block mb-1">
+              <label className="text-[10px] uppercase text-[#6f685f] block mb-1">
                 Sets
               </label>
               <input
@@ -389,7 +389,7 @@ export default function WorkoutPage() {
               />
             </div>
             <div>
-              <label className="text-[10px] uppercase text-[#777777] block mb-1">
+              <label className="text-[10px] uppercase text-[#6f685f] block mb-1">
                 Reps
               </label>
               <input
@@ -405,7 +405,7 @@ export default function WorkoutPage() {
               />
             </div>
             <div>
-              <label className="text-[10px] uppercase text-[#777777] block mb-1">
+              <label className="text-[10px] uppercase text-[#6f685f] block mb-1">
                 Weight (lbs)
               </label>
               <input
@@ -421,7 +421,7 @@ export default function WorkoutPage() {
               />
             </div>
             <div>
-              <label className="text-[10px] uppercase text-[#777777] block mb-1">
+              <label className="text-[10px] uppercase text-[#6f685f] block mb-1">
                 Exercise RPE
               </label>
               <input
@@ -437,7 +437,7 @@ export default function WorkoutPage() {
                 }
                 className="slider-dark"
               />
-              <span className="text-[10px] text-[#777777]">
+              <span className="text-[10px] text-[#6f685f]">
                 {newExercise.rpe}/10
               </span>
             </div>
@@ -452,13 +452,13 @@ export default function WorkoutPage() {
         </div>
 
         <div className="card-surface p-4">
-          <h3 className="text-sm font-semibold text-[#eaeaea] mb-3">
+          <h3 className="text-sm font-semibold text-[#25313c] mb-3">
             TODAY&apos;S WORKOUT
           </h3>
           <div className="grid gap-3">
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-[10px] uppercase text-[#777777] block mb-1">
+                <label className="text-[10px] uppercase text-[#6f685f] block mb-1">
                   Workout Type
                 </label>
                 <select
@@ -476,7 +476,7 @@ export default function WorkoutPage() {
                 </select>
               </div>
               <div>
-                <label className="text-[10px] uppercase text-[#777777] block mb-1">
+                <label className="text-[10px] uppercase text-[#6f685f] block mb-1">
                   Duration (min)
                 </label>
                 <input
@@ -493,7 +493,7 @@ export default function WorkoutPage() {
                 />
               </div>
               <div className="col-span-2">
-                <label className="text-[10px] uppercase text-[#777777] block mb-1">
+                <label className="text-[10px] uppercase text-[#6f685f] block mb-1">
                   Session RPE
                 </label>
                 <input
@@ -506,7 +506,7 @@ export default function WorkoutPage() {
                   }
                   className="slider-dark"
                 />
-                <span className="text-[10px] text-[#777777]">{form.rpe}/10</span>
+                <span className="text-[10px] text-[#6f685f]">{form.rpe}/10</span>
               </div>
             </div>
 
@@ -515,15 +515,15 @@ export default function WorkoutPage() {
                 {exercises.map((exercise, index) => (
                   <div
                     key={`${exercise.name}-${index}`}
-                    className="flex items-center justify-between gap-3 px-3 py-2 bg-[#1a1a1a] rounded"
+                    className="flex items-center justify-between gap-3 px-3 py-2 bg-[#f0ebe2] rounded"
                   >
-                    <div className="text-sm text-[#eaeaea]">
+                    <div className="text-sm text-[#25313c]">
                       {exercise.name} - {exercise.sets}x{exercise.reps} @{" "}
                       {exercise.weight} lbs - RPE {exercise.rpe}
                     </div>
                     <button
                       onClick={() => removeExercise(index)}
-                      className="text-[#444444] hover:text-[#ef4444] transition-colors"
+                      className="text-[#8c8478] hover:text-[#c97a73] transition-colors"
                     >
                       <Trash2 size={14} />
                     </button>
@@ -531,7 +531,7 @@ export default function WorkoutPage() {
                 ))}
               </div>
             ) : (
-              <div className="rounded border border-dashed border-white/[0.08] p-4 text-sm text-[#444444]">
+              <div className="rounded border border-dashed border-[#d8cdbd] p-4 text-sm text-[#8c8478]">
                 Add exercises to build today&apos;s session.
               </div>
             )}
@@ -541,7 +541,7 @@ export default function WorkoutPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="card-surface p-4">
-          <label className="mb-1 block text-[10px] uppercase tracking-wider text-[#777777]">
+          <label className="mb-1 block text-[10px] uppercase tracking-wider text-[#6f685f]">
             Notes
           </label>
           <textarea
@@ -553,27 +553,27 @@ export default function WorkoutPage() {
         </div>
 
         <div className="card-surface p-4">
-          <h3 className="text-sm font-semibold text-[#eaeaea] mb-3">
+          <h3 className="text-sm font-semibold text-[#25313c] mb-3">
             SAVE SESSION
           </h3>
           {!hasSupabaseConfig ? (
-            <div className="mb-3 rounded border border-[#eab308]/30 bg-[#eab308]/10 px-3 py-2 text-xs text-[#eab308]">
+            <div className="mb-3 rounded border border-[#c39a4e]/30 bg-[#c39a4e]/10 px-3 py-2 text-xs text-[#c39a4e]">
               Supabase env vars are missing. Workout logs stay in local draft
               mode.
             </div>
           ) : null}
           {hasSupabaseConfig && !userId ? (
-            <div className="mb-3 rounded border border-[#3b82f6]/30 bg-[#3b82f6]/10 px-3 py-2 text-xs text-[#3b82f6]">
+            <div className="mb-3 rounded border border-[#6b87ae]/30 bg-[#6b87ae]/10 px-3 py-2 text-xs text-[#6b87ae]">
               Supabase is configured, but there is no session yet.
             </div>
           ) : null}
           {error ? (
-            <div className="mb-3 rounded border border-[#ef4444]/30 bg-[#ef4444]/10 px-3 py-2 text-xs text-[#ef4444]">
+            <div className="mb-3 rounded border border-[#c97a73]/30 bg-[#c97a73]/10 px-3 py-2 text-xs text-[#c97a73]">
               {error}
             </div>
           ) : null}
           {notice ? (
-            <div className="mb-3 rounded border border-white/[0.06] bg-[#111111] px-3 py-2 text-xs text-[#777777]">
+            <div className="mb-3 rounded border border-[#ddd4c6] bg-[#fdfaf4] px-3 py-2 text-xs text-[#6f685f]">
               {notice}
             </div>
           ) : null}
@@ -590,19 +590,19 @@ export default function WorkoutPage() {
       </div>
 
       <div className="card-surface p-4">
-        <h3 className="text-sm font-semibold text-[#eaeaea] mb-3">
+        <h3 className="text-sm font-semibold text-[#25313c] mb-3">
           7-DAY TREND
         </h3>
         {chartData.length > 0 ? (
           <ResponsiveContainer width="100%" height={200}>
             <LineChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
-              <XAxis dataKey="day" stroke="#444" fontSize={10} />
-              <YAxis domain={[0, 10]} stroke="#444" fontSize={10} />
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(111,104,95,0.14)" />
+              <XAxis dataKey="day" stroke="#8c8478" fontSize={10} />
+              <YAxis domain={[0, 10]} stroke="#8c8478" fontSize={10} />
               <Tooltip
                 contentStyle={{
-                  background: "#1a1a1a",
-                  border: "1px solid rgba(255,255,255,0.06)",
+                  background: "#f0ebe2",
+                  border: "1px solid rgba(111,104,95,0.18)",
                   borderRadius: "4px",
                   fontSize: "11px",
                 }}
@@ -610,31 +610,31 @@ export default function WorkoutPage() {
               <Line
                 type="monotone"
                 dataKey="readiness"
-                stroke="#3b82f6"
+                stroke="#6b87ae"
                 strokeWidth={2}
                 dot={false}
               />
               <Line
                 type="monotone"
                 dataKey="energy"
-                stroke="#22c55e"
+                stroke="#6a9a74"
                 strokeWidth={2}
                 dot={false}
               />
             </LineChart>
           </ResponsiveContainer>
         ) : (
-          <div className="h-[200px] flex items-center justify-center text-sm text-[#444444]">
+          <div className="h-[200px] flex items-center justify-center text-sm text-[#8c8478]">
             Save a workout to see the trend line.
           </div>
         )}
       </div>
 
       <div className="card-surface p-4 overflow-x-auto">
-        <h3 className="text-sm font-semibold text-[#eaeaea] mb-3">HISTORY</h3>
+        <h3 className="text-sm font-semibold text-[#25313c] mb-3">HISTORY</h3>
         <table className="w-full text-xs">
           <thead>
-            <tr className="text-[#777777] text-left border-b border-white/[0.06]">
+            <tr className="text-[#6f685f] text-left border-b border-[#ddd4c6]">
               <th className="pb-2 font-medium">Date</th>
               <th className="pb-2 font-medium">Type</th>
               <th className="pb-2 font-medium">Duration</th>
@@ -647,15 +647,15 @@ export default function WorkoutPage() {
             {history.map((row) => (
               <tr
                 key={row.id}
-                className="border-b border-white/[0.04] hover:bg-white/[0.02]"
+                className="border-b border-[#e3d8c9] hover:bg-[#f7f3ed]"
               >
-                <td className="py-2 text-[#eaeaea]">{row.date}</td>
-                <td className="py-2 text-[#777777]">{row.workout_type}</td>
-                <td className="py-2 text-[#777777]">
+                <td className="py-2 text-[#25313c]">{row.date}</td>
+                <td className="py-2 text-[#6f685f]">{row.workout_type}</td>
+                <td className="py-2 text-[#6f685f]">
                   {Number(row.duration_minutes ?? 0)} min
                 </td>
-                <td className="py-2 text-[#777777]">{row.energy}/10</td>
-                <td className="py-2 text-[#777777]">{row.pain}/10</td>
+                <td className="py-2 text-[#6f685f]">{row.energy}/10</td>
+                <td className="py-2 text-[#6f685f]">{row.pain}/10</td>
                 <td className="py-2">
                   <span
                     className="px-1.5 py-0.5 rounded text-[10px] font-mono-data"
@@ -671,8 +671,8 @@ export default function WorkoutPage() {
             ))}
             {history.length === 0 ? (
               <tr>
-                <td colSpan={6} className="py-8 text-center text-[#444444]">
-                  No workouts yet. Log your first session above.
+                <td colSpan={6} className="py-8 text-center text-[#8c8478]">
+                  No workouts yet. Add today’s session so the readiness trend has context.
                 </td>
               </tr>
             ) : null}
@@ -696,14 +696,14 @@ function FactorBar({
 }) {
   return (
     <div className="flex items-center gap-3 text-xs">
-      <span className="text-[#777777] w-28">{label}</span>
-      <div className="flex-1 h-1 bg-white/[0.06] rounded-full overflow-hidden">
+      <span className="text-[#6f685f] w-28">{label}</span>
+      <div className="flex-1 h-1 bg-[#ece5da] rounded-full overflow-hidden">
         <div
           className="h-full rounded-full transition-all"
           style={{ width: `${(value / max) * 100}%`, backgroundColor: color }}
         />
       </div>
-      <span className="text-[#777777] w-10 text-right">{value.toFixed(1)}</span>
+      <span className="text-[#6f685f] w-10 text-right">{value.toFixed(1)}</span>
     </div>
   );
 }
@@ -724,8 +724,8 @@ function SliderInput({
   return (
     <div>
       <div className="flex items-center justify-between mb-1">
-        <label className="text-[10px] uppercase text-[#777777]">{label}</label>
-        <span className="font-mono-data text-[10px] text-[#777777]">
+        <label className="text-[10px] uppercase text-[#6f685f]">{label}</label>
+        <span className="font-mono-data text-[10px] text-[#6f685f]">
           {value}/{max}
         </span>
       </div>

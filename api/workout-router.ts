@@ -1,7 +1,8 @@
 import { z } from "zod";
-import { eq, and, desc, gte } from "drizzle-orm";
+import { eq, and, gte } from "drizzle-orm";
 import * as schema from "@db/schema";
 import { getDb } from "./queries/connection";
+import { parseDateOnly } from "./queries/date";
 import { createRouter, authedQuery } from "./middleware";
 
 function calcTrainingReadiness(
@@ -39,7 +40,7 @@ export const workoutRouter = createRouter({
         .select()
         .from(schema.workoutLogs)
         .where(
-          and(eq(schema.workoutLogs.userId, ctx.user.id), eq(schema.workoutLogs.date, input.date))
+          and(eq(schema.workoutLogs.userId, ctx.user.id), eq(schema.workoutLogs.date, parseDateOnly(input.date)))
         )
         .limit(1);
       return rows.at(0) ?? null;
@@ -58,7 +59,7 @@ export const workoutRouter = createRouter({
         .where(
           and(
             eq(schema.workoutLogs.userId, ctx.user.id),
-            gte(schema.workoutLogs.date, start.toISOString().split("T")[0])
+            gte(schema.workoutLogs.date, start)
           )
         )
         .orderBy(schema.workoutLogs.date);
@@ -84,11 +85,12 @@ export const workoutRouter = createRouter({
     )
     .mutation(async ({ ctx, input }) => {
       const db = getDb();
+      const { date, ...rest } = input;
       const existing = await db
         .select()
         .from(schema.workoutLogs)
         .where(
-          and(eq(schema.workoutLogs.userId, ctx.user.id), eq(schema.workoutLogs.date, input.date))
+          and(eq(schema.workoutLogs.userId, ctx.user.id), eq(schema.workoutLogs.date, parseDateOnly(date)))
         )
         .limit(1);
 
@@ -104,7 +106,8 @@ export const workoutRouter = createRouter({
           : "Maintain current load. Monitor recovery.";
 
       const data = {
-        ...input,
+        ...rest,
+        date: parseDateOnly(date),
         userId: ctx.user.id,
         exercises: input.exercises ?? [],
         readinessScore,
@@ -131,7 +134,7 @@ export const workoutRouter = createRouter({
         .select()
         .from(schema.workoutLogs)
         .where(
-          and(eq(schema.workoutLogs.userId, ctx.user.id), eq(schema.workoutLogs.date, input.date))
+          and(eq(schema.workoutLogs.userId, ctx.user.id), eq(schema.workoutLogs.date, parseDateOnly(input.date)))
         )
         .limit(1);
 
@@ -157,7 +160,6 @@ export const workoutRouter = createRouter({
     .input(z.object({ weeks: z.number().default(8) }))
     .query(async ({ ctx, input }) => {
       const db = getDb();
-      const end = new Date();
       const start = new Date();
       start.setDate(start.getDate() - input.weeks * 7);
       const rows = await db
@@ -166,7 +168,7 @@ export const workoutRouter = createRouter({
         .where(
           and(
             eq(schema.workoutLogs.userId, ctx.user.id),
-            gte(schema.workoutLogs.date, start.toISOString().split("T")[0])
+            gte(schema.workoutLogs.date, start)
           )
         )
         .orderBy(schema.workoutLogs.date);

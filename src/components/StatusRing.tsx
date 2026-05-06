@@ -10,14 +10,18 @@ interface StatusRingProps {
 }
 
 export function getStatusColor(score: number): string {
-  if (score >= 8) return "#22c55e";
-  if (score >= 6.5) return "#eab308";
-  return "#ef4444";
+  if (score <= 0) return "#8c8478";
+  if (score >= 8) return "#6a9a74";
+  if (score >= 6.5) return "#c39a4e";
+  if (score >= 4.5) return "#6b87ae";
+  return "#c97a73";
 }
 
 export function getStatusLabel(score: number): string {
+  if (score <= 0) return "No Data";
   if (score >= 8) return "Good";
   if (score >= 6.5) return "Caution";
+  if (score >= 4.5) return "Needs Attention";
   return "Critical";
 }
 
@@ -62,7 +66,7 @@ export default function StatusRing({
             cy={size / 2}
             r={radius}
             fill="none"
-            stroke="rgba(255,255,255,0.06)"
+            stroke="rgba(111, 104, 95, 0.16)"
             strokeWidth={strokeWidth}
           />
           <circle
@@ -87,12 +91,12 @@ export default function StatusRing({
         )}
       </div>
       {label && (
-        <span className="text-[10px] uppercase tracking-wider text-[#777777] font-medium">
+        <span className="text-[10px] uppercase tracking-wider text-[#6f685f] font-medium">
           {label}
         </span>
       )}
       {sublabel && (
-        <span className="text-[10px] text-[#444444]">{sublabel}</span>
+        <span className="text-[10px] text-[#8c8478]">{sublabel}</span>
       )}
     </div>
   );

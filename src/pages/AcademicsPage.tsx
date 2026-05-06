@@ -238,9 +238,9 @@ export default function AcademicsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="border-b border-white/[0.06] pb-4">
-        <h1 className="text-2xl font-semibold text-[#eaeaea]">Academics</h1>
-        <p className="text-sm text-[#777777] mt-1">
+      <div className="border-b border-[#ddd4c6] pb-4">
+        <h1 className="text-2xl font-semibold text-[#25313c]">Academics</h1>
+        <p className="text-sm text-[#6f685f] mt-1">
           Track assignments, exams, study load, grade risk, and weekly academic
           execution.
         </p>
@@ -249,7 +249,7 @@ export default function AcademicsPage() {
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
         <div className="lg:col-span-3 space-y-4">
           <div className="card-surface p-4">
-            <h3 className="text-sm font-semibold text-[#eaeaea] mb-3">
+            <h3 className="text-sm font-semibold text-[#25313c] mb-3">
               ADD TASK
             </h3>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
@@ -280,7 +280,7 @@ export default function AcademicsPage() {
                 className="input-dark"
               />
               <div>
-                <label className="text-[10px] uppercase tracking-wider text-[#777777] block mb-1">
+                <label className="text-[10px] uppercase tracking-wider text-[#6f685f] block mb-1">
                   Est. Hours
                 </label>
                 <input
@@ -298,7 +298,7 @@ export default function AcademicsPage() {
                 />
               </div>
               <div>
-                <label className="text-[10px] uppercase tracking-wider text-[#777777] block mb-1">
+                <label className="text-[10px] uppercase tracking-wider text-[#6f685f] block mb-1">
                   Difficulty
                 </label>
                 <input
@@ -314,12 +314,12 @@ export default function AcademicsPage() {
                   }
                   className="slider-dark"
                 />
-                <span className="text-[10px] text-[#777777]">
+                <span className="text-[10px] text-[#6f685f]">
                   {form.difficulty}/10
                 </span>
               </div>
               <div>
-                <label className="text-[10px] uppercase tracking-wider text-[#777777] block mb-1">
+                <label className="text-[10px] uppercase tracking-wider text-[#6f685f] block mb-1">
                   Grade Impact
                 </label>
                 <input
@@ -335,12 +335,12 @@ export default function AcademicsPage() {
                   }
                   className="slider-dark"
                 />
-                <span className="text-[10px] text-[#777777]">
+                <span className="text-[10px] text-[#6f685f]">
                   {form.gradeImpact}/10
                 </span>
               </div>
               <div>
-                <label className="text-[10px] uppercase tracking-wider text-[#777777] block mb-1">
+                <label className="text-[10px] uppercase tracking-wider text-[#6f685f] block mb-1">
                   Status
                 </label>
                 <select
@@ -359,7 +359,7 @@ export default function AcademicsPage() {
                 </select>
               </div>
               <div className="md:col-span-3 col-span-2">
-                <label className="text-[10px] uppercase tracking-wider text-[#777777] block mb-1">
+                <label className="text-[10px] uppercase tracking-wider text-[#6f685f] block mb-1">
                   Notes
                 </label>
                 <textarea
@@ -383,27 +383,27 @@ export default function AcademicsPage() {
           </div>
 
           <div className="card-surface p-4">
-            <h3 className="text-sm font-semibold text-[#eaeaea] mb-3">
+            <h3 className="text-sm font-semibold text-[#25313c] mb-3">
               TASK LIST - Sorted by Priority
             </h3>
             {error ? (
-              <div className="mb-3 rounded border border-[#ef4444]/30 bg-[#ef4444]/10 px-3 py-2 text-xs text-[#ef4444]">
+              <div className="mb-3 rounded border border-[#c97a73]/30 bg-[#c97a73]/10 px-3 py-2 text-xs text-[#c97a73]">
                 {error}
               </div>
             ) : null}
             {notice ? (
-              <div className="mb-3 rounded border border-white/[0.06] bg-[#111111] px-3 py-2 text-xs text-[#777777]">
+              <div className="mb-3 rounded border border-[#ddd4c6] bg-[#fdfaf4] px-3 py-2 text-xs text-[#6f685f]">
                 {notice}
               </div>
             ) : null}
             {supabaseConfigured && !userId ? (
-              <div className="mb-3 rounded border border-[#3b82f6]/30 bg-[#3b82f6]/10 px-3 py-2 text-xs text-[#3b82f6]">
+              <div className="mb-3 rounded border border-[#6b87ae]/30 bg-[#6b87ae]/10 px-3 py-2 text-xs text-[#6b87ae]">
                 Supabase is configured, but there is no session yet. Draft mode is
                 still available.
               </div>
             ) : null}
             {!supabaseConfigured ? (
-              <div className="mb-3 rounded border border-[#eab308]/30 bg-[#eab308]/10 px-3 py-2 text-xs text-[#eab308]">
+              <div className="mb-3 rounded border border-[#c39a4e]/30 bg-[#c39a4e]/10 px-3 py-2 text-xs text-[#c39a4e]">
                 Supabase env vars are missing. Tasks stay local until you add them.
               </div>
             ) : null}
@@ -417,7 +417,7 @@ export default function AcademicsPage() {
                 return (
                   <div
                     key={task.id}
-                    className={`flex items-center gap-3 px-3 py-3 rounded-md border-b border-white/[0.04] hover:bg-[#1a1a1a] transition-colors ${
+                    className={`flex items-center gap-3 px-3 py-3 rounded-md border-b border-[#e3d8c9] hover:bg-[#f0ebe2] transition-colors ${
                       task.status === "completed" ? "opacity-50" : ""
                     }`}
                   >
@@ -438,7 +438,7 @@ export default function AcademicsPage() {
                           e.target.value as AcademicTaskForm["status"],
                         )
                       }
-                      className="bg-[#1a1a1a] border border-white/[0.06] rounded text-[10px] text-[#777777] px-1 py-0.5 flex-shrink-0"
+                      className="bg-[#f0ebe2] border border-[#ddd4c6] rounded text-[10px] text-[#6f685f] px-1 py-0.5 flex-shrink-0"
                     >
                       <option value="pending">Pending</option>
                       <option value="in_progress">In Progress</option>
@@ -448,45 +448,45 @@ export default function AcademicsPage() {
                       <div
                         className={`text-sm truncate ${
                           task.status === "completed"
-                            ? "line-through text-[#777777]"
-                            : "text-[#eaeaea]"
+                            ? "line-through text-[#6f685f]"
+                            : "text-[#25313c]"
                         }`}
                       >
                         {task.task_name}
                       </div>
                       <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                        <span className="text-[10px] px-1.5 py-0.5 bg-[#3b82f6]/10 text-[#3b82f6] rounded">
+                        <span className="text-[10px] px-1.5 py-0.5 bg-[#6b87ae]/10 text-[#6b87ae] rounded">
                           {task.class_name}
                         </span>
-                        <span className="text-[10px] text-[#777777]">
+                        <span className="text-[10px] text-[#6f685f]">
                           {daysUntil <= 0
                             ? "Due today"
                             : daysUntil === 1
                               ? "1 day left"
                               : `${daysUntil} days`}
                         </span>
-                        <span className="text-[10px] text-[#777777]">
+                        <span className="text-[10px] text-[#6f685f]">
                           {Number(task.estimated_hours ?? 0)}h
                         </span>
-                        <span className="text-[10px] text-[#777777]">
+                        <span className="text-[10px] text-[#6f685f]">
                           {task.notes ? "Notes saved" : "No notes"}
                         </span>
                       </div>
                     </div>
                     <button
                       onClick={() => deleteTask(task.id)}
-                      className="text-[#444444] hover:text-[#ef4444] transition-colors flex-shrink-0"
+                      className="text-[#8c8478] hover:text-[#c97a73] transition-colors flex-shrink-0"
                     >
                       <Trash2 size={14} />
                     </button>
                   </div>
                 );
               })}
-              {sortedTasks.length === 0 && !isLoading ? (
-                <div className="text-center py-8 text-sm text-[#444444]">
-                  No tasks yet. Add your first assignment above.
-                </div>
-              ) : null}
+            {sortedTasks.length === 0 && !isLoading ? (
+              <div className="text-center py-8 text-sm text-[#8c8478]">
+                No tasks yet. Capture anything from school, Connex, family, or personal life.
+              </div>
+            ) : null}
             </div>
           </div>
         </div>
@@ -494,8 +494,8 @@ export default function AcademicsPage() {
         <div className="lg:col-span-2 space-y-4">
           <div className="card-surface p-4">
             <div className="flex items-center gap-2 mb-3">
-              <AlertTriangle size={14} className="text-[#ef4444]" />
-              <h3 className="text-sm font-semibold text-[#ef4444]">
+              <AlertTriangle size={14} className="text-[#c97a73]" />
+              <h3 className="text-sm font-semibold text-[#c97a73]">
                 GRADE RISK ALERT
               </h3>
             </div>
@@ -506,10 +506,10 @@ export default function AcademicsPage() {
                     key={task.id}
                     className="flex items-start gap-2 text-xs"
                   >
-                    <div className="w-1.5 h-1.5 rounded-full bg-[#ef4444] mt-1 flex-shrink-0" />
+                    <div className="w-1.5 h-1.5 rounded-full bg-[#c97a73] mt-1 flex-shrink-0" />
                     <div>
-                      <span className="text-[#eaeaea]">{task.class_name}</span>
-                      <span className="text-[#777777]">
+                      <span className="text-[#25313c]">{task.class_name}</span>
+                      <span className="text-[#6f685f]">
                         {" "}
                         — {task.task_name} (P:{Number(task.priority_score ?? 0).toFixed(1)})
                       </span>
@@ -518,44 +518,44 @@ export default function AcademicsPage() {
                 ))}
               </div>
             ) : (
-              <p className="text-xs text-[#22c55e]">
-                No high-risk items detected.
+              <p className="text-xs text-[#6a9a74]">
+                No high-risk items detected. Keep monitoring due dates and workload.
               </p>
             )}
           </div>
 
           <div className="card-surface p-4">
-            <h3 className="text-sm font-semibold text-[#eaeaea] mb-3">
+            <h3 className="text-sm font-semibold text-[#25313c] mb-3">
               PRIORITY BREAKDOWN
             </h3>
             {chartData.length > 0 ? (
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={chartData}>
-                  <XAxis dataKey="name" stroke="#444" fontSize={10} />
-                  <YAxis domain={[0, 10]} stroke="#444" fontSize={10} />
+                  <XAxis dataKey="name" stroke="#8c8478" fontSize={10} />
+                  <YAxis domain={[0, 10]} stroke="#8c8478" fontSize={10} />
                   <Tooltip
                     contentStyle={{
-                      background: "#1a1a1a",
-                      border: "1px solid rgba(255,255,255,0.06)",
+                      background: "#f0ebe2",
+                      border: "1px solid rgba(111,104,95,0.18)",
                       fontSize: "11px",
                     }}
                   />
-                  <ReferenceLine y={8} stroke="#22c55e" strokeDasharray="3 3" />
-                  <Bar dataKey="score" fill="#3b82f6" radius={[2, 2, 0, 0]} />
+                  <ReferenceLine y={8} stroke="#6a9a74" strokeDasharray="3 3" />
+                  <Bar dataKey="score" fill="#6b87ae" radius={[2, 2, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             ) : (
-              <div className="h-[220px] flex items-center justify-center text-sm text-[#444444]">
+              <div className="h-[220px] flex items-center justify-center text-sm text-[#8c8478]">
                 Add a few tasks to see the priority spread.
               </div>
             )}
           </div>
 
           <div className="card-surface p-4">
-            <h3 className="text-sm font-semibold text-[#eaeaea] mb-3">
+            <h3 className="text-sm font-semibold text-[#25313c] mb-3">
               DRAFT MODE
             </h3>
-            <div className="text-xs text-[#777777]">
+            <div className="text-xs text-[#6f685f]">
               {supabaseConfigured
                 ? "Once Supabase Auth is connected, these tasks will save to your user row set."
                 : "The form works locally, but saving to Supabase is disabled until the env vars are added."}

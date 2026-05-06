@@ -2,6 +2,7 @@ import { z } from "zod";
 import { eq, and, desc } from "drizzle-orm";
 import * as schema from "@db/schema";
 import { getDb } from "./queries/connection";
+import { parseDateOnly } from "./queries/date";
 import { createRouter, authedQuery } from "./middleware";
 
 export const relationshipsRouter = createRouter({
@@ -40,15 +41,22 @@ export const relationshipsRouter = createRouter({
     )
     .mutation(async ({ ctx, input }) => {
       const db = getDb();
+      const { date, lastContact, ...rest } = input;
       const importance = 7;
-      const daysSince = input.lastContact
-        ? Math.ceil((new Date().getTime() - new Date(input.lastContact).getTime()) / (1000 * 60 * 60 * 24))
+      const daysSince = lastContact
+        ? Math.ceil((new Date().getTime() - new Date(lastContact).getTime()) / (1000 * 60 * 60 * 24))
         : 7;
       const unresolvedTension = input.unresolvedIssue ? 7 : 2;
       const opportunity = input.followUpNeeded ? 8 : 4;
       const priority = Math.round((importance * 0.35 + Math.min(10, daysSince) * 0.25 + unresolvedTension * 0.25 + opportunity * 0.15) * 100) / 100;
 
-      const data = { ...input, userId: ctx.user.id, relationshipPriority: priority };
+      const data = {
+        ...rest,
+        date: parseDateOnly(date),
+        lastContact: lastContact ? parseDateOnly(lastContact) : undefined,
+        userId: ctx.user.id,
+        relationshipPriority: priority,
+      };
       const result = await db.insert(schema.relationshipLogs).values(data);
       return { ...data, id: Number(result[0].insertId) };
     }),

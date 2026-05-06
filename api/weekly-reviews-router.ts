@@ -1,7 +1,8 @@
 import { z } from "zod";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, gte } from "drizzle-orm";
 import * as schema from "@db/schema";
 import { getDb } from "./queries/connection";
+import { addDaysUtc, parseDateOnly } from "./queries/date";
 import { createRouter, authedQuery } from "./middleware";
 
 function calcWeeklyLifeScore(
@@ -30,13 +31,14 @@ export const weeklyReviewsRouter = createRouter({
     .input(z.object({ weekStart: z.string() }))
     .query(async ({ ctx, input }) => {
       const db = getDb();
+      const weekStart = parseDateOnly(input.weekStart);
       const rows = await db
         .select()
         .from(schema.weeklyReviews)
         .where(
           and(
             eq(schema.weeklyReviews.userId, ctx.user.id),
-            eq(schema.weeklyReviews.weekStartDate, input.weekStart)
+            eq(schema.weeklyReviews.weekStartDate, weekStart)
           )
         )
         .limit(1);
@@ -47,9 +49,8 @@ export const weeklyReviewsRouter = createRouter({
     .input(z.object({ weekStart: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const db = getDb();
-      const start = new Date(input.weekStart);
-      const end = new Date(start);
-      end.setDate(end.getDate() + 6);
+      const start = parseDateOnly(input.weekStart);
+      const end = addDaysUtc(start, 6);
 
       // Get sleep logs
       const sleepRows = await db
@@ -58,7 +59,7 @@ export const weeklyReviewsRouter = createRouter({
         .where(
           and(
             eq(schema.sleepLogs.userId, ctx.user.id),
-            gte(schema.sleepLogs.date, input.weekStart)
+            gte(schema.sleepLogs.date, start)
           )
         );
       const sleepAvg = sleepRows.length > 0
@@ -72,7 +73,7 @@ export const weeklyReviewsRouter = createRouter({
         .where(
           and(
             eq(schema.academicTasks.userId, ctx.user.id),
-            gte(schema.academicTasks.dueDate, input.weekStart)
+            gte(schema.academicTasks.dueDate, start)
           )
         );
       const completedTasks = taskRows.filter((t) => t.status === "completed").length;
@@ -85,7 +86,7 @@ export const weeklyReviewsRouter = createRouter({
         .where(
           and(
             eq(schema.workoutLogs.userId, ctx.user.id),
-            gte(schema.workoutLogs.date, input.weekStart)
+            gte(schema.workoutLogs.date, start)
           )
         );
       const trainingAvg = workoutRows.length > 0
@@ -99,7 +100,7 @@ export const weeklyReviewsRouter = createRouter({
         .where(
           and(
             eq(schema.nutritionLogs.userId, ctx.user.id),
-            gte(schema.nutritionLogs.date, input.weekStart)
+            gte(schema.nutritionLogs.date, start)
           )
         );
       const nutritionScore = nutritionRows.length > 0
@@ -122,7 +123,7 @@ export const weeklyReviewsRouter = createRouter({
         .where(
           and(
             eq(schema.faithLogs.userId, ctx.user.id),
-            gte(schema.faithLogs.date, input.weekStart)
+            gte(schema.faithLogs.date, start)
           )
         );
       const faithAvg = faithRows.length > 0
@@ -136,7 +137,7 @@ export const weeklyReviewsRouter = createRouter({
         .where(
           and(
             eq(schema.moneyLogs.userId, ctx.user.id),
-            gte(schema.moneyLogs.date, input.weekStart)
+            gte(schema.moneyLogs.date, start)
           )
         );
       const moneyScore = moneyRows.length > 0
@@ -151,15 +152,15 @@ export const weeklyReviewsRouter = createRouter({
         .where(
           and(
             eq(schema.weeklyReviews.userId, ctx.user.id),
-            eq(schema.weeklyReviews.weekStartDate, input.weekStart)
+            eq(schema.weeklyReviews.weekStartDate, start)
           )
         )
         .limit(1);
 
       const data = {
         userId: ctx.user.id,
-        weekStartDate: input.weekStart,
-        weekEndDate: end.toISOString().split("T")[0],
+        weekStartDate: start,
+        weekEndDate: end,
         academicScore,
         sleepScore: sleepAvg,
         trainingScore: trainingAvg,
@@ -204,7 +205,7 @@ export const weeklyReviewsRouter = createRouter({
         .where(
           and(
             eq(schema.weeklyReviews.userId, ctx.user.id),
-            eq(schema.weeklyReviews.weekStartDate, input.weekStart)
+            eq(schema.weeklyReviews.weekStartDate, parseDateOnly(input.weekStart))
           )
         );
       return { success: true };
@@ -220,7 +221,7 @@ export const weeklyReviewsRouter = createRouter({
         .where(
           and(
             eq(schema.weeklyReviews.userId, ctx.user.id),
-            eq(schema.weeklyReviews.weekStartDate, input.weekStart)
+            eq(schema.weeklyReviews.weekStartDate, parseDateOnly(input.weekStart))
           )
         )
         .limit(1);

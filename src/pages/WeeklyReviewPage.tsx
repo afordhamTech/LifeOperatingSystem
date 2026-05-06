@@ -333,9 +333,9 @@ export default function WeeklyReviewPage() {
 
   return (
     <div className="space-y-6">
-      <div className="border-b border-white/[0.06] pb-4">
-        <h1 className="text-2xl font-semibold text-[#eaeaea]">Weekly Review</h1>
-        <p className="text-sm text-[#777777] mt-1">
+      <div className="border-b border-[#ddd4c6] pb-4">
+        <h1 className="text-2xl font-semibold text-[#25313c]">Weekly Review</h1>
+        <p className="text-sm text-[#6f685f] mt-1">
           Turn the week into feedback. Week of {weekStart}.
         </p>
       </div>
@@ -364,7 +364,7 @@ export default function WeeklyReviewPage() {
         <div className="flex flex-wrap items-center gap-6 justify-center">
           <StatusRing score={weeklyLifeScore} size={140} strokeWidth={7} />
           <div className="space-y-1">
-            <div className="text-sm text-[#777777]">Weekly Life Score</div>
+            <div className="text-sm text-[#6f685f]">Weekly Life Score</div>
             <div
               className="text-3xl font-bold"
               style={{ color: getStatusColor(weeklyLifeScore) }}
@@ -384,7 +384,7 @@ export default function WeeklyReviewPage() {
               className="px-3 py-1.5 rounded-md text-center"
               style={{ backgroundColor: `${getStatusColor(cat.score)}10` }}
             >
-              <div className="text-[10px] text-[#777777]">{cat.label}</div>
+              <div className="text-[10px] text-[#6f685f]">{cat.label}</div>
               <div className="text-sm font-bold" style={{ color: getStatusColor(cat.score) }}>
                 {cat.score.toFixed(1)}
               </div>
@@ -394,22 +394,22 @@ export default function WeeklyReviewPage() {
       </div>
 
       <div className="card-surface p-4">
-        <h3 className="text-sm font-semibold text-[#eaeaea] mb-3">
+        <h3 className="text-sm font-semibold text-[#25313c] mb-3">
           CATEGORY BREAKDOWN
         </h3>
         <ResponsiveContainer width="100%" height={220}>
           <BarChart data={chartData}>
-            <XAxis dataKey="label" stroke="#444" fontSize={10} />
-            <YAxis domain={[0, 10]} stroke="#444" fontSize={10} />
+            <XAxis dataKey="label" stroke="#8c8478" fontSize={10} />
+            <YAxis domain={[0, 10]} stroke="#8c8478" fontSize={10} />
             <Tooltip
               contentStyle={{
-                background: "#1a1a1a",
-                border: "1px solid rgba(255,255,255,0.06)",
+                background: "#f0ebe2",
+                border: "1px solid rgba(111,104,95,0.18)",
                 fontSize: "11px",
               }}
             />
-            <ReferenceLine y={8} stroke="#22c55e" strokeDasharray="3 3" />
-            <Bar dataKey="score" fill="#3b82f6" radius={[2, 2, 0, 0]} />
+            <ReferenceLine y={8} stroke="#6a9a74" strokeDasharray="3 3" />
+            <Bar dataKey="score" fill="#6b87ae" radius={[2, 2, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
       </div>
@@ -417,24 +417,24 @@ export default function WeeklyReviewPage() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <ReviewTextCard
           title="BIGGEST WIN"
-          icon={<Trophy size={14} className="text-[#22c55e]" />}
-          accent="text-[#22c55e]"
+          icon={<Trophy size={14} className="text-[#6a9a74]" />}
+          accent="text-[#6a9a74]"
           value={form.biggestWin}
           onChange={(value) => setForm((p) => ({ ...p, biggestWin: value }))}
           placeholder="What went well this week?"
         />
         <ReviewTextCard
           title="BIGGEST LEAK"
-          icon={<TrendingDown size={14} className="text-[#ef4444]" />}
-          accent="text-[#ef4444]"
+          icon={<TrendingDown size={14} className="text-[#c97a73]" />}
+          accent="text-[#c97a73]"
           value={form.biggestLeak}
           onChange={(value) => setForm((p) => ({ ...p, biggestLeak: value }))}
           placeholder="Where did energy go to waste?"
         />
         <ReviewTextCard
           title="NEXT WEEK BIG 3"
-          icon={<Frown size={14} className="text-[#eab308]" />}
-          accent="text-[#eab308]"
+          icon={<Frown size={14} className="text-[#c39a4e]" />}
+          accent="text-[#c39a4e]"
           value={form.nextWeekBig3.join("\n")}
           onChange={(value) =>
             setForm((p) => ({
@@ -452,7 +452,7 @@ export default function WeeklyReviewPage() {
       </div>
 
       <div className="card-surface p-4">
-        <h3 className="text-sm font-semibold text-[#eaeaea] mb-3">
+        <h3 className="text-sm font-semibold text-[#25313c] mb-3">
           SCORE SLIDERS
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -499,7 +499,7 @@ export default function WeeklyReviewPage() {
       </div>
 
       <div className="card-surface p-4">
-        <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-[#777777]">
+        <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-[#6f685f]">
           Notes
         </label>
         <textarea
@@ -511,24 +511,24 @@ export default function WeeklyReviewPage() {
       </div>
 
       {hasSupabaseConfig && !userId ? (
-        <div className="rounded border border-[#3b82f6]/30 bg-[#3b82f6]/10 px-3 py-2 text-xs text-[#3b82f6]">
+        <div className="rounded border border-[#6b87ae]/30 bg-[#6b87ae]/10 px-3 py-2 text-xs text-[#6b87ae]">
           Supabase is configured, but there is no session yet. Draft mode is
           still available.
         </div>
       ) : null}
       {!hasSupabaseConfig ? (
-        <div className="rounded border border-[#eab308]/30 bg-[#eab308]/10 px-3 py-2 text-xs text-[#eab308]">
+        <div className="rounded border border-[#c39a4e]/30 bg-[#c39a4e]/10 px-3 py-2 text-xs text-[#c39a4e]">
           Supabase env vars are missing. Weekly review will stay local until the
           frontend env is added.
         </div>
       ) : null}
       {error ? (
-        <div className="rounded border border-[#ef4444]/30 bg-[#ef4444]/10 px-3 py-2 text-xs text-[#ef4444]">
+        <div className="rounded border border-[#c97a73]/30 bg-[#c97a73]/10 px-3 py-2 text-xs text-[#c97a73]">
           {error}
         </div>
       ) : null}
       {notice ? (
-        <div className="rounded border border-white/[0.06] bg-[#111111] px-3 py-2 text-xs text-[#777777]">
+        <div className="rounded border border-[#ddd4c6] bg-[#fdfaf4] px-3 py-2 text-xs text-[#6f685f]">
           {notice}
         </div>
       ) : null}
@@ -548,10 +548,10 @@ function ScoreSlider({
   return (
     <div>
       <div className="flex items-center justify-between mb-1">
-        <label className="text-[10px] uppercase tracking-wider text-[#777777]">
+        <label className="text-[10px] uppercase tracking-wider text-[#6f685f]">
           {label}
         </label>
-        <span className="font-mono-data text-[10px] text-[#3b82f6]">
+        <span className="font-mono-data text-[10px] text-[#6b87ae]">
           {value.toFixed(1)}/10
         </span>
       </div>

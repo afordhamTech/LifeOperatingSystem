@@ -1,7 +1,8 @@
 import { z } from "zod";
-import { eq, and, desc, gte } from "drizzle-orm";
+import { eq, and, gte } from "drizzle-orm";
 import * as schema from "@db/schema";
 import { getDb } from "./queries/connection";
+import { parseDateOnly } from "./queries/date";
 import { createRouter, authedQuery } from "./middleware";
 
 function calcInjuryRisk(
@@ -31,7 +32,7 @@ export const healthRouter = createRouter({
       const rows = await db
         .select()
         .from(schema.healthLogs)
-        .where(and(eq(schema.healthLogs.userId, ctx.user.id), eq(schema.healthLogs.date, input.date)))
+        .where(and(eq(schema.healthLogs.userId, ctx.user.id), eq(schema.healthLogs.date, parseDateOnly(input.date))))
         .limit(1);
       return rows.at(0) ?? null;
     }),
@@ -49,7 +50,7 @@ export const healthRouter = createRouter({
         .where(
           and(
             eq(schema.healthLogs.userId, ctx.user.id),
-            gte(schema.healthLogs.date, start.toISOString().split("T")[0])
+            gte(schema.healthLogs.date, start)
           )
         )
         .orderBy(schema.healthLogs.date);
@@ -76,10 +77,11 @@ export const healthRouter = createRouter({
     )
     .mutation(async ({ ctx, input }) => {
       const db = getDb();
+      const { date, ...rest } = input;
       const existing = await db
         .select()
         .from(schema.healthLogs)
-        .where(and(eq(schema.healthLogs.userId, ctx.user.id), eq(schema.healthLogs.date, input.date)))
+        .where(and(eq(schema.healthLogs.userId, ctx.user.id), eq(schema.healthLogs.date, parseDateOnly(date))))
         .limit(1);
 
       const pain = input.painScore ?? 0;
@@ -87,7 +89,7 @@ export const healthRouter = createRouter({
       const riskScore = calcInjuryRisk(pain, trend);
       const redFlags = calcRedFlags(pain, trend, input.painType ?? undefined);
 
-      const data = { ...input, userId: ctx.user.id, injuryRiskScore: riskScore, redFlags };
+      const data = { ...rest, date: parseDateOnly(date), userId: ctx.user.id, injuryRiskScore: riskScore, redFlags };
 
       if (existing.length > 0) {
         await db.update(schema.healthLogs).set(data).where(eq(schema.healthLogs.id, existing[0].id));
@@ -105,7 +107,7 @@ export const healthRouter = createRouter({
       const rows = await db
         .select()
         .from(schema.healthLogs)
-        .where(and(eq(schema.healthLogs.userId, ctx.user.id), eq(schema.healthLogs.date, input.date)))
+        .where(and(eq(schema.healthLogs.userId, ctx.user.id), eq(schema.healthLogs.date, parseDateOnly(input.date))))
         .limit(1);
 
       const log = rows.at(0);

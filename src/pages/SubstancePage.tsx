@@ -51,9 +51,9 @@ Turn this into a deeper explanation, 5 talking points, and 3 questions I could u
 
   return (
     <div className="space-y-6">
-      <div className="border-b border-white/[0.06] pb-4">
-        <h1 className="text-2xl font-semibold text-[#eaeaea]">Substance & Learning</h1>
-        <p className="text-sm text-[#777777] mt-1">
+      <div className="border-b border-[#ddd4c6] pb-4">
+        <h1 className="text-2xl font-semibold text-[#25313c]">Substance & Learning</h1>
+        <p className="text-sm text-[#6f685f] mt-1">
           Build depth, better thinking, better speech, and stronger conversation ability.
         </p>
       </div>
@@ -61,7 +61,7 @@ Turn this into a deeper explanation, 5 talking points, and 3 questions I could u
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Learning Log */}
         <div className="lg:col-span-2 card-surface p-4">
-          <h3 className="text-sm font-semibold text-[#eaeaea] mb-3">LEARNING LOG</h3>
+          <h3 className="text-sm font-semibold text-[#25313c] mb-3">LEARNING LOG</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <input
               type="text"
@@ -96,7 +96,7 @@ Turn this into a deeper explanation, 5 talking points, and 3 questions I could u
               className="input-dark h-16 resize-none"
             />
             <div className="flex items-center gap-4">
-              <label className="flex items-center gap-2 text-xs text-[#777777] cursor-pointer">
+              <label className="flex items-center gap-2 text-xs text-[#6f685f] cursor-pointer">
                 <input
                   type="checkbox"
                   checked={form.writingPractice}
@@ -105,7 +105,7 @@ Turn this into a deeper explanation, 5 talking points, and 3 questions I could u
                 />
                 Writing
               </label>
-              <label className="flex items-center gap-2 text-xs text-[#777777] cursor-pointer">
+              <label className="flex items-center gap-2 text-xs text-[#6f685f] cursor-pointer">
                 <input
                   type="checkbox"
                   checked={form.speakingPractice}
@@ -114,7 +114,7 @@ Turn this into a deeper explanation, 5 talking points, and 3 questions I could u
                 />
                 Speaking
               </label>
-              <label className="flex items-center gap-2 text-xs text-[#777777] cursor-pointer">
+              <label className="flex items-center gap-2 text-xs text-[#6f685f] cursor-pointer">
                 <input
                   type="checkbox"
                   checked={form.conversationPractice}
@@ -125,7 +125,7 @@ Turn this into a deeper explanation, 5 talking points, and 3 questions I could u
               </label>
             </div>
             <div>
-              <label className="text-[10px] uppercase text-[#777777] block mb-1">Flashcards made</label>
+              <label className="text-[10px] uppercase text-[#6f685f] block mb-1">Flashcards made</label>
               <input
                 type="number"
                 value={form.flashcardsMade}
@@ -142,15 +142,15 @@ Turn this into a deeper explanation, 5 talking points, and 3 questions I could u
         {/* Substance Score */}
         <div className="space-y-4">
           <div className="card-surface p-4 text-center">
-            <h3 className="text-sm font-semibold text-[#eaeaea] mb-3">SUBSTANCE SCORE</h3>
-            <div className="text-4xl font-bold text-[#eab308]">{(score * 100).toFixed(0)}%</div>
-            <div className="text-xs text-[#777777] mt-1">
+            <h3 className="text-sm font-semibold text-[#25313c] mb-3">SUBSTANCE SCORE</h3>
+            <div className="text-4xl font-bold text-[#c39a4e]">{(score * 100).toFixed(0)}%</div>
+            <div className="text-xs text-[#6f685f] mt-1">
               {score >= 0.8 ? "Deep thinker" : score >= 0.5 ? "Building" : "Start reading"}
             </div>
           </div>
 
           <div className="card-surface p-4">
-            <h3 className="text-sm font-semibold text-[#eaeaea] mb-2">FACTORS</h3>
+            <h3 className="text-sm font-semibold text-[#25313c] mb-2">FACTORS</h3>
             <div className="space-y-2">
               <FactorBar label="Reading" value={form.readingDone ? 25 : 0} max={25} icon={<BookOpen size={12} />} />
               <FactorBar label="Reflection" value={form.notesTaken ? 25 : 0} max={25} icon={<Lightbulb size={12} />} />
@@ -162,7 +162,7 @@ Turn this into a deeper explanation, 5 talking points, and 3 questions I could u
 
           {/* Weekly Trend */}
           <div className="card-surface p-4">
-            <h3 className="text-sm font-semibold text-[#eaeaea] mb-2">WEEKLY TREND</h3>
+            <h3 className="text-sm font-semibold text-[#25313c] mb-2">WEEKLY TREND</h3>
             <div className="flex gap-1">
               {(substanceData?.trend ?? []).map((day, i) => (
                 <div
@@ -174,7 +174,7 @@ Turn this into a deeper explanation, 5 talking points, and 3 questions I could u
                     className="w-full rounded-t"
                     style={{
                       height: `${(day.score / 1) * 100}%`,
-                      backgroundColor: day.score >= 0.6 ? "#22c55e" : day.score >= 0.3 ? "#eab308" : "#ef4444",
+                      backgroundColor: day.score >= 0.6 ? "#6a9a74" : day.score >= 0.3 ? "#c39a4e" : "#c97a73",
                       opacity: 0.6,
                     }}
                   />
@@ -182,7 +182,7 @@ Turn this into a deeper explanation, 5 talking points, and 3 questions I could u
               ))}
               {(!substanceData?.trend || substanceData.trend.length === 0) &&
                 Array.from({ length: 7 }).map((_, i) => (
-                  <div key={i} className="flex-1 h-10 bg-white/[0.02] rounded" />
+                  <div key={i} className="flex-1 h-10 bg-[#f7f3ed] rounded" />
                 ))}
             </div>
           </div>
@@ -197,12 +197,12 @@ Turn this into a deeper explanation, 5 talking points, and 3 questions I could u
 function FactorBar({ label, value, max, icon }: { label: string; value: number; max: number; icon: React.ReactNode }) {
   return (
     <div className="flex items-center gap-2">
-      <span className="text-[#777777]">{icon}</span>
-      <span className="text-[10px] text-[#777777] w-16">{label}</span>
-      <div className="flex-1 h-1 bg-white/[0.06] rounded-full overflow-hidden">
-        <div className="h-full bg-[#eab308] rounded-full" style={{ width: `${(value / max) * 100}%` }} />
+      <span className="text-[#6f685f]">{icon}</span>
+      <span className="text-[10px] text-[#6f685f] w-16">{label}</span>
+      <div className="flex-1 h-1 bg-[#ece5da] rounded-full overflow-hidden">
+        <div className="h-full bg-[#c39a4e] rounded-full" style={{ width: `${(value / max) * 100}%` }} />
       </div>
-      <span className="font-mono-data text-[10px] text-[#777777] w-6">{value}%</span>
+      <span className="font-mono-data text-[10px] text-[#6f685f] w-6">{value}%</span>
     </div>
   );
 }
