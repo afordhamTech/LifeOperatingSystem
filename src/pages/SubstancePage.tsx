@@ -1,39 +1,161 @@
-import { useState } from "react";
-import { trpc } from "@/providers/trpc";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import ChatGPTPrompt from "@/components/ChatGPTPrompt";
+import { useSupabaseSession } from "@/hooks/useSupabaseSession";
 import { calcSubstanceScore } from "@/lib/calculations";
+import {
+  fetchSubstanceEntry,
+  fetchSubstanceWeek,
+  getSyncLabel,
+  getSyncTone,
+  type LifeeeSyncStatus,
+  type SubstanceEntry,
+  upsertSubstanceEntry,
+} from "@/lib/lifeee-persistence";
 import { BookOpen, PenLine, MessageSquare, Lightbulb } from "lucide-react";
+
+const STORAGE_KEY = "lifeee.substance_logs.v1";
+
+function defaultSubstanceEntry(date: string): SubstanceEntry {
+  return {
+    date,
+    readingDone: "",
+    topicStudied: "",
+    notesTaken: "",
+    flashcardsMade: 0,
+    conversationPractice: false,
+    newConcept: "",
+    questionOfDay: "",
+    writingPractice: false,
+    speakingPractice: false,
+  };
+}
+
+function readLocalSubstanceEntries() {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as SubstanceEntry[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeLocalSubstanceEntry(entry: SubstanceEntry) {
+  if (typeof window === "undefined") return;
+  const entries = readLocalSubstanceEntries().filter((item) => item.date !== entry.date);
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify([entry, ...entries]));
+}
 
 export default function SubstancePage() {
   const today = new Date().toISOString().split("T")[0];
-  const utils = trpc.useUtils();
-
-  const { data: learningLog } = trpc.learning.getByDate.useQuery({ date: today });
-  const { data: substanceData } = trpc.learning.getSubstanceScore.useQuery();
-
-  const upsertLearning = trpc.learning.upsert.useMutation({
-    onSuccess: () => {
-      utils.learning.getByDate.invalidate({ date: today });
-      utils.learning.getSubstanceScore.invalidate();
-    },
+  const weekStart = new Date();
+  weekStart.setDate(weekStart.getDate() - 6);
+  const weekStartKey = weekStart.toISOString().split("T")[0];
+  const { hasSupabaseConfig, isLoading: sessionLoading, userId } = useSupabaseSession();
+  const [form, setForm] = useState<SubstanceEntry>(() => {
+    return readLocalSubstanceEntries().find((entry) => entry.date === today) ?? defaultSubstanceEntry(today);
   });
+  const [trend, setTrend] = useState<{ date: string; score: number }[]>([]);
+  const [syncStatus, setSyncStatus] = useState<LifeeeSyncStatus>("local");
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const remoteLoadedRef = useRef(false);
 
-  const [form, setForm] = useState({
-    readingDone: learningLog?.readingDone ?? "",
-    topicStudied: learningLog?.topicStudied ?? "",
-    notesTaken: learningLog?.notesTaken ?? "",
-    flashcardsMade: learningLog?.flashcardsMade ?? 0,
-    conversationPractice: learningLog?.conversationPractice ?? false,
-    newConcept: learningLog?.newConcept ?? "",
-    questionOfDay: learningLog?.questionOfDay ?? "",
-    writingPractice: learningLog?.writingPractice ?? false,
-    speakingPractice: learningLog?.speakingPractice ?? false,
-  });
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      if (sessionLoading) {
+        setSyncStatus("loading");
+        return;
+      }
 
-  const score = calcSubstanceScore(form.readingDone, form.notesTaken, form.writingPractice, form.speakingPractice, form.newConcept);
+      const localEntries = readLocalSubstanceEntries();
+      const localEntry = localEntries.find((entry) => entry.date === today) ?? null;
 
-  const handleSave = () => {
-    upsertLearning.mutate({ date: today, ...form });
+      if (!hasSupabaseConfig || !userId) {
+        remoteLoadedRef.current = false;
+        setForm(localEntry ?? defaultSubstanceEntry(today));
+        setTrend(
+          localEntries
+            .filter((entry) => entry.date >= weekStartKey)
+            .map((entry) => ({
+              date: entry.date,
+              score: calcSubstanceScore(
+                entry.readingDone,
+                entry.notesTaken,
+                entry.writingPractice,
+                entry.speakingPractice,
+                entry.newConcept,
+              ),
+            })),
+        );
+        setSyncStatus(hasSupabaseConfig ? "waiting" : "local");
+        return;
+      }
+
+      setSyncStatus("loading");
+      setSyncError(null);
+
+      try {
+        const [remoteEntry, remoteTrend] = await Promise.all([
+          fetchSubstanceEntry(userId, today),
+          fetchSubstanceWeek(userId, weekStartKey),
+        ]);
+        if (!active) return;
+
+        if (!remoteEntry && localEntry) {
+          const uploaded = await upsertSubstanceEntry(userId, localEntry);
+          if (!active) return;
+          setForm(uploaded);
+          writeLocalSubstanceEntry(uploaded);
+        } else {
+          const next = remoteEntry ?? defaultSubstanceEntry(today);
+          setForm(next);
+          writeLocalSubstanceEntry(next);
+        }
+
+        setTrend(remoteTrend);
+        remoteLoadedRef.current = true;
+        setSyncStatus("saved");
+      } catch (error) {
+        if (!active) return;
+        setSyncError(error instanceof Error ? error.message : "Could not load substance log.");
+        setSyncStatus("error");
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [hasSupabaseConfig, sessionLoading, today, userId, weekStartKey]);
+
+  const score = calcSubstanceScore(
+    form.readingDone,
+    form.notesTaken,
+    form.writingPractice,
+    form.speakingPractice,
+    form.newConcept,
+  );
+
+  const handleSave = async () => {
+    const entry = { ...form, date: today, substanceScore: score };
+    writeLocalSubstanceEntry(entry);
+
+    if (hasSupabaseConfig && userId && remoteLoadedRef.current) {
+      try {
+        setSyncStatus("saving");
+        const saved = await upsertSubstanceEntry(userId, entry);
+        setForm(saved);
+        writeLocalSubstanceEntry(saved);
+        setTrend(await fetchSubstanceWeek(userId, weekStartKey));
+        setSyncStatus("saved");
+        setSyncError(null);
+      } catch (error) {
+        setSyncError(error instanceof Error ? error.message : "Could not save substance log.");
+        setSyncStatus("error");
+      }
+    } else {
+      setSyncStatus(hasSupabaseConfig ? "waiting" : "local");
+    }
   };
 
   const promptText = `Here is what I learned or thought about today:
@@ -52,14 +174,21 @@ Turn this into a deeper explanation, 5 talking points, and 3 questions I could u
   return (
     <div className="space-y-6">
       <div className="border-b border-[#ddd4c6] pb-4">
-        <h1 className="text-2xl font-semibold text-[#25313c]">Substance & Learning</h1>
-        <p className="text-sm text-[#6f685f] mt-1">
-          Build depth, better thinking, better speech, and stronger conversation ability.
-        </p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-semibold text-[#25313c]">Substance & Learning</h1>
+            <p className="text-sm text-[#6f685f] mt-1">
+              Build depth, better thinking, better speech, and stronger conversation ability.
+            </p>
+          </div>
+          <span className={`rounded-full border px-2.5 py-1 text-[11px] ${getSyncTone(syncStatus)}`}>
+            {getSyncLabel(syncStatus)}
+          </span>
+        </div>
+        {syncError && <p className="mt-2 text-xs text-destructive">{syncError}</p>}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Learning Log */}
         <div className="lg:col-span-2 card-surface p-4">
           <h3 className="text-sm font-semibold text-[#25313c] mb-3">LEARNING LOG</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -135,11 +264,10 @@ Turn this into a deeper explanation, 5 talking points, and 3 questions I could u
             </div>
           </div>
           <button onClick={handleSave} className="btn-primary w-full mt-3">
-            {upsertLearning.isPending ? "Saving..." : "Save & Score"}
+            {syncStatus === "saving" ? "Saving..." : "Save & Score"}
           </button>
         </div>
 
-        {/* Substance Score */}
         <div className="space-y-4">
           <div className="card-surface p-4 text-center">
             <h3 className="text-sm font-semibold text-[#25313c] mb-3">SUBSTANCE SCORE</h3>
@@ -160,30 +288,24 @@ Turn this into a deeper explanation, 5 talking points, and 3 questions I could u
             </div>
           </div>
 
-          {/* Weekly Trend */}
           <div className="card-surface p-4">
             <h3 className="text-sm font-semibold text-[#25313c] mb-2">WEEKLY TREND</h3>
             <div className="flex gap-1">
-              {(substanceData?.trend ?? []).map((day, i) => (
-                <div
-                  key={i}
-                  className="flex-1 rounded flex items-end justify-center"
-                  style={{ height: "40px" }}
-                >
+              {trend.map((day, i) => (
+                <div key={`${day.date}-${i}`} className="flex-1 rounded flex items-end justify-center" style={{ height: "40px" }}>
                   <div
                     className="w-full rounded-t"
                     style={{
-                      height: `${(day.score / 1) * 100}%`,
+                      height: `${day.score * 100}%`,
                       backgroundColor: day.score >= 0.6 ? "#6a9a74" : day.score >= 0.3 ? "#c39a4e" : "#c97a73",
                       opacity: 0.6,
                     }}
                   />
                 </div>
               ))}
-              {(!substanceData?.trend || substanceData.trend.length === 0) &&
-                Array.from({ length: 7 }).map((_, i) => (
-                  <div key={i} className="flex-1 h-10 bg-[#f7f3ed] rounded" />
-                ))}
+              {trend.length === 0 && Array.from({ length: 7 }).map((_, i) => (
+                <div key={i} className="flex-1 h-10 bg-[#f7f3ed] rounded" />
+              ))}
             </div>
           </div>
         </div>
@@ -194,7 +316,7 @@ Turn this into a deeper explanation, 5 talking points, and 3 questions I could u
   );
 }
 
-function FactorBar({ label, value, max, icon }: { label: string; value: number; max: number; icon: React.ReactNode }) {
+function FactorBar({ label, value, max, icon }: { label: string; value: number; max: number; icon: ReactNode }) {
   return (
     <div className="flex items-center gap-2">
       <span className="text-[#6f685f]">{icon}</span>

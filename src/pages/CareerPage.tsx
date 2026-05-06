@@ -1,15 +1,42 @@
-import { useState } from "react";
-import { trpc } from "@/providers/trpc";
+import { useEffect, useRef, useState } from "react";
 import ChatGPTPrompt from "@/components/ChatGPTPrompt";
 import { getStatusColor } from "@/components/StatusRing";
+import { useSupabaseSession } from "@/hooks/useSupabaseSession";
+import {
+  createLifeeeId,
+  fetchProofItems,
+  getSyncLabel,
+  getSyncTone,
+  type LifeeeSyncStatus,
+  type ProofItem,
+  upsertProofItem,
+} from "@/lib/lifeee-persistence";
+import { calcProofScore } from "@/lib/calculations";
 import { Plus, Github, Linkedin, FileText, CheckCircle2, Circle } from "lucide-react";
 
+const STORAGE_KEY = "lifeee.proof_items.v1";
+
+function readLocalProofItems() {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as ProofItem[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeLocalProofItems(items: ProofItem[]) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+}
+
 export default function CareerPage() {
-  const utils = trpc.useUtils();
-  const { data: dashboard } = trpc.career.getDashboard.useQuery();
-  const createArtifact = trpc.career.create.useMutation({
-    onSuccess: () => utils.career.getDashboard.invalidate(),
-  });
+  const { hasSupabaseConfig, isLoading: sessionLoading, userId } = useSupabaseSession();
+  const [items, setItems] = useState<ProofItem[]>(() => readLocalProofItems());
+  const [syncStatus, setSyncStatus] = useState<LifeeeSyncStatus>("local");
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const remoteLoadedRef = useRef(false);
 
   const [form, setForm] = useState({
     projectName: "",
@@ -21,9 +48,94 @@ export default function CareerPage() {
     completion: 5,
   });
 
-  const handleAdd = () => {
-    if (!form.projectName) return;
-    createArtifact.mutate(form);
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      if (sessionLoading) {
+        setSyncStatus("loading");
+        return;
+      }
+
+      const localItems = readLocalProofItems();
+
+      if (!hasSupabaseConfig || !userId) {
+        remoteLoadedRef.current = false;
+        setItems(localItems);
+        setSyncStatus(hasSupabaseConfig ? "waiting" : "local");
+        return;
+      }
+
+      setSyncStatus("loading");
+      setSyncError(null);
+
+      try {
+        const remoteItems = await fetchProofItems(userId);
+        if (!active) return;
+
+        if (remoteItems.length === 0 && localItems.length > 0) {
+          const uploaded = await Promise.all(localItems.map((item) => upsertProofItem(userId, item)));
+          if (!active) return;
+          setItems(uploaded);
+          writeLocalProofItems(uploaded);
+        } else {
+          setItems(remoteItems);
+          writeLocalProofItems(remoteItems);
+        }
+
+        remoteLoadedRef.current = true;
+        setSyncStatus("saved");
+      } catch (error) {
+        if (!active) return;
+        setSyncError(error instanceof Error ? error.message : "Could not load proof items.");
+        setSyncStatus("error");
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [hasSupabaseConfig, sessionLoading, userId]);
+
+  const handleAdd = async () => {
+    if (!form.projectName.trim()) return;
+    const item: ProofItem = {
+      id: createLifeeeId(),
+      projectName: form.projectName.trim(),
+      artifactType: form.artifactType,
+      hoursWorked: form.hoursWorked,
+      visibility: form.visibility,
+      difficulty: form.difficulty,
+      relevance: form.relevance,
+      completion: form.completion,
+      proofScore: calcProofScore(form.visibility, form.difficulty, form.relevance, form.completion),
+      githubUpdated: false,
+      linkedinUpdated: false,
+      resumeBulletAdded: false,
+      applicationSubmitted: false,
+      mentorContact: "",
+      skillPracticed: "",
+    };
+    const optimistic = [item, ...items];
+    setItems(optimistic);
+    writeLocalProofItems(optimistic);
+
+    if (hasSupabaseConfig && userId && remoteLoadedRef.current) {
+      try {
+        setSyncStatus("saving");
+        const saved = await upsertProofItem(userId, item);
+        const next = [saved, ...items];
+        setItems(next);
+        writeLocalProofItems(next);
+        setSyncStatus("saved");
+        setSyncError(null);
+      } catch (error) {
+        setSyncError(error instanceof Error ? error.message : "Could not save proof item.");
+        setSyncStatus("error");
+      }
+    } else {
+      setSyncStatus(hasSupabaseConfig ? "waiting" : "local");
+    }
+
     setForm({
       projectName: "",
       artifactType: "code",
@@ -35,33 +147,53 @@ export default function CareerPage() {
     });
   };
 
+  const bulletsToUpdate = items.filter((item) => !item.resumeBulletAdded).length;
+  const linkedInUpdates = items.filter((item) => !item.linkedinUpdated).length;
+  const proofScore =
+    items.length > 0
+      ? Math.round((items.reduce((sum, item) => sum + item.proofScore, 0) / items.length) * 100) / 100
+      : 0;
+  const nextAction =
+    bulletsToUpdate > 0
+      ? "Update resume with recent project bullets"
+      : linkedInUpdates > 0
+        ? "Post LinkedIn update about recent work"
+        : "Start a new project to build proof";
+
   const promptText = `Here is my career and proof data:
 
 Projects:
-${dashboard?.projects
-  ?.map(
+${items
+  .map(
     (p) =>
-      `- ${p.projectName} (Proof Score: ${Number(p.proofScore).toFixed(1)}, Type: ${p.artifactType})`
+      `- ${p.projectName} (Proof Score: ${Number(p.proofScore).toFixed(1)}, Type: ${p.artifactType})`,
   )
   .join("\n")}
 
-Resume bullets to update: ${dashboard?.bulletsToUpdate ?? 0}
-LinkedIn updates needed: ${dashboard?.linkedInUpdates ?? 0}
-Average proof score: ${dashboard?.proofScore?.toFixed(1) ?? 0}
+Resume bullets to update: ${bulletsToUpdate}
+LinkedIn updates needed: ${linkedInUpdates}
+Average proof score: ${proofScore.toFixed(1)}
 
 Tell me what proof is strongest, what I should polish, what I should add to my resume, and what my next career move should be this week.`;
 
   return (
     <div className="space-y-6">
       <div className="border-b border-[#ddd4c6] pb-4">
-        <h1 className="text-2xl font-semibold text-[#25313c]">Career & Proof</h1>
-        <p className="text-sm text-[#6f685f] mt-1">
-          Track whether you are creating evidence that future people can trust.
-        </p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-semibold text-[#25313c]">Career & Proof</h1>
+            <p className="text-sm text-[#6f685f] mt-1">
+              Track whether you are creating evidence that future people can trust.
+            </p>
+          </div>
+          <span className={`rounded-full border px-2.5 py-1 text-[11px] ${getSyncTone(syncStatus)}`}>
+            {getSyncLabel(syncStatus)}
+          </span>
+        </div>
+        {syncError && <p className="mt-2 text-xs text-destructive">{syncError}</p>}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Add Project */}
         <div className="card-surface p-4">
           <h3 className="text-sm font-semibold text-[#25313c] mb-3">ADD PROJECT</h3>
           <div className="space-y-3">
@@ -110,40 +242,36 @@ Tell me what proof is strongest, what I should polish, what I should add to my r
           </div>
         </div>
 
-        {/* Dashboard Widgets */}
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <div className="card-surface p-3 text-center">
-              <div className="text-xl font-bold text-[#25313c]">{dashboard?.projects?.length ?? 0}</div>
+              <div className="text-xl font-bold text-[#25313c]">{items.length}</div>
               <div className="text-[10px] text-[#6f685f]">Projects</div>
             </div>
             <div className="card-surface p-3 text-center">
-              <div className="text-xl font-bold text-[#c39a4e]">{dashboard?.bulletsToUpdate ?? 0}</div>
+              <div className="text-xl font-bold text-[#c39a4e]">{bulletsToUpdate}</div>
               <div className="text-[10px] text-[#6f685f]">Resume Bullets</div>
             </div>
             <div className="card-surface p-3 text-center">
-              <div className="text-xl font-bold text-[#6b87ae]">{dashboard?.linkedInUpdates ?? 0}</div>
+              <div className="text-xl font-bold text-[#6b87ae]">{linkedInUpdates}</div>
               <div className="text-[10px] text-[#6f685f]">LinkedIn Updates</div>
             </div>
             <div className="card-surface p-3 text-center">
-              <div className="text-xl font-bold text-[#9a7bbd]">
-                {dashboard?.proofScore?.toFixed(1) ?? "0.0"}
-              </div>
+              <div className="text-xl font-bold text-[#9a7bbd]">{proofScore.toFixed(1)}</div>
               <div className="text-[10px] text-[#6f685f]">Avg Proof Score</div>
             </div>
           </div>
           <div className="card-surface p-3">
             <div className="text-xs text-[#6f685f]">Next action:</div>
-            <div className="text-sm text-[#6b87ae] mt-1">{dashboard?.nextAction}</div>
+            <div className="text-sm text-[#6b87ae] mt-1">{nextAction}</div>
           </div>
         </div>
       </div>
 
-      {/* Project List */}
       <div className="card-surface p-4">
         <h3 className="text-sm font-semibold text-[#25313c] mb-3">PROJECTS</h3>
         <div className="space-y-3">
-          {(dashboard?.projects ?? []).map((project) => (
+          {items.map((project) => (
             <div key={project.id} className="p-3 bg-[#f0ebe2] rounded">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -202,7 +330,7 @@ Tell me what proof is strongest, what I should polish, what I should add to my r
               </div>
             </div>
           ))}
-          {(!dashboard?.projects || dashboard.projects.length === 0) && (
+          {items.length === 0 && (
             <div className="text-center py-8 text-sm text-[#8c8478]">
               No projects yet. Add a proof artifact, shipped feature, or portfolio piece.
             </div>

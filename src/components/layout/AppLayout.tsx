@@ -1,5 +1,7 @@
 import { Link, useLocation } from "react-router";
 import { useAuth } from "@/hooks/useAuth";
+import { useSupabaseSession } from "@/hooks/useSupabaseSession";
+import { supabase } from "@/lib/supabase-client";
 import {
   LayoutDashboard,
   ListChecks,
@@ -59,9 +61,14 @@ const navSections: NavSection[] = [
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
-  const { user, logout } = useAuth();
+  const { user: kimiUser, logout } = useAuth();
+  const { session: supabaseSession } = useSupabaseSession();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const user = kimiUser ?? (supabaseSession?.user ? {
+    avatar: null,
+    name: supabaseSession.user.email ?? "Supabase user",
+  } : null);
 
   const toggleSidebar = useCallback(() => setCollapsed((p) => !p), []);
   const closeMobile = useCallback(() => setMobileOpen(false), []);
@@ -172,7 +179,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                     {user.name || "User"}
                   </span>
                   <button
-                    onClick={logout}
+                    onClick={() => {
+                      if (supabaseSession && supabase) {
+                        void supabase.auth.signOut();
+                      }
+                      if (kimiUser) logout();
+                    }}
                     className="p-1 text-muted-foreground transition-colors hover:text-[#c97a73]"
                   >
                     <LogOut size={14} />

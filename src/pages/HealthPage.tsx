@@ -1,43 +1,145 @@
-import { useState } from "react";
-import { trpc } from "@/providers/trpc";
+import { useEffect, useRef, useState } from "react";
 import StatusRing, { getStatusColor } from "@/components/StatusRing";
 import ChatGPTPrompt from "@/components/ChatGPTPrompt";
+import { useSupabaseSession } from "@/hooks/useSupabaseSession";
 import { calcInjuryRisk } from "@/lib/calculations";
+import {
+  fetchHealthEntry,
+  getHealthRecommendations,
+  getSyncLabel,
+  getSyncTone,
+  type HealthEntry,
+  type LifeeeSyncStatus,
+  upsertHealthEntry,
+} from "@/lib/lifeee-persistence";
 import { AlertTriangle, Shield } from "lucide-react";
+
+const STORAGE_KEY = "lifeee.health_logs.v1";
+
+function defaultHealthEntry(date: string): HealthEntry {
+  return {
+    date,
+    painArea: "",
+    painScore: 0,
+    painType: "dull",
+    painTrigger: "",
+    painReliever: "",
+    trainingDone: "",
+    sleep: 7,
+    hydration: 7,
+    mobilityDone: false,
+    medicationTaken: "",
+    doctorVisitNeeded: false,
+    painTrend: "stable",
+  };
+}
+
+function readLocalHealthEntries() {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as HealthEntry[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeLocalHealthEntry(entry: HealthEntry) {
+  if (typeof window === "undefined") return;
+  const entries = readLocalHealthEntries().filter((item) => item.date !== entry.date);
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify([entry, ...entries]));
+}
+
+function getRedFlags(entry: HealthEntry) {
+  const flags: string[] = [];
+  if (entry.painScore > 7) flags.push("Pain above 7 - no hard training");
+  if (entry.painTrend === "increasing") flags.push("Pain increasing - reduce load");
+  if (entry.painType === "sharp") flags.push("Sharp pain during movement - stop that movement");
+  return flags;
+}
 
 export default function HealthPage() {
   const today = new Date().toISOString().split("T")[0];
-  const utils = trpc.useUtils();
-
-  const { data: healthLog } = trpc.health.getByDate.useQuery({ date: today });
-  const { data: riskData } = trpc.health.getRisk.useQuery({ date: today });
-
-  const upsertHealth = trpc.health.upsert.useMutation({
-    onSuccess: () => {
-      utils.health.getByDate.invalidate({ date: today });
-      utils.health.getRisk.invalidate({ date: today });
-    },
+  const { hasSupabaseConfig, isLoading: sessionLoading, userId } = useSupabaseSession();
+  const [form, setForm] = useState<HealthEntry>(() => {
+    return readLocalHealthEntries().find((entry) => entry.date === today) ?? defaultHealthEntry(today);
   });
+  const [syncStatus, setSyncStatus] = useState<LifeeeSyncStatus>("local");
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const remoteLoadedRef = useRef(false);
 
-  const [form, setForm] = useState({
-    painArea: healthLog?.painArea ?? "",
-    painScore: healthLog?.painScore ?? 0,
-    painType: healthLog?.painType ?? "dull",
-    painTrigger: healthLog?.painTrigger ?? "",
-    painReliever: healthLog?.painReliever ?? "",
-    trainingDone: healthLog?.trainingDone ?? "",
-    sleep: healthLog?.sleep ? Number(healthLog.sleep) : 7,
-    hydration: healthLog?.hydration ?? 7,
-    mobilityDone: healthLog?.mobilityDone ?? false,
-    medicationTaken: healthLog?.medicationTaken ?? "",
-    doctorVisitNeeded: healthLog?.doctorVisitNeeded ?? false,
-    painTrend: healthLog?.painTrend ?? "stable",
-  });
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      if (sessionLoading) {
+        setSyncStatus("loading");
+        return;
+      }
+
+      const localEntry = readLocalHealthEntries().find((entry) => entry.date === today) ?? null;
+
+      if (!hasSupabaseConfig || !userId) {
+        remoteLoadedRef.current = false;
+        setForm(localEntry ?? defaultHealthEntry(today));
+        setSyncStatus(hasSupabaseConfig ? "waiting" : "local");
+        return;
+      }
+
+      setSyncStatus("loading");
+      setSyncError(null);
+
+      try {
+        const remoteEntry = await fetchHealthEntry(userId, today);
+        if (!active) return;
+
+        if (!remoteEntry && localEntry) {
+          const uploaded = (await upsertHealthEntry(userId, localEntry)) ?? localEntry;
+          if (!active) return;
+          setForm(uploaded);
+          writeLocalHealthEntry(uploaded);
+        } else {
+          const next = remoteEntry ?? defaultHealthEntry(today);
+          setForm(next);
+          writeLocalHealthEntry(next);
+        }
+
+        remoteLoadedRef.current = true;
+        setSyncStatus("saved");
+      } catch (error) {
+        if (!active) return;
+        setSyncError(error instanceof Error ? error.message : "Could not load health log.");
+        setSyncStatus("error");
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [hasSupabaseConfig, sessionLoading, today, userId]);
 
   const riskScore = calcInjuryRisk(form.painScore, form.painTrend);
+  const recommendations = getHealthRecommendations(form);
+  const redFlags = getRedFlags(form);
 
-  const handleSave = () => {
-    upsertHealth.mutate({ date: today, ...form });
+  const handleSave = async () => {
+    const entry = { ...form, date: today };
+    writeLocalHealthEntry(entry);
+
+    if (hasSupabaseConfig && userId && remoteLoadedRef.current) {
+      try {
+        setSyncStatus("saving");
+        const saved = (await upsertHealthEntry(userId, entry)) ?? entry;
+        setForm(saved);
+        writeLocalHealthEntry(saved);
+        setSyncStatus("saved");
+        setSyncError(null);
+      } catch (error) {
+        setSyncError(error instanceof Error ? error.message : "Could not save health log.");
+        setSyncStatus("error");
+      }
+    } else {
+      setSyncStatus(hasSupabaseConfig ? "waiting" : "local");
+    }
   };
 
   const promptText = `Here is my health and injury data:
@@ -59,14 +161,21 @@ Help me decide whether to train, modify training, recover, or seek medical help.
   return (
     <div className="space-y-6">
       <div className="border-b border-[#ddd4c6] pb-4">
-        <h1 className="text-2xl font-semibold text-[#25313c]">Health & Injury</h1>
-        <p className="text-sm text-[#6f685f] mt-1">
-          Track pain, recurring issues, recovery, and whether you are ignoring warning signals.
-        </p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-semibold text-[#25313c]">Health & Injury</h1>
+            <p className="text-sm text-[#6f685f] mt-1">
+              Track pain, recurring issues, recovery, and whether you are ignoring warning signals.
+            </p>
+          </div>
+          <span className={`rounded-full border px-2.5 py-1 text-[11px] ${getSyncTone(syncStatus)}`}>
+            {getSyncLabel(syncStatus)}
+          </span>
+        </div>
+        {syncError && <p className="mt-2 text-xs text-destructive">{syncError}</p>}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Pain Input */}
         <div className="card-surface p-4">
           <h3 className="text-sm font-semibold text-[#25313c] mb-3">PAIN TRACKER</h3>
           <div className="space-y-3">
@@ -160,12 +269,11 @@ Help me decide whether to train, modify training, recover, or seek medical help.
               </label>
             </div>
             <button onClick={handleSave} className="btn-primary w-full">
-              {upsertHealth.isPending ? "Saving..." : "Log & Assess"}
+              {syncStatus === "saving" ? "Saving..." : "Log & Assess"}
             </button>
           </div>
         </div>
 
-        {/* Risk Assessment */}
         <div className="card-surface p-4 flex flex-col items-center">
           <h3 className="text-sm font-semibold text-[#25313c] mb-3 w-full">INJURY RISK</h3>
           <StatusRing score={riskScore} size={120} strokeWidth={6} />
@@ -182,12 +290,11 @@ Help me decide whether to train, modify training, recover, or seek medical help.
           </div>
         </div>
 
-        {/* Recommendations */}
         <div className="card-surface p-4">
           <h3 className="text-sm font-semibold text-[#25313c] mb-3">RECOMMENDATIONS</h3>
-          {riskData?.recommendations && riskData.recommendations.length > 0 ? (
+          {recommendations.length > 0 ? (
             <div className="space-y-2">
-              {riskData.recommendations.map((rec, i) => (
+              {recommendations.map((rec, i) => (
                 <div key={i} className="flex items-start gap-2 text-xs">
                   <Shield size={12} className="text-[#c39a4e] mt-0.5 flex-shrink-0" />
                   <span className="text-[#6f685f]">{rec}</span>
@@ -198,14 +305,13 @@ Help me decide whether to train, modify training, recover, or seek medical help.
             <p className="text-xs text-[#6a9a74]">No specific recommendations. Stay consistent.</p>
           )}
 
-          {/* Red Flags */}
-          {(riskData?.redFlags ?? []).length > 0 && (
+          {redFlags.length > 0 && (
             <div className="mt-4 p-3 bg-[#c97a73]/10 rounded">
               <div className="flex items-center gap-2 mb-2">
                 <AlertTriangle size={12} className="text-[#c97a73]" />
                 <span className="text-xs font-semibold text-[#c97a73]">RED FLAGS</span>
               </div>
-              {(riskData?.redFlags ?? []).map((flag, i) => (
+              {redFlags.map((flag, i) => (
                 <div key={i} className="text-xs text-[#c97a73] mb-1">
                   {flag}
                 </div>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Inbox,
   CalendarClock,
@@ -25,6 +25,15 @@ import {
   calcTaskPriority,
   buildTriagePrompt,
 } from "@/lib/task-system";
+import { useSupabaseSession } from "@/hooks/useSupabaseSession";
+import {
+  deleteUniversalTask,
+  fetchUniversalTasks,
+  getSyncLabel,
+  getSyncTone,
+  type LifeeeSyncStatus,
+  upsertUniversalTask,
+} from "@/lib/lifeee-persistence";
 
 const TABS: { key: TaskStatus | "all"; label: string; icon: React.ComponentType<{ size?: number }> }[] = [
   { key: "inbox", label: "Life Inbox", icon: Inbox },
@@ -50,9 +59,15 @@ function readCurrentEnergy(): number {
 }
 
 export default function TaskCommandPage() {
+  const { hasSupabaseConfig, isLoading: sessionLoading, userId } = useSupabaseSession();
   const [tasks, setTasks] = useState<Task[]>(() => loadTasks());
   const [activeTab, setActiveTab] = useState<TaskStatus | "all">("inbox");
   const [currentEnergy, setCurrentEnergy] = useState<number>(readCurrentEnergy());
+  const currentEnergyRef = useRef(currentEnergy);
+  const remoteLoadedRef = useRef(false);
+  const saveSequenceRef = useRef(0);
+  const [syncStatus, setSyncStatus] = useState<LifeeeSyncStatus>("local");
+  const [syncError, setSyncError] = useState<string | null>(null);
   const [draft, setDraft] = useState({
     title: "",
     task_type: "Personal" as TaskType,
@@ -70,8 +85,62 @@ export default function TaskCommandPage() {
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
+    currentEnergyRef.current = currentEnergy;
+  }, [currentEnergy]);
+
+  useEffect(() => {
     saveTasks(tasks);
   }, [tasks]);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadPersistedTasks = async () => {
+      if (sessionLoading) return;
+
+      if (!hasSupabaseConfig || !userId) {
+        remoteLoadedRef.current = false;
+        if (!active) return;
+        setTasks(loadTasks());
+        setSyncStatus(hasSupabaseConfig ? "waiting" : "local");
+        setSyncError(null);
+        return;
+      }
+
+      setSyncStatus("loading");
+      setSyncError(null);
+
+      try {
+        const remoteTasks = await fetchUniversalTasks(userId);
+        const localTasks = loadTasks();
+        const nextTasks =
+          remoteTasks.length === 0 && localTasks.length > 0
+            ? await Promise.all(
+                localTasks.map((task) =>
+                  upsertUniversalTask(userId, task, currentEnergyRef.current),
+                ),
+              )
+            : remoteTasks;
+
+        if (!active) return;
+        remoteLoadedRef.current = true;
+        setTasks(nextTasks);
+        saveTasks(nextTasks);
+        setSyncStatus("saved");
+      } catch (error) {
+        if (!active) return;
+        remoteLoadedRef.current = false;
+        setSyncStatus("error");
+        setSyncError(error instanceof Error ? error.message : "Unable to load tasks.");
+      }
+    };
+
+    void loadPersistedTasks();
+
+    return () => {
+      active = false;
+    };
+  }, [hasSupabaseConfig, sessionLoading, userId]);
 
   const plan = useMemo(() => buildDayPlan(tasks, currentEnergy), [tasks, currentEnergy]);
 
@@ -79,6 +148,31 @@ export default function TaskCommandPage() {
     if (activeTab === "all") return tasks.filter((t) => t.recurring);
     return tasks.filter((t) => t.status === activeTab);
   }, [tasks, activeTab]);
+
+  const persistTask = async (task: Task) => {
+    if (!userId || !remoteLoadedRef.current) {
+      setSyncStatus(hasSupabaseConfig ? "waiting" : "local");
+      return;
+    }
+
+    const saveSequence = saveSequenceRef.current + 1;
+    saveSequenceRef.current = saveSequence;
+    setSyncStatus("saving");
+    setSyncError(null);
+
+    try {
+      const savedTask = await upsertUniversalTask(userId, task, currentEnergy);
+      if (saveSequenceRef.current !== saveSequence) return;
+      setTasks((current) =>
+        current.map((item) => (item.id === savedTask.id ? savedTask : item)),
+      );
+      setSyncStatus("saved");
+    } catch (error) {
+      if (saveSequenceRef.current !== saveSequence) return;
+      setSyncStatus("error");
+      setSyncError(error instanceof Error ? error.message : "Unable to save task.");
+    }
+  };
 
   const addTask = () => {
     if (!draft.title.trim()) return;
@@ -99,18 +193,32 @@ export default function TaskCommandPage() {
     });
     setTasks((prev) => [task, ...prev]);
     setDraft((d) => ({ ...d, title: "", fixed_time: "" }));
+    void persistTask(task);
   };
 
   const updateTask = (id: string, patch: Partial<Task>) => {
-    setTasks((prev) =>
-      prev.map((t) =>
-        t.id === id ? { ...t, ...patch, updated_at: new Date().toISOString() } : t,
-      ),
-    );
+    const current = tasks.find((task) => task.id === id);
+    if (!current) return;
+    const nextTask = { ...current, ...patch, updated_at: new Date().toISOString() };
+    setTasks((prev) => prev.map((t) => (t.id === id ? nextTask : t)));
+    void persistTask(nextTask);
   };
 
   const removeTask = (id: string) => {
     setTasks((prev) => prev.filter((t) => t.id !== id));
+    if (!userId || !remoteLoadedRef.current) {
+      setSyncStatus(hasSupabaseConfig ? "waiting" : "local");
+      return;
+    }
+
+    setSyncStatus("saving");
+    setSyncError(null);
+    void deleteUniversalTask(userId, id)
+      .then(() => setSyncStatus("saved"))
+      .catch((error: unknown) => {
+        setSyncStatus("error");
+        setSyncError(error instanceof Error ? error.message : "Unable to delete task.");
+      });
   };
 
   const completeTask = (id: string) =>
@@ -140,6 +248,13 @@ export default function TaskCommandPage() {
     .filter((t) => t.status !== "completed")
     .sort((a, b) => calcTaskPriority(b, currentEnergy) - calcTaskPriority(a, currentEnergy))
     .slice(0, 5);
+  const visibleSyncStatus: LifeeeSyncStatus = sessionLoading
+    ? "loading"
+    : !hasSupabaseConfig
+      ? "local"
+      : !userId
+        ? "waiting"
+        : syncStatus;
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -151,6 +266,12 @@ export default function TaskCommandPage() {
           </p>
         </div>
         <div className="flex items-center gap-3">
+          <span
+            className={`rounded-full border px-3 py-1 text-xs font-semibold ${getSyncTone(visibleSyncStatus)}`}
+            title={visibleSyncStatus === "error" ? syncError ?? undefined : undefined}
+          >
+            {getSyncLabel(visibleSyncStatus)}
+          </span>
           <label className="text-xs text-[#6f685f] flex items-center gap-2">
             Current energy
             <input

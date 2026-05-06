@@ -4,6 +4,7 @@ import { hasSupabaseConfig, supabase } from "@/lib/supabase-client";
 type SupabaseSession = {
   user: {
     id: string;
+    email?: string;
   } | null;
 };
 

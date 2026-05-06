@@ -55,9 +55,12 @@ import {
   getTopicErrors,
   getTopicSessions,
   getWeeklyAccuracySeries,
+  hasMcatFoundationProgress,
   isCarsTopic,
   loadActiveSession,
   loadMcatFoundationState,
+  normalizeActiveMcatSession,
+  normalizeMcatFoundationState,
   saveActiveSession,
   saveMcatFoundationState,
   type ActiveMcatSession,
@@ -68,6 +71,8 @@ import {
   type McatTopic,
   type McatTopicStatus,
 } from "@/lib/mcat-foundation";
+import { supabase } from "@/lib/supabase-client";
+import { useSupabaseSession } from "@/hooks/useSupabaseSession";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog,
@@ -173,9 +178,60 @@ function copyText(text: string, onCopied: () => void) {
 
 const CHART_COLORS = ["#6b87ae", "#9a7bbd", "#c39a4e", "#6a9a74", "#c97a73", "#8c8478", "#5d6d7e"];
 
+const MCAT_SYNC_DEBOUNCE_MS = 700;
+
+type McatSyncStatus = "local" | "loading" | "saving" | "synced" | "error";
+
+type McatRemoteRow = {
+  state: unknown;
+  active_session: unknown | null;
+};
+
+function stateUpdatedAtMs(state: McatFoundationState) {
+  const time = new Date(state.updatedAt).getTime();
+  return Number.isFinite(time) ? time : 0;
+}
+
+function shouldUseRemoteSnapshot(
+  remote: McatFoundationState,
+  local: McatFoundationState,
+  remoteActiveSession: ActiveMcatSession | null,
+  localActiveSession: ActiveMcatSession | null,
+) {
+  const remoteHasProgress = hasMcatFoundationProgress(remote) || Boolean(remoteActiveSession);
+  const localHasProgress = hasMcatFoundationProgress(local) || Boolean(localActiveSession);
+  if (remoteHasProgress && !localHasProgress) return true;
+  if (!remoteHasProgress && localHasProgress) return false;
+  return stateUpdatedAtMs(remote) >= stateUpdatedAtMs(local);
+}
+
+function syncLabel(status: McatSyncStatus, hasConfig: boolean, userId: string | null) {
+  if (!hasConfig) return "Local only";
+  if (status === "loading") return userId ? "Loading Supabase" : "Checking auth";
+  if (!userId) return "Sign in to sync";
+  if (status === "saving") return "Saving Supabase";
+  if (status === "synced") return "Supabase synced";
+  if (status === "error") return "Sync error";
+  return "Local only";
+}
+
+function syncClass(status: McatSyncStatus, userId: string | null) {
+  if (!userId) return "border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-300";
+  if (status === "error") return "border-destructive/25 bg-destructive/10 text-destructive";
+  if (status === "synced") return "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
+  return "border-primary/25 bg-primary/10 text-primary";
+}
+
 export default function McatFoundationPage() {
+  const { hasSupabaseConfig, isLoading: sessionLoading, userId } = useSupabaseSession();
   const [state, setState] = useState<McatFoundationState>(() => loadMcatFoundationState());
   const [activeSession, setActiveSession] = useState<ActiveMcatSession | null>(() => loadActiveSession());
+  const [syncStatus, setSyncStatus] = useState<McatSyncStatus>("local");
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const stateRef = useRef(state);
+  const activeSessionRef = useRef(activeSession);
+  const remoteLoadedForUserRef = useRef<string | null>(null);
+  const saveSequenceRef = useRef(0);
   const [tickNonce, setTickNonce] = useState(0);
   const [activeTab, setActiveTab] = useState("today");
   const [logDialogOpen, setLogDialogOpen] = useState(false);
@@ -214,13 +270,147 @@ export default function McatFoundationPage() {
 
   // Persist data state
   useEffect(() => {
+    stateRef.current = state;
     saveMcatFoundationState(state);
   }, [state]);
 
-  // Persist + tick active session
+  // Persist active session locally so an interrupted timer can resume.
   useEffect(() => {
+    activeSessionRef.current = activeSession;
     saveActiveSession(activeSession);
   }, [activeSession]);
+
+  useEffect(() => {
+    let active = true;
+
+    const createRemoteSnapshot = async () => {
+      if (!supabase || !userId) return;
+      setSyncStatus("saving");
+      const snapshot = {
+        user_id: userId,
+        state: { ...stateRef.current, updatedAt: new Date().toISOString() },
+        active_session: activeSessionRef.current,
+      };
+      const { error } = await supabase
+        .from("mcat_foundation_states")
+        .upsert(snapshot, { onConflict: "user_id" });
+
+      if (!active) return;
+      if (error) {
+        remoteLoadedForUserRef.current = null;
+        setSyncStatus("error");
+        setSyncError(error.message);
+        return;
+      }
+
+      setSyncStatus("synced");
+      setSyncError(null);
+    };
+
+    const loadRemoteSnapshot = async () => {
+      if (!supabase || !userId) return;
+      setSyncStatus("loading");
+      setSyncError(null);
+
+      const { data, error } = await supabase
+        .from("mcat_foundation_states")
+        .select("state,active_session")
+        .eq("user_id", userId)
+        .maybeSingle<McatRemoteRow>();
+
+      if (!active) return;
+
+      if (error) {
+        remoteLoadedForUserRef.current = null;
+        setSyncStatus("error");
+        setSyncError(error.message);
+        return;
+      }
+
+      remoteLoadedForUserRef.current = userId;
+
+      if (!data) {
+        await createRemoteSnapshot();
+        return;
+      }
+
+      const remoteState = normalizeMcatFoundationState(data.state);
+      const remoteActiveSession = normalizeActiveMcatSession(data.active_session);
+      const localState = stateRef.current;
+      const localActiveSession = activeSessionRef.current;
+      if (shouldUseRemoteSnapshot(remoteState, localState, remoteActiveSession, localActiveSession)) {
+        setState(remoteState);
+        saveMcatFoundationState(remoteState);
+        setActiveSession(remoteActiveSession);
+        saveActiveSession(remoteActiveSession);
+        setSyncStatus("synced");
+        return;
+      }
+
+      await createRemoteSnapshot();
+    };
+
+    if (sessionLoading) {
+      return () => {
+        active = false;
+      };
+    }
+
+    if (!supabase || !hasSupabaseConfig || !userId) {
+      remoteLoadedForUserRef.current = null;
+      return () => {
+        active = false;
+      };
+    }
+
+    void loadRemoteSnapshot();
+
+    return () => {
+      active = false;
+    };
+  }, [hasSupabaseConfig, sessionLoading, userId]);
+
+  useEffect(() => {
+    if (!supabase || !userId || sessionLoading || remoteLoadedForUserRef.current !== userId) {
+      return;
+    }
+
+    const supabaseClient = supabase;
+    const saveSequence = saveSequenceRef.current + 1;
+    saveSequenceRef.current = saveSequence;
+
+    const timeout = window.setTimeout(() => {
+      setSyncStatus("saving");
+      setSyncError(null);
+
+      void (async () => {
+        const { error } = await supabaseClient
+          .from("mcat_foundation_states")
+          .upsert(
+            {
+              user_id: userId,
+              state: { ...state, updatedAt: new Date().toISOString() },
+              active_session: activeSession,
+            },
+            { onConflict: "user_id" },
+          );
+
+        if (saveSequenceRef.current !== saveSequence) return;
+
+        if (error) {
+          setSyncStatus("error");
+          setSyncError(error.message);
+          return;
+        }
+
+        setSyncStatus("synced");
+      })();
+    }, MCAT_SYNC_DEBOUNCE_MS);
+
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [activeSession, sessionLoading, state, userId]);
 
   useEffect(() => {
     if (!activeSession?.isRunning) {
@@ -488,6 +678,12 @@ export default function McatFoundationPage() {
   }, [state.carsEntries]);
 
   const goalPct = Math.min(100, Math.round((todayMinutes / DAILY_GOAL_MINUTES) * 100));
+  const visibleSyncStatus: McatSyncStatus =
+    sessionLoading || syncStatus === "loading"
+      ? "loading"
+      : !hasSupabaseConfig || !userId
+        ? "local"
+        : syncStatus;
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -499,9 +695,20 @@ export default function McatFoundationPage() {
               Foundation Builder mode for Khan MCAT topics, early coursework, mistake review, CARS reps, and retests.
             </p>
           </div>
-          <span className="rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
-            {state.stage}
-          </span>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
+              {state.stage}
+            </span>
+            <span
+              className={cn(
+                "rounded-full border px-3 py-1 text-xs font-semibold",
+                syncClass(visibleSyncStatus, userId),
+              )}
+              title={visibleSyncStatus === "error" ? syncError ?? undefined : undefined}
+            >
+              {syncLabel(visibleSyncStatus, hasSupabaseConfig, userId)}
+            </span>
+          </div>
         </div>
       </header>
 

@@ -145,12 +145,32 @@ export type ActiveMcatSession = {
   startedAt: number;
 };
 
+export function normalizeActiveMcatSession(value: unknown): ActiveMcatSession | null {
+  if (!value || typeof value !== "object") return null;
+  const session = value as Partial<ActiveMcatSession>;
+  if (
+    typeof session.topicId !== "string" ||
+    typeof session.elapsedMs !== "number" ||
+    typeof session.isRunning !== "boolean"
+  ) {
+    return null;
+  }
+
+  return {
+    topicId: session.topicId,
+    elapsedMs: Math.max(0, session.elapsedMs),
+    isRunning: session.isRunning,
+    lastResumedAt: typeof session.lastResumedAt === "number" ? session.lastResumedAt : null,
+    startedAt: typeof session.startedAt === "number" ? session.startedAt : Date.now(),
+  };
+}
+
 export function loadActiveSession(): ActiveMcatSession | null {
   if (typeof window === "undefined") return null;
   const raw = window.localStorage.getItem(ACTIVE_SESSION_KEY);
   if (!raw) return null;
   try {
-    return JSON.parse(raw) as ActiveMcatSession;
+    return normalizeActiveMcatSession(JSON.parse(raw));
   } catch {
     return null;
   }
@@ -482,9 +502,13 @@ export function createDefaultMcatFoundationState(): McatFoundationState {
   };
 }
 
-function normalizeState(state: McatFoundationState): McatFoundationState {
+export function normalizeMcatFoundationState(value: unknown): McatFoundationState {
+  if (!value || typeof value !== "object") return createDefaultMcatFoundationState();
+
+  const state = value as Partial<McatFoundationState>;
   const seeded = getSeedMcatTopics();
-  const existingById = new Map(state.topics.map((topic) => [topic.id, topic]));
+  const existingTopics = Array.isArray(state.topics) ? state.topics : [];
+  const existingById = new Map(existingTopics.map((topic) => [topic.id, topic]));
   const topics = seeded.map((topic) => {
     const existing = existingById.get(topic.id);
     if (!existing) return topic;
@@ -511,8 +535,25 @@ function normalizeState(state: McatFoundationState): McatFoundationState {
     sessions: Array.isArray(state.sessions) ? state.sessions : [],
     errors: Array.isArray(state.errors) ? state.errors : [],
     carsEntries: Array.isArray(state.carsEntries) ? state.carsEntries : [],
-    updatedAt: state.updatedAt ?? new Date().toISOString(),
+    updatedAt: typeof state.updatedAt === "string" ? state.updatedAt : new Date().toISOString(),
   };
+}
+
+export function hasMcatFoundationProgress(state: McatFoundationState) {
+  return (
+    state.sessions.length > 0 ||
+    state.errors.length > 0 ||
+    state.carsEntries.length > 0 ||
+    state.topics.some(
+      (topic) =>
+        topic.status !== "Not learned yet" ||
+        topic.questionsAttempted > 0 ||
+        topic.questionsCorrect > 0 ||
+        topic.flashcardsDue > 0 ||
+        Boolean(topic.lastReviewed) ||
+        Boolean(topic.lastRetested),
+    )
+  );
 }
 
 export function loadMcatFoundationState(): McatFoundationState {
@@ -522,7 +563,7 @@ export function loadMcatFoundationState(): McatFoundationState {
   if (!raw) return createDefaultMcatFoundationState();
 
   try {
-    return normalizeState(JSON.parse(raw) as McatFoundationState);
+    return normalizeMcatFoundationState(JSON.parse(raw));
   } catch {
     return createDefaultMcatFoundationState();
   }

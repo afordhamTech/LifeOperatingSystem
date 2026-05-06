@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CalendarClock,
   CalendarDays,
@@ -37,6 +37,18 @@ import {
 } from "@/lib/calendar-system";
 import { buildDayPlan, loadTasks, type Task } from "@/lib/task-system";
 import { toDateKey } from "@/lib/date-helpers";
+import { useSupabaseSession } from "@/hooks/useSupabaseSession";
+import {
+  buildDailyPlanPayload,
+  deleteCalendarAnchor,
+  fetchCalendarAnchors,
+  fetchUniversalTasks,
+  getSyncLabel,
+  getSyncTone,
+  type LifeeeSyncStatus,
+  upsertCalendarAnchor,
+  upsertDailyPlan,
+} from "@/lib/lifeee-persistence";
 
 type View = "today" | "week" | "month" | "agenda";
 
@@ -62,9 +74,14 @@ function readEnergy(): number {
 }
 
 export default function CalendarPage() {
+  const { hasSupabaseConfig, isLoading: sessionLoading, userId } = useSupabaseSession();
   const today = useMemo(() => toDateKey(), []);
   const [anchors, setAnchors] = useState<CalendarAnchor[]>(() => loadAnchors());
   const [tasks, setTasks] = useState<Task[]>(() => loadTasks());
+  const remoteLoadedRef = useRef(false);
+  const saveSequenceRef = useRef(0);
+  const [syncStatus, setSyncStatus] = useState<LifeeeSyncStatus>("local");
+  const [syncError, setSyncError] = useState<string | null>(null);
   const [view, setView] = useState<View>("today");
   const [activeDate, setActiveDate] = useState<string>(today);
   const [currentEnergy] = useState<number>(readEnergy());
@@ -90,10 +107,58 @@ export default function CalendarPage() {
     saveAnchors(anchors);
   }, [anchors]);
 
-  // Refresh tasks when the page mounts so the bridge picks up new captures.
   useEffect(() => {
-    setTasks(loadTasks());
-  }, []);
+    let active = true;
+
+    const loadPersistedCalendar = async () => {
+      if (sessionLoading) return;
+
+      if (!hasSupabaseConfig || !userId) {
+        remoteLoadedRef.current = false;
+        if (!active) return;
+        setAnchors(loadAnchors());
+        setTasks(loadTasks());
+        setSyncStatus(hasSupabaseConfig ? "waiting" : "local");
+        setSyncError(null);
+        return;
+      }
+
+      setSyncStatus("loading");
+      setSyncError(null);
+
+      try {
+        const [remoteAnchors, remoteTasks] = await Promise.all([
+          fetchCalendarAnchors(userId),
+          fetchUniversalTasks(userId),
+        ]);
+        const localAnchors = loadAnchors();
+        const nextAnchors =
+          remoteAnchors.length === 0 && localAnchors.length > 0
+            ? await Promise.all(
+                localAnchors.map((anchor) => upsertCalendarAnchor(userId, anchor)),
+              )
+            : remoteAnchors;
+
+        if (!active) return;
+        remoteLoadedRef.current = true;
+        setAnchors(nextAnchors);
+        setTasks(remoteTasks);
+        saveAnchors(nextAnchors);
+        setSyncStatus("saved");
+      } catch (error) {
+        if (!active) return;
+        remoteLoadedRef.current = false;
+        setSyncStatus("error");
+        setSyncError(error instanceof Error ? error.message : "Unable to load calendar.");
+      }
+    };
+
+    void loadPersistedCalendar();
+
+    return () => {
+      active = false;
+    };
+  }, [hasSupabaseConfig, sessionLoading, userId]);
 
   const onDayAnchors = useMemo(
     () =>
@@ -125,17 +190,58 @@ export default function CalendarPage() {
     const next = makeAnchor({ ...draft, title: draft.title.trim() });
     setAnchors((prev) => [next, ...prev]);
     setDraft((d) => ({ ...d, title: "", prep: "", follow_up: "", notes: "" }));
+    void persistAnchor(next);
   };
 
-  const removeAnchor = (id: string) =>
-    setAnchors((prev) => prev.filter((a) => a.id !== id));
+  const persistAnchor = async (anchor: CalendarAnchor) => {
+    if (!userId || !remoteLoadedRef.current) {
+      setSyncStatus(hasSupabaseConfig ? "waiting" : "local");
+      return;
+    }
 
-  const updateAnchor = (id: string, patch: Partial<CalendarAnchor>) =>
-    setAnchors((prev) =>
-      prev.map((a) =>
-        a.id === id ? { ...a, ...patch, updated_at: new Date().toISOString() } : a,
-      ),
-    );
+    const saveSequence = saveSequenceRef.current + 1;
+    saveSequenceRef.current = saveSequence;
+    setSyncStatus("saving");
+    setSyncError(null);
+
+    try {
+      const savedAnchor = await upsertCalendarAnchor(userId, anchor);
+      if (saveSequenceRef.current !== saveSequence) return;
+      setAnchors((current) =>
+        current.map((item) => (item.id === savedAnchor.id ? savedAnchor : item)),
+      );
+      setSyncStatus("saved");
+    } catch (error) {
+      if (saveSequenceRef.current !== saveSequence) return;
+      setSyncStatus("error");
+      setSyncError(error instanceof Error ? error.message : "Unable to save calendar anchor.");
+    }
+  };
+
+  const removeAnchor = (id: string) => {
+    setAnchors((prev) => prev.filter((a) => a.id !== id));
+    if (!userId || !remoteLoadedRef.current) {
+      setSyncStatus(hasSupabaseConfig ? "waiting" : "local");
+      return;
+    }
+
+    setSyncStatus("saving");
+    setSyncError(null);
+    void deleteCalendarAnchor(userId, id)
+      .then(() => setSyncStatus("saved"))
+      .catch((error: unknown) => {
+        setSyncStatus("error");
+        setSyncError(error instanceof Error ? error.message : "Unable to delete calendar anchor.");
+      });
+  };
+
+  const updateAnchor = (id: string, patch: Partial<CalendarAnchor>) => {
+    const current = anchors.find((anchor) => anchor.id === id);
+    if (!current) return;
+    const nextAnchor = { ...current, ...patch, updated_at: new Date().toISOString() };
+    setAnchors((prev) => prev.map((a) => (a.id === id ? nextAnchor : a)));
+    void persistAnchor(nextAnchor);
+  };
 
   const copy = async (key: string, text: string) => {
     try {
@@ -205,6 +311,48 @@ export default function CalendarPage() {
   };
 
   const loops = useMemo(() => listRecurringLoops(new Date(activeDate)), [activeDate]);
+  const visibleSyncStatus: LifeeeSyncStatus = sessionLoading
+    ? "loading"
+    : !hasSupabaseConfig
+      ? "local"
+      : !userId
+        ? "waiting"
+        : syncStatus;
+
+  useEffect(() => {
+    if (!userId || sessionLoading || !remoteLoadedRef.current) return;
+
+    const saveSequence = saveSequenceRef.current + 1;
+    saveSequenceRef.current = saveSequence;
+    const timeout = window.setTimeout(() => {
+      setSyncStatus("saving");
+      setSyncError(null);
+
+      const payload = buildDailyPlanPayload({
+        date: activeDate,
+        plan,
+        realityScore: reality.score,
+        mainBottleneck: reality.recommendations[0] ?? null,
+        shutdownTime: available.bestShutdownTarget,
+      });
+
+      void upsertDailyPlan(userId, payload)
+        .then(() => {
+          if (saveSequenceRef.current === saveSequence) {
+            setSyncStatus("saved");
+          }
+        })
+        .catch((error: unknown) => {
+          if (saveSequenceRef.current !== saveSequence) return;
+          setSyncStatus("error");
+          setSyncError(error instanceof Error ? error.message : "Unable to save daily plan.");
+        });
+    }, 800);
+
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [activeDate, available.bestShutdownTarget, plan, reality.recommendations, reality.score, sessionLoading, userId]);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -216,6 +364,12 @@ export default function CalendarPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <span
+            className={`rounded-full border px-3 py-2 text-xs font-semibold ${getSyncTone(visibleSyncStatus)}`}
+            title={visibleSyncStatus === "error" ? syncError ?? undefined : undefined}
+          >
+            {getSyncLabel(visibleSyncStatus)}
+          </span>
           <button
             onClick={copyPlanningPrompt}
             className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm hover:bg-muted/70"
