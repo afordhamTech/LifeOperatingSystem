@@ -1,15 +1,41 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   BookOpenCheck,
   CalendarClock,
   Check,
+  CheckCircle2,
+  ChevronDown,
+  Circle,
   Clipboard,
+  Clock,
+  Filter,
+  Flag,
   FlaskConical,
-  ListChecks,
+  Layers,
+  Pause,
+  Play,
+  Plus,
   RotateCcw,
+  Search,
+  Square,
   Target,
+  Trash2,
+  TrendingUp,
+  X,
 } from "lucide-react";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip as RechartsTooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import {
   CARS_ERROR_TYPES,
   MCAT_ERROR_TYPES,
@@ -17,11 +43,24 @@ import {
   MCAT_TOPIC_STATUSES,
   MCAT_TUTOR_PROMPT,
   MCAT_WEEKLY_REVIEW_PROMPT,
+  activeSessionElapsedMs,
+  getDailyMinutes,
+  getDailyMinutesSeries,
   getMcatDailyNextMove,
   getMcatSummary,
+  getMistakeBreakdown,
+  getStudyStreak,
   getTodayDateKey,
+  getTopicAccuracy,
+  getTopicErrors,
+  getTopicSessions,
+  getWeeklyAccuracySeries,
+  isCarsTopic,
+  loadActiveSession,
   loadMcatFoundationState,
+  saveActiveSession,
   saveMcatFoundationState,
+  type ActiveMcatSession,
   type AnyMcatErrorType,
   type CarsErrorType,
   type McatFoundationState,
@@ -29,10 +68,26 @@ import {
   type McatTopic,
   type McatTopicStatus,
 } from "@/lib/mcat-foundation";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { cn } from "@/lib/utils";
 
-type CopyState = "tutor" | "weekly" | null;
+const DAILY_GOAL_MINUTES = 60;
 
-type SessionForm = {
+type LogDialogPrefill = {
+  topicId: string;
+  minutes: number;
+} | null;
+
+type SessionFormState = {
   topicId: string;
   minutes: number;
   questionsAttempted: number;
@@ -44,13 +99,13 @@ type SessionForm = {
   flashcardsMade: number;
 };
 
-type ErrorForm = {
+type ErrorFormState = {
   topicId: string;
   type: AnyMcatErrorType;
   note: string;
 };
 
-type CarsForm = {
+type CarsFormState = {
   passages: number;
   questionsAttempted: number;
   questionsCorrect: number;
@@ -65,30 +120,36 @@ function makeId(prefix: string) {
 }
 
 function priorityClass(label: McatPriorityLabel) {
-  if (label === "Study Now") return "bg-[#6b87ae]/10 text-[#6b87ae] border-[#6b87ae]/25";
-  if (label === "CARS Always Available") return "bg-[#9a7bbd]/10 text-[#8b6eb0] border-[#9a7bbd]/25";
-  if (label === "Preview Lightly") return "bg-[#c39a4e]/10 text-[#a9813f] border-[#c39a4e]/25";
-  if (label === "Passage Practice Later") return "bg-[#8c8478]/10 text-[#6f685f] border-[#8c8478]/20";
-  return "bg-[#6f7f8f]/10 text-[#5d6d7e] border-[#6f7f8f]/20";
+  if (label === "Study Now") return "bg-primary/10 text-primary border-primary/25";
+  if (label === "CARS Always Available") return "bg-violet-500/10 text-violet-600 border-violet-500/25 dark:text-violet-300";
+  if (label === "Preview Lightly") return "bg-amber-500/10 text-amber-700 border-amber-500/25 dark:text-amber-300";
+  if (label === "Passage Practice Later") return "bg-muted text-muted-foreground border-border";
+  return "bg-muted text-muted-foreground border-border";
 }
 
-function statusClass(status: McatTopicStatus) {
-  if (status === "MCAT ready" || status === "Practice ready") return "text-[#6a9a74]";
-  if (status === "Stable" || status === "Practiced") return "text-[#6b87ae]";
-  if (status === "Reviewed" || status === "Learning now") return "text-[#c39a4e]";
-  return "text-[#8c8478]";
+function statusBadge(status: McatTopicStatus) {
+  if (status === "MCAT ready" || status === "Practice ready") return "bg-emerald-500/10 text-emerald-700 border-emerald-500/25 dark:text-emerald-300";
+  if (status === "Stable" || status === "Practiced") return "bg-primary/10 text-primary border-primary/25";
+  if (status === "Reviewed" || status === "Learning now") return "bg-amber-500/10 text-amber-700 border-amber-500/25 dark:text-amber-300";
+  return "bg-muted text-muted-foreground border-border";
 }
 
 function formatAccuracy(correct: number, attempted: number) {
-  if (attempted <= 0) return "0%";
+  if (attempted <= 0) return "—";
   return `${Math.round((correct / attempted) * 100)}%`;
 }
 
-function getTopicById(topics: McatTopic[], topicId: string) {
-  return topics.find((topic) => topic.id === topicId) ?? topics[0] ?? null;
+function formatHms(ms: number) {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  const pad = (v: number) => v.toString().padStart(2, "0");
+  if (h > 0) return `${h}:${pad(m)}:${pad(s)}`;
+  return `${pad(m)}:${pad(s)}`;
 }
 
-function nextStatusAfterSession(form: SessionForm): McatTopicStatus {
+function nextStatusAfterSession(form: SessionFormState): McatTopicStatus {
   const accuracy = form.questionsAttempted > 0 ? form.questionsCorrect / form.questionsAttempted : 0;
   if (accuracy >= 0.85 && form.confidenceAfter >= 8) return "Practice ready";
   if (accuracy >= 0.7 && form.confidenceAfter >= 6) return "Practiced";
@@ -110,11 +171,24 @@ function copyText(text: string, onCopied: () => void) {
     .finally(onCopied);
 }
 
+const CHART_COLORS = ["#6b87ae", "#9a7bbd", "#c39a4e", "#6a9a74", "#c97a73", "#8c8478", "#5d6d7e"];
+
 export default function McatFoundationPage() {
   const [state, setState] = useState<McatFoundationState>(() => loadMcatFoundationState());
+  const [activeSession, setActiveSession] = useState<ActiveMcatSession | null>(() => loadActiveSession());
+  const [tickNonce, setTickNonce] = useState(0);
+  const [activeTab, setActiveTab] = useState("today");
+  const [logDialogOpen, setLogDialogOpen] = useState(false);
+  const [logPrefill, setLogPrefill] = useState<LogDialogPrefill>(null);
+  const [topicDetailId, setTopicDetailId] = useState<string | null>(null);
+  const [copied, setCopied] = useState<"tutor" | "weekly" | null>(null);
+  const tickRef = useRef<number | null>(null);
+
   const firstTopicId = state.topics[0]?.id ?? "";
-  const [copied, setCopied] = useState<CopyState>(null);
-  const [sessionForm, setSessionForm] = useState<SessionForm>({
+  const studyNowTopic =
+    state.topics.find((t) => t.priorityLabel === "Study Now") ?? state.topics[0] ?? null;
+
+  const [sessionForm, setSessionForm] = useState<SessionFormState>(() => ({
     topicId: firstTopicId,
     minutes: 35,
     questionsAttempted: 10,
@@ -124,60 +198,81 @@ export default function McatFoundationPage() {
     mistakeTypes: [],
     notes: "",
     flashcardsMade: 5,
-  });
-  const [errorForm, setErrorForm] = useState<ErrorForm>({
+  }));
+  const [errorForm, setErrorForm] = useState<ErrorFormState>(() => ({
     topicId: firstTopicId,
     type: "Never learned",
     note: "",
-  });
-  const [carsForm, setCarsForm] = useState<CarsForm>({
+  }));
+  const [carsForm, setCarsForm] = useState<CarsFormState>(() => ({
     passages: 1,
     questionsAttempted: 6,
     questionsCorrect: 0,
     minutes: 12,
     errorTypes: [],
-  });
+  }));
 
+  // Persist data state
   useEffect(() => {
     saveMcatFoundationState(state);
   }, [state]);
+
+  // Persist + tick active session
+  useEffect(() => {
+    saveActiveSession(activeSession);
+  }, [activeSession]);
+
+  useEffect(() => {
+    if (!activeSession?.isRunning) {
+      if (tickRef.current != null) {
+        window.clearInterval(tickRef.current);
+        tickRef.current = null;
+      }
+      return;
+    }
+    tickRef.current = window.setInterval(() => setTickNonce((n) => n + 1), 1000);
+    return () => {
+      if (tickRef.current != null) {
+        window.clearInterval(tickRef.current);
+        tickRef.current = null;
+      }
+    };
+  }, [activeSession?.isRunning]);
 
   const summary = useMemo(() => getMcatSummary(state), [state]);
   const todayMove = useMemo(
     () => getMcatDailyNextMove(state, { academicRisk: 0, sleepReadiness: 8 }),
     [state],
   );
-  const selectedTopic = getTopicById(state.topics, sessionForm.topicId);
+  const streak = useMemo(() => getStudyStreak(state), [state]);
+  const todayMinutes = useMemo(() => getDailyMinutes(state, todayKey), [state]);
+  const dailySeries = useMemo(() => getDailyMinutesSeries(state, 14), [state]);
+  const weeklyAccuracy = useMemo(() => getWeeklyAccuracySeries(state, 6), [state]);
+  const mistakeBreakdown = useMemo(() => getMistakeBreakdown(state, 30), [state]);
   const topicById = useMemo(
     () => new Map(state.topics.map((topic) => [topic.id, topic])),
     [state.topics],
   );
-  const topicsByUnit = useMemo(() => {
-    return state.topics.reduce<Record<string, McatTopic[]>>((groups, topic) => {
-      groups[topic.unit] = [...(groups[topic.unit] ?? []), topic];
-      return groups;
-    }, {});
-  }, [state.topics]);
+  const todaySessions = useMemo(
+    () => state.sessions.filter((s) => s.date === todayKey),
+    [state.sessions],
+  );
+  const todayCars = useMemo(
+    () => state.carsEntries.filter((e) => e.date === todayKey),
+    [state.carsEntries],
+  );
   const studyQueue = summary.scoredTopics
     .filter(({ topic }) => topic.priorityLabel !== "Delay Until Coursework")
-    .slice(0, 10);
-  const delayedTopics = state.topics.filter(
-    (topic) => topic.priorityLabel === "Delay Until Coursework",
-  );
+    .slice(0, 8);
   const retestQueue = [...summary.scoredTopics]
     .filter(({ topic }) => topic.priorityLabel !== "Delay Until Coursework")
     .sort((a, b) => b.retestPriority - a.retestPriority)
     .slice(0, 8);
 
-  const weeklyStats = {
-    topicsStudied: summary.topicsStudiedThisWeek.join(", ") || "None yet",
-    sessions: summary.sessionsThisWeek.length,
-    minutes: summary.minutesThisWeek,
-    accuracy: formatAccuracy(summary.questionsCorrect, summary.questionsAttempted),
-    mistakeTypes: Object.entries(summary.mistakeTypeCounts)
-      .map(([type, count]) => `${type}: ${count}`)
-      .join(", ") || "None logged",
-  };
+  const elapsedMs = activeSession ? activeSessionElapsedMs(activeSession) : 0;
+  const activeTopic = activeSession ? topicById.get(activeSession.topicId) ?? null : null;
+  // touch tickNonce so ESLint doesn't think it's unused — re-render is the side effect
+  void tickNonce;
 
   const updateTopic = (topicId: string, patch: Partial<McatTopic>) => {
     setState((current) => ({
@@ -188,10 +283,72 @@ export default function McatFoundationPage() {
     }));
   };
 
-  const addSession = () => {
-    if (!selectedTopic) return;
-    const attempted = Math.max(0, sessionForm.questionsAttempted);
-    const correct = Math.min(Math.max(0, sessionForm.questionsCorrect), attempted);
+  const startSession = (topicId: string) => {
+    setActiveSession({
+      topicId,
+      elapsedMs: 0,
+      isRunning: true,
+      lastResumedAt: Date.now(),
+      startedAt: Date.now(),
+    });
+    setActiveTab("today");
+  };
+
+  const pauseSession = () => {
+    setActiveSession((current) => {
+      if (!current || !current.isRunning) return current;
+      return {
+        ...current,
+        elapsedMs: activeSessionElapsedMs(current),
+        isRunning: false,
+        lastResumedAt: null,
+      };
+    });
+  };
+
+  const resumeSession = () => {
+    setActiveSession((current) => {
+      if (!current || current.isRunning) return current;
+      return {
+        ...current,
+        isRunning: true,
+        lastResumedAt: Date.now(),
+      };
+    });
+  };
+
+  const stopSession = () => {
+    if (!activeSession) return;
+    const elapsed = activeSessionElapsedMs(activeSession);
+    const minutes = Math.max(1, Math.round(elapsed / 60000));
+    setLogPrefill({ topicId: activeSession.topicId, minutes });
+    setSessionForm((current) => ({ ...current, topicId: activeSession.topicId, minutes }));
+    setLogDialogOpen(true);
+  };
+
+  const cancelSession = () => {
+    setActiveSession(null);
+  };
+
+  const openLogDialog = (prefill?: LogDialogPrefill) => {
+    if (prefill) {
+      setLogPrefill(prefill);
+      setSessionForm((current) => ({
+        ...current,
+        topicId: prefill.topicId,
+        minutes: prefill.minutes,
+      }));
+    } else {
+      setLogPrefill(null);
+    }
+    setLogDialogOpen(true);
+  };
+
+  const submitLogSession = () => {
+    const topic = topicById.get(sessionForm.topicId);
+    if (!topic) return;
+    const attempted = Math.max(0, Math.floor(sessionForm.questionsAttempted));
+    const correct = Math.min(Math.max(0, Math.floor(sessionForm.questionsCorrect)), attempted);
     const session = {
       ...sessionForm,
       id: makeId("mcat-session"),
@@ -203,20 +360,20 @@ export default function McatFoundationPage() {
     setState((current) => ({
       ...current,
       sessions: [session, ...current.sessions],
-      topics: current.topics.map((topic) => {
-        if (topic.id !== session.topicId) return topic;
-        const nextAttempted = topic.questionsAttempted + attempted;
-        const nextCorrect = topic.questionsCorrect + correct;
+      topics: current.topics.map((t) => {
+        if (t.id !== session.topicId) return t;
+        const nextAttempted = t.questionsAttempted + attempted;
+        const nextCorrect = t.questionsCorrect + correct;
         const accuracy = attempted > 0 ? correct / attempted : 0;
         return {
-          ...topic,
+          ...t,
           status: nextStatusAfterSession(sessionForm),
           questionsAttempted: nextAttempted,
           questionsCorrect: nextCorrect,
           explanationConfidence: sessionForm.confidenceAfter,
-          weakness: Math.max(1, topic.weakness + (accuracy < 0.6 ? 1 : -0.5)),
-          retestUrgency: Math.min(10, topic.retestUrgency + (accuracy < 0.7 ? 1 : 0)),
-          flashcardsDue: topic.flashcardsDue + sessionForm.flashcardsMade,
+          weakness: Math.max(1, t.weakness + (accuracy < 0.6 ? 1 : -0.5)),
+          retestUrgency: Math.min(10, t.retestUrgency + (accuracy < 0.7 ? 1 : 0)),
+          flashcardsDue: t.flashcardsDue + sessionForm.flashcardsMade,
           lastReviewed: todayKey,
         };
       }),
@@ -228,6 +385,9 @@ export default function McatFoundationPage() {
       mistakeTypes: [],
       notes: "",
     }));
+    setLogPrefill(null);
+    setLogDialogOpen(false);
+    setActiveSession(null);
   };
 
   const addError = () => {
@@ -266,11 +426,14 @@ export default function McatFoundationPage() {
         {
           id: makeId("cars"),
           date: todayKey,
-          passages: carsForm.passages,
-          questionsAttempted: carsForm.questionsAttempted,
-          questionsCorrect: Math.min(carsForm.questionsCorrect, carsForm.questionsAttempted),
+          passages: Math.max(1, Math.floor(carsForm.passages)),
+          questionsAttempted: Math.max(0, Math.floor(carsForm.questionsAttempted)),
+          questionsCorrect: Math.max(
+            0,
+            Math.min(Math.floor(carsForm.questionsCorrect), Math.floor(carsForm.questionsAttempted)),
+          ),
           errorTypes: carsForm.errorTypes,
-          minutes: carsForm.minutes,
+          minutes: Math.max(0, Math.floor(carsForm.minutes)),
         },
         ...current.carsEntries,
       ],
@@ -278,425 +441,1588 @@ export default function McatFoundationPage() {
     setCarsForm((current) => ({ ...current, questionsCorrect: 0, errorTypes: [] }));
   };
 
+  const deleteSession = (id: string) => {
+    setState((current) => ({ ...current, sessions: current.sessions.filter((s) => s.id !== id) }));
+  };
+  const deleteError = (id: string) => {
+    setState((current) => ({ ...current, errors: current.errors.filter((e) => e.id !== id) }));
+  };
+  const toggleErrorResolved = (id: string) => {
+    setState((current) => ({
+      ...current,
+      errors: current.errors.map((e) => (e.id === id ? { ...e, resolved: !e.resolved } : e)),
+    }));
+  };
+  const deleteCarsEntry = (id: string) => {
+    setState((current) => ({
+      ...current,
+      carsEntries: current.carsEntries.filter((e) => e.id !== id),
+    }));
+  };
+
   const markRetested = (topicId: string) => {
+    const topic = topicById.get(topicId);
+    if (!topic) return;
     updateTopic(topicId, {
       status: "Stable",
       lastRetested: todayKey,
       lastReviewed: todayKey,
       retestSuccess: 8,
       retestUrgency: 2,
-      weakness: Math.max(1, (topicById.get(topicId)?.weakness ?? 5) - 1),
-      flashcardsDue: Math.max(0, (topicById.get(topicId)?.flashcardsDue ?? 0) - 5),
+      weakness: Math.max(1, topic.weakness - 1),
+      flashcardsDue: Math.max(0, topic.flashcardsDue - 5),
     });
   };
 
-  const toggleSessionMistake = (type: AnyMcatErrorType) => {
-    setSessionForm((current) => ({
-      ...current,
-      mistakeTypes: current.mistakeTypes.includes(type)
-        ? current.mistakeTypes.filter((item) => item !== type)
-        : [...current.mistakeTypes, type],
-    }));
-  };
-
-  const toggleCarsError = (type: CarsErrorType) => {
-    setCarsForm((current) => ({
-      ...current,
-      errorTypes: current.errorTypes.includes(type)
-        ? current.errorTypes.filter((item) => item !== type)
-        : [...current.errorTypes, type],
-    }));
-  };
-
-  const handleCopy = (kind: Exclude<CopyState, null>, text: string) => {
+  const handleCopy = (kind: "tutor" | "weekly", text: string) => {
     copyText(text, () => {
       setCopied(kind);
       window.setTimeout(() => setCopied(null), 1800);
     });
   };
 
+  const carsAccuracy = useMemo(() => {
+    const attempted = state.carsEntries.reduce((sum, e) => sum + e.questionsAttempted, 0);
+    const correct = state.carsEntries.reduce((sum, e) => sum + e.questionsCorrect, 0);
+    return formatAccuracy(correct, attempted);
+  }, [state.carsEntries]);
+
+  const goalPct = Math.min(100, Math.round((todayMinutes / DAILY_GOAL_MINUTES) * 100));
+
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <div className="border-b border-[#ddd4c6] pb-4">
-        <h1 className="text-2xl font-semibold text-[#25313c]">MCAT Foundation OS</h1>
-        <p className="mt-1 text-sm text-[#6f685f]">
-          Foundation Builder mode for Khan MCAT topics, early coursework, mistake review, CARS reps, and retests.
-        </p>
+      <header className="border-b border-border pb-4">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-semibold text-foreground">MCAT Foundation OS</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Foundation Builder mode for Khan MCAT topics, early coursework, mistake review, CARS reps, and retests.
+            </p>
+          </div>
+          <span className="rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
+            {state.stage}
+          </span>
+        </div>
+      </header>
+
+      <section className="grid grid-cols-2 gap-3 md:grid-cols-5">
+        <HeroStat
+          icon={<Flag size={14} />}
+          label="Streak"
+          value={`${streak} day${streak === 1 ? "" : "s"}`}
+          tone={streak >= 3 ? "good" : streak === 0 ? "muted" : "warn"}
+        />
+        <HeroStat
+          icon={<Clock size={14} />}
+          label="Today"
+          value={`${todayMinutes} / ${DAILY_GOAL_MINUTES} min`}
+          tone={goalPct >= 100 ? "good" : goalPct >= 50 ? "warn" : "muted"}
+          progress={goalPct}
+        />
+        <HeroStat
+          icon={<TrendingUp size={14} />}
+          label="Week accuracy"
+          value={summary.questionsAttempted > 0 ? `${summary.accuracy}%` : "—"}
+          sub={
+            summary.accuracyTrend !== 0
+              ? `${summary.accuracyTrend > 0 ? "+" : ""}${summary.accuracyTrend}% wow`
+              : undefined
+          }
+        />
+        <HeroStat
+          icon={<FlaskConical size={14} />}
+          label="CARS this wk"
+          value={`${summary.carsPassageCountThisWeek}`}
+          tone={summary.carsPassageCountThisWeek === 0 ? "warn" : "good"}
+        />
+        <HeroStat
+          icon={<Layers size={14} />}
+          label="Flashcards due"
+          value={`${summary.flashcardsDue}`}
+        />
+      </section>
+
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList className="grid w-full grid-cols-5 lg:w-auto lg:inline-flex">
+          <TabsTrigger value="today">Today</TabsTrigger>
+          <TabsTrigger value="practice">Practice</TabsTrigger>
+          <TabsTrigger value="topics">Topics</TabsTrigger>
+          <TabsTrigger value="cars">CARS</TabsTrigger>
+          <TabsTrigger value="review">Review</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="today" className="mt-4 space-y-4">
+          <ActiveSessionCard
+            activeSession={activeSession}
+            elapsedMs={elapsedMs}
+            activeTopic={activeTopic}
+            topics={state.topics}
+            onStart={startSession}
+            onPause={pauseSession}
+            onResume={resumeSession}
+            onStop={stopSession}
+            onCancel={cancelSession}
+            onChangeTopic={(topicId) =>
+              setActiveSession((current) =>
+                current ? { ...current, topicId } : current,
+              )
+            }
+            defaultTopicId={studyNowTopic?.id ?? firstTopicId}
+          />
+
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+            <div className="card-surface p-4">
+              <div className="mb-3 flex items-center gap-2">
+                <Target size={16} className="text-primary" />
+                <h2 className="text-sm font-semibold text-foreground">Today's Move</h2>
+              </div>
+              <div className="rounded-xl border border-primary/20 bg-primary/5 p-4">
+                <div className="text-base font-semibold text-foreground">{todayMove.title}</div>
+                <p className="mt-1 text-sm text-muted-foreground">{todayMove.detail}</p>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <span className="rounded-full border border-border bg-card px-2.5 py-1 text-xs text-muted-foreground">
+                    Topic: {todayMove.topic}
+                  </span>
+                  {(() => {
+                    const moveTopic =
+                      state.topics.find((t) => t.title === todayMove.topic) ?? studyNowTopic;
+                    if (!moveTopic) return null;
+                    return (
+                      <button
+                        className="btn-primary px-3 py-1.5"
+                        onClick={() => startSession(moveTopic.id)}
+                        disabled={Boolean(activeSession)}
+                      >
+                        <Play size={14} className="mr-1.5" />
+                        Start session
+                      </button>
+                    );
+                  })()}
+                </div>
+              </div>
+
+              <div className="mt-4">
+                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  Top study queue
+                </h3>
+                <div className="space-y-2">
+                  {studyQueue.slice(0, 4).map(({ topic, studyDecision }) => (
+                    <button
+                      key={topic.id}
+                      onClick={() => setTopicDetailId(topic.id)}
+                      className="flex w-full items-center justify-between gap-3 rounded-lg border border-border bg-card p-3 text-left transition-colors hover:bg-muted/60"
+                    >
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-semibold text-foreground">{topic.title}</div>
+                        <div className="mt-0.5 truncate text-xs text-muted-foreground">{topic.unit}</div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className={cn("rounded-full border px-2 py-0.5 text-[10px]", priorityClass(topic.priorityLabel))}>
+                          {topic.priorityLabel}
+                        </span>
+                        <span className="font-mono-data text-xs text-muted-foreground">
+                          {studyDecision.toFixed(1)}
+                        </span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="card-surface p-4">
+              <div className="mb-3 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <BookOpenCheck size={16} className="text-primary" />
+                  <h2 className="text-sm font-semibold text-foreground">Today's Log</h2>
+                </div>
+                <button
+                  className="btn-secondary px-2.5 py-1 text-xs"
+                  onClick={() => openLogDialog()}
+                >
+                  <Plus size={13} className="mr-1" />
+                  Log session
+                </button>
+              </div>
+
+              {todaySessions.length === 0 && todayCars.length === 0 ? (
+                <div className="empty-state">
+                  Nothing logged yet today. Start the timer above or log a session manually.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {todaySessions.map((session) => (
+                    <div
+                      key={session.id}
+                      className="flex items-center justify-between gap-3 rounded-lg border border-border bg-card p-3"
+                    >
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-semibold text-foreground">
+                          {topicById.get(session.topicId)?.title ?? "Unknown topic"}
+                        </div>
+                        <div className="mt-0.5 text-xs text-muted-foreground">
+                          {session.minutes} min · {formatAccuracy(session.questionsCorrect, session.questionsAttempted)} ·{" "}
+                          {session.questionsAttempted}Q
+                        </div>
+                      </div>
+                      <button
+                        className="text-muted-foreground hover:text-rose-600"
+                        onClick={() => deleteSession(session.id)}
+                        aria-label="Delete session"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  ))}
+                  {todayCars.map((entry) => (
+                    <div
+                      key={entry.id}
+                      className="flex items-center justify-between gap-3 rounded-lg border border-violet-500/20 bg-violet-500/5 p-3"
+                    >
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-semibold text-foreground">
+                          CARS · {entry.passages} passage{entry.passages === 1 ? "" : "s"}
+                        </div>
+                        <div className="mt-0.5 text-xs text-muted-foreground">
+                          {entry.minutes} min · {formatAccuracy(entry.questionsCorrect, entry.questionsAttempted)}
+                        </div>
+                      </div>
+                      <button
+                        className="text-muted-foreground hover:text-rose-600"
+                        onClick={() => deleteCarsEntry(entry.id)}
+                        aria-label="Delete CARS entry"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="card-surface p-4">
+            <div className="mb-3 flex items-center gap-2">
+              <CalendarClock size={16} className="text-primary" />
+              <h2 className="text-sm font-semibold text-foreground">Retest queue</h2>
+            </div>
+            {retestQueue.length === 0 ? (
+              <div className="empty-state">
+                Nothing to retest yet. Log a few sessions and retest priorities will fill in.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                {retestQueue.slice(0, 6).map(({ topic, retestPriority }) => (
+                  <div
+                    key={topic.id}
+                    className="flex items-center justify-between gap-3 rounded-lg border border-border bg-card p-3"
+                  >
+                    <button
+                      className="min-w-0 text-left"
+                      onClick={() => setTopicDetailId(topic.id)}
+                    >
+                      <div className="truncate text-sm font-semibold text-foreground">{topic.title}</div>
+                      <div className="mt-0.5 truncate text-xs text-muted-foreground">
+                        Priority {retestPriority.toFixed(1)} · last reviewed {topic.lastReviewed ?? "never"}
+                      </div>
+                    </button>
+                    <button
+                      className="btn-secondary whitespace-nowrap px-2.5 py-1 text-xs"
+                      onClick={() => markRetested(topic.id)}
+                    >
+                      <RotateCcw size={12} className="mr-1" />
+                      Retested
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="practice" className="mt-4 space-y-4">
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            <div className="card-surface p-4">
+              <div className="mb-3 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <BookOpenCheck size={16} className="text-primary" />
+                  <h2 className="text-sm font-semibold text-foreground">All sessions</h2>
+                </div>
+                <button className="btn-secondary px-2.5 py-1 text-xs" onClick={() => openLogDialog()}>
+                  <Plus size={13} className="mr-1" />
+                  Log session
+                </button>
+              </div>
+              {state.sessions.length === 0 ? (
+                <div className="empty-state">
+                  No sessions yet. Use the timer on Today or click "Log session".
+                </div>
+              ) : (
+                <div className="max-h-[480px] space-y-2 overflow-auto pr-1">
+                  {state.sessions.map((session) => (
+                    <div
+                      key={session.id}
+                      className="rounded-lg border border-border bg-card p-3 text-xs"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <button
+                          className="text-left"
+                          onClick={() => setTopicDetailId(session.topicId)}
+                        >
+                          <div className="text-sm font-semibold text-foreground">
+                            {topicById.get(session.topicId)?.title ?? "Unknown topic"}
+                          </div>
+                          <div className="mt-0.5 text-muted-foreground">
+                            {session.date} · {session.minutes} min ·{" "}
+                            {formatAccuracy(session.questionsCorrect, session.questionsAttempted)} ·{" "}
+                            {session.questionsAttempted}Q
+                          </div>
+                        </button>
+                        <button
+                          className="text-muted-foreground hover:text-rose-600"
+                          onClick={() => deleteSession(session.id)}
+                          aria-label="Delete session"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                      {session.mistakeTypes.length > 0 ? (
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {session.mistakeTypes.map((t) => (
+                            <span
+                              key={t}
+                              className="rounded-full border border-border bg-muted/60 px-2 py-0.5 text-[10px] text-muted-foreground"
+                            >
+                              {t}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
+                      {session.notes ? (
+                        <div className="mt-2 text-muted-foreground">{session.notes}</div>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="card-surface p-4">
+              <div className="mb-3 flex items-center gap-2">
+                <AlertCircle size={16} className="text-amber-600" />
+                <h2 className="text-sm font-semibold text-foreground">Error log</h2>
+              </div>
+              <div className="space-y-3">
+                <select
+                  className="input-dark w-full"
+                  value={errorForm.topicId}
+                  onChange={(event) =>
+                    setErrorForm((current) => ({ ...current, topicId: event.target.value }))
+                  }
+                >
+                  {state.topics.map((topic) => (
+                    <option key={topic.id} value={topic.id}>
+                      {topic.title}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  className="input-dark w-full"
+                  value={errorForm.type}
+                  onChange={(event) =>
+                    setErrorForm((current) => ({
+                      ...current,
+                      type: event.target.value as AnyMcatErrorType,
+                    }))
+                  }
+                >
+                  <optgroup label="MCAT">
+                    {MCAT_ERROR_TYPES.map((t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="CARS">
+                    {CARS_ERROR_TYPES.map((t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
+                  </optgroup>
+                </select>
+                <textarea
+                  className="input-dark min-h-20 w-full"
+                  placeholder="Write the exact miss or gap."
+                  value={errorForm.note}
+                  onChange={(event) => setErrorForm((current) => ({ ...current, note: event.target.value }))}
+                />
+                <button className="btn-secondary flex w-full items-center justify-center gap-2" onClick={addError}>
+                  <Plus size={15} />
+                  Add error
+                </button>
+              </div>
+
+              <div className="mt-4 max-h-[280px] space-y-2 overflow-auto pr-1">
+                {state.errors.length === 0 ? (
+                  <div className="empty-state">
+                    No errors logged. Classify each miss when it happens.
+                  </div>
+                ) : (
+                  state.errors.map((error) => (
+                    <div
+                      key={error.id}
+                      className={cn(
+                        "rounded-lg border p-3 text-xs",
+                        error.resolved
+                          ? "border-emerald-500/25 bg-emerald-500/5"
+                          : "border-border bg-card",
+                      )}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => toggleErrorResolved(error.id)}
+                            aria-label={error.resolved ? "Mark unresolved" : "Mark resolved"}
+                            className={cn(
+                              "transition-colors",
+                              error.resolved ? "text-emerald-600" : "text-muted-foreground hover:text-emerald-600",
+                            )}
+                          >
+                            {error.resolved ? <CheckCircle2 size={14} /> : <Circle size={14} />}
+                          </button>
+                          <span className="font-semibold text-foreground">{error.type}</span>
+                        </div>
+                        <button
+                          className="text-muted-foreground hover:text-rose-600"
+                          onClick={() => deleteError(error.id)}
+                          aria-label="Delete error"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                      <div className="mt-1 text-muted-foreground">
+                        <button onClick={() => setTopicDetailId(error.topicId)} className="underline-offset-2 hover:underline">
+                          {topicById.get(error.topicId)?.title ?? "Unknown topic"}
+                        </button>{" "}
+                        · {error.date}
+                      </div>
+                      {error.note ? <div className="mt-1 text-foreground/80">{error.note}</div> : null}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="topics" className="mt-4 space-y-4">
+          <TopicsTab
+            state={state}
+            onSelectTopic={setTopicDetailId}
+            onUpdateTopic={updateTopic}
+          />
+        </TabsContent>
+
+        <TabsContent value="cars" className="mt-4 space-y-4">
+          <CarsTab
+            state={state}
+            carsForm={carsForm}
+            setCarsForm={setCarsForm}
+            onSubmit={addCarsEntry}
+            onDelete={deleteCarsEntry}
+            carsAccuracy={carsAccuracy}
+            summary={summary}
+          />
+        </TabsContent>
+
+        <TabsContent value="review" className="mt-4 space-y-4">
+          <ReviewTab
+            summary={summary}
+            dailySeries={dailySeries}
+            weeklyAccuracy={weeklyAccuracy}
+            mistakeBreakdown={mistakeBreakdown}
+            onCopy={handleCopy}
+            copied={copied}
+          />
+        </TabsContent>
+      </Tabs>
+
+      <LogSessionDialog
+        open={logDialogOpen}
+        onOpenChange={(open) => {
+          setLogDialogOpen(open);
+          if (!open) setLogPrefill(null);
+        }}
+        form={sessionForm}
+        setForm={setSessionForm}
+        topics={state.topics}
+        prefill={logPrefill}
+        onSubmit={submitLogSession}
+      />
+
+      <TopicDetailDialog
+        topicId={topicDetailId}
+        state={state}
+        onClose={() => setTopicDetailId(null)}
+        onStart={(id) => {
+          setTopicDetailId(null);
+          startSession(id);
+        }}
+        onRetest={(id) => markRetested(id)}
+        onUpdateStatus={(id, status) => updateTopic(id, { status })}
+      />
+    </div>
+  );
+}
+
+/* ------------------------------- Hero stat ------------------------------- */
+
+function HeroStat({
+  icon,
+  label,
+  value,
+  sub,
+  tone = "neutral",
+  progress,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  sub?: string;
+  tone?: "good" | "warn" | "muted" | "neutral";
+  progress?: number;
+}) {
+  const toneClass =
+    tone === "good"
+      ? "text-emerald-700 dark:text-emerald-300"
+      : tone === "warn"
+        ? "text-amber-700 dark:text-amber-300"
+        : tone === "muted"
+          ? "text-muted-foreground"
+          : "text-foreground";
+  return (
+    <div className="card-surface p-3">
+      <div className="flex items-center gap-1.5 text-muted-foreground">
+        <span className="text-primary">{icon}</span>
+        <span className="text-[10px] uppercase tracking-wider">{label}</span>
+      </div>
+      <div className={cn("mt-1.5 text-base font-semibold", toneClass)}>{value}</div>
+      {sub ? <div className="mt-0.5 text-[11px] text-muted-foreground">{sub}</div> : null}
+      {typeof progress === "number" ? (
+        <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+          <div
+            className={cn(
+              "h-full rounded-full transition-all",
+              progress >= 100 ? "bg-emerald-600" : "bg-primary",
+            )}
+            style={{ width: `${Math.min(100, Math.max(0, progress))}%` }}
+          />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/* ----------------------------- Active session ---------------------------- */
+
+function ActiveSessionCard({
+  activeSession,
+  elapsedMs,
+  activeTopic,
+  topics,
+  onStart,
+  onPause,
+  onResume,
+  onStop,
+  onCancel,
+  onChangeTopic,
+  defaultTopicId,
+}: {
+  activeSession: ActiveMcatSession | null;
+  elapsedMs: number;
+  activeTopic: McatTopic | null;
+  topics: McatTopic[];
+  onStart: (topicId: string) => void;
+  onPause: () => void;
+  onResume: () => void;
+  onStop: () => void;
+  onCancel: () => void;
+  onChangeTopic: (topicId: string) => void;
+  defaultTopicId: string;
+}) {
+  if (!activeSession) {
+    return <IdleStartCard topics={topics} defaultTopicId={defaultTopicId} onStart={onStart} />;
+  }
+
+  return (
+    <div className="card-elevated p-5">
+      <div className="flex flex-wrap items-center gap-4">
+        <div
+          className={cn(
+            "flex h-12 w-12 items-center justify-center rounded-xl",
+            activeSession.isRunning
+              ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+              : "bg-amber-500/15 text-amber-700 dark:text-amber-300",
+          )}
+        >
+          {activeSession.isRunning ? <Play size={20} /> : <Pause size={20} />}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+            {activeSession.isRunning ? "In session" : "Paused"}
+          </div>
+          <select
+            className="input-dark mt-1 w-full max-w-md text-sm font-semibold"
+            value={activeSession.topicId}
+            onChange={(e) => onChangeTopic(e.target.value)}
+          >
+            {topics.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.title}
+              </option>
+            ))}
+          </select>
+          {activeTopic ? (
+            <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <span className={cn("rounded-full border px-2 py-0.5", priorityClass(activeTopic.priorityLabel))}>
+                {activeTopic.priorityLabel}
+              </span>
+              <span>{activeTopic.unit}</span>
+            </div>
+          ) : null}
+        </div>
+        <div className="flex flex-col items-end gap-2">
+          <div className="font-mono-data text-3xl font-semibold tabular-nums text-foreground">
+            {formatHms(elapsedMs)}
+          </div>
+          <div className="flex items-center gap-2">
+            {activeSession.isRunning ? (
+              <button className="btn-secondary px-3 py-1.5 text-xs" onClick={onPause}>
+                <Pause size={13} className="mr-1" />
+                Pause
+              </button>
+            ) : (
+              <button className="btn-secondary px-3 py-1.5 text-xs" onClick={onResume}>
+                <Play size={13} className="mr-1" />
+                Resume
+              </button>
+            )}
+            <button className="btn-primary px-3 py-1.5 text-xs" onClick={onStop}>
+              <Square size={13} className="mr-1" />
+              Log
+            </button>
+            <button
+              className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-rose-600"
+              onClick={onCancel}
+              aria-label="Cancel session"
+              title="Cancel without logging"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function IdleStartCard({
+  topics,
+  defaultTopicId,
+  onStart,
+}: {
+  topics: McatTopic[];
+  defaultTopicId: string;
+  onStart: (topicId: string) => void;
+}) {
+  const [pickerTopicId, setPickerTopicId] = useState(defaultTopicId);
+  return (
+    <div className="card-elevated p-5">
+      <div className="flex flex-wrap items-center gap-4">
+        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
+          <Play size={20} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <h2 className="text-base font-semibold text-foreground">Start a focused session</h2>
+          <p className="mt-0.5 text-sm text-muted-foreground">
+            Pick a topic, start the timer, and log it when you're done.
+          </p>
+        </div>
+        <div className="flex w-full items-center gap-2 sm:w-auto">
+          <select
+            className="input-dark min-w-0 flex-1 sm:w-72"
+            value={pickerTopicId}
+            onChange={(e) => setPickerTopicId(e.target.value)}
+          >
+            {topics
+              .filter((t) => t.priorityLabel !== "Delay Until Coursework")
+              .map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.title}
+                </option>
+              ))}
+          </select>
+          <button
+            className="btn-primary whitespace-nowrap"
+            onClick={() => onStart(pickerTopicId)}
+            disabled={!pickerTopicId}
+          >
+            <Play size={15} className="mr-1.5" />
+            Start
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* -------------------------------- Topics tab ------------------------------ */
+
+const SORT_OPTIONS = [
+  { value: "decision", label: "Study decision" },
+  { value: "weakness", label: "Weakness" },
+  { value: "alpha", label: "A → Z" },
+] as const;
+
+type SortKey = (typeof SORT_OPTIONS)[number]["value"];
+
+function TopicsTab({
+  state,
+  onSelectTopic,
+  onUpdateTopic,
+}: {
+  state: McatFoundationState;
+  onSelectTopic: (id: string) => void;
+  onUpdateTopic: (id: string, patch: Partial<McatTopic>) => void;
+}) {
+  const [search, setSearch] = useState("");
+  const [priorityFilter, setPriorityFilter] = useState<McatPriorityLabel | "all">("all");
+  const [statusFilter, setStatusFilter] = useState<McatTopicStatus | "all">("all");
+  const [sortKey, setSortKey] = useState<SortKey>("decision");
+  const [openUnits, setOpenUnits] = useState<Record<string, boolean>>({});
+
+  const summary = useMemo(() => getMcatSummary(state), [state]);
+  const decisionByTopicId = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const s of summary.scoredTopics) map.set(s.topic.id, s.studyDecision);
+    return map;
+  }, [summary.scoredTopics]);
+
+  const filtered = useMemo(() => {
+    const lower = search.trim().toLowerCase();
+    return state.topics.filter((topic) => {
+      if (lower && !topic.title.toLowerCase().includes(lower) && !topic.unit.toLowerCase().includes(lower)) return false;
+      if (priorityFilter !== "all" && topic.priorityLabel !== priorityFilter) return false;
+      if (statusFilter !== "all" && topic.status !== statusFilter) return false;
+      return true;
+    });
+  }, [state.topics, search, priorityFilter, statusFilter]);
+
+  const grouped = useMemo(() => {
+    const groups: Record<string, McatTopic[]> = {};
+    for (const topic of filtered) {
+      groups[topic.unit] = groups[topic.unit] ? [...groups[topic.unit], topic] : [topic];
+    }
+    for (const unit of Object.keys(groups)) {
+      groups[unit] = [...groups[unit]].sort((a, b) => {
+        if (sortKey === "weakness") return b.weakness - a.weakness;
+        if (sortKey === "alpha") return a.title.localeCompare(b.title);
+        return (decisionByTopicId.get(b.id) ?? 0) - (decisionByTopicId.get(a.id) ?? 0);
+      });
+    }
+    return groups;
+  }, [filtered, sortKey, decisionByTopicId]);
+
+  const toggleUnit = (unit: string) =>
+    setOpenUnits((current) => ({ ...current, [unit]: !current[unit] }));
+
+  const expandAll = () => {
+    const all: Record<string, boolean> = {};
+    for (const unit of Object.keys(grouped)) all[unit] = true;
+    setOpenUnits(all);
+  };
+  const collapseAll = () => setOpenUnits({});
+
+  const totalShown = filtered.length;
+
+  return (
+    <>
+      <div className="card-surface p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative min-w-[200px] flex-1">
+            <Search
+              size={14}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+            />
+            <input
+              type="text"
+              placeholder="Search topics or units"
+              className="input-dark pl-9"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+          <select
+            className="input-dark w-[180px]"
+            value={priorityFilter}
+            onChange={(e) => setPriorityFilter(e.target.value as typeof priorityFilter)}
+          >
+            <option value="all">All priorities</option>
+            {MCAT_PRIORITY_LABELS.map((label) => (
+              <option key={label} value={label}>
+                {label}
+              </option>
+            ))}
+          </select>
+          <select
+            className="input-dark w-[160px]"
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
+          >
+            <option value="all">All statuses</option>
+            {MCAT_TOPIC_STATUSES.map((status) => (
+              <option key={status} value={status}>
+                {status}
+              </option>
+            ))}
+          </select>
+          <select
+            className="input-dark w-[160px]"
+            value={sortKey}
+            onChange={(e) => setSortKey(e.target.value as SortKey)}
+          >
+            {SORT_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                Sort: {opt.label}
+              </option>
+            ))}
+          </select>
+          <div className="flex items-center gap-2">
+            <button className="btn-secondary px-2.5 py-1 text-xs" onClick={expandAll}>
+              Expand all
+            </button>
+            <button className="btn-secondary px-2.5 py-1 text-xs" onClick={collapseAll}>
+              Collapse
+            </button>
+          </div>
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <Filter size={12} />
+          <span>{totalShown} topic{totalShown === 1 ? "" : "s"} shown</span>
+          {(search || priorityFilter !== "all" || statusFilter !== "all") && (
+            <button
+              className="underline underline-offset-2 hover:text-foreground"
+              onClick={() => {
+                setSearch("");
+                setPriorityFilter("all");
+                setStatusFilter("all");
+              }}
+            >
+              Clear filters
+            </button>
+          )}
+        </div>
       </div>
 
-      <section className="grid grid-cols-1 gap-3 lg:grid-cols-[1.15fr_0.85fr]">
-        <div className="card-surface p-4">
-          <div className="mb-4 flex items-center justify-between gap-3">
-            <div>
-              <div className="flex items-center gap-2">
-                <Target size={16} className="text-[#6b87ae]" />
-                <h2 className="text-sm font-semibold text-[#25313c]">Current Stage</h2>
+      <div className="space-y-2">
+        {Object.entries(grouped).map(([unit, topics]) => {
+          const isOpen = openUnits[unit] ?? false;
+          const studyNowCount = topics.filter((t) => t.priorityLabel === "Study Now").length;
+          const delayedCount = topics.filter((t) => t.priorityLabel === "Delay Until Coursework").length;
+          return (
+            <Collapsible key={unit} open={isOpen} onOpenChange={() => toggleUnit(unit)}>
+              <div className="card-surface overflow-hidden">
+                <CollapsibleTrigger className="flex w-full items-center justify-between gap-3 p-4 text-left transition-colors hover:bg-muted/40">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <ChevronDown
+                      size={14}
+                      className={cn(
+                        "text-muted-foreground transition-transform",
+                        isOpen ? "rotate-0" : "-rotate-90",
+                      )}
+                    />
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-semibold text-foreground">{unit}</div>
+                      <div className="mt-0.5 flex flex-wrap gap-1.5 text-[11px] text-muted-foreground">
+                        <span>{topics.length} topics</span>
+                        {studyNowCount > 0 ? <span>· {studyNowCount} study now</span> : null}
+                        {delayedCount > 0 ? <span>· {delayedCount} delayed</span> : null}
+                      </div>
+                    </div>
+                  </div>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <div className="border-t border-border bg-muted/20 p-2">
+                    {topics.map((topic) => (
+                      <div
+                        key={topic.id}
+                        className="grid grid-cols-1 gap-2 rounded-lg p-2 text-sm transition-colors hover:bg-card md:grid-cols-[1fr_180px_140px_36px] md:items-center"
+                      >
+                        <button
+                          className="min-w-0 text-left"
+                          onClick={() => onSelectTopic(topic.id)}
+                        >
+                          <div className="truncate font-medium text-foreground">{topic.title}</div>
+                          <div className="mt-0.5 flex flex-wrap gap-1.5">
+                            <span className={cn("rounded-full border px-2 py-0.5 text-[10px]", priorityClass(topic.priorityLabel))}>
+                              {topic.priorityLabel}
+                            </span>
+                            <span className={cn("rounded-full border px-2 py-0.5 text-[10px]", statusBadge(topic.status))}>
+                              {topic.status}
+                            </span>
+                          </div>
+                        </button>
+                        <select
+                          className="input-dark text-xs"
+                          value={topic.status}
+                          onChange={(event) =>
+                            onUpdateTopic(topic.id, { status: event.target.value as McatTopicStatus })
+                          }
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {MCAT_TOPIC_STATUSES.map((status) => (
+                            <option key={status} value={status}>
+                              {status}
+                            </option>
+                          ))}
+                        </select>
+                        <div className="font-mono-data text-xs text-muted-foreground">
+                          {topic.questionsAttempted > 0
+                            ? `${formatAccuracy(topic.questionsCorrect, topic.questionsAttempted)} · ${topic.questionsAttempted}Q`
+                            : "no data"}
+                        </div>
+                        <div className="text-right">
+                          <span className="font-mono-data text-xs text-primary">
+                            {(decisionByTopicId.get(topic.id) ?? 0).toFixed(1)}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </CollapsibleContent>
               </div>
-              <p className="mt-1 text-xs text-[#6f685f]">
-                Rising sophomore after freshman year. Assume Gen Chem and light intro psych/science only.
-              </p>
-            </div>
-            <span className="rounded-full border border-[#6b87ae]/25 bg-[#6b87ae]/10 px-3 py-1 text-xs font-semibold text-[#6b87ae]">
-              {state.stage}
-            </span>
-          </div>
+            </Collapsible>
+          );
+        })}
+        {totalShown === 0 ? (
+          <div className="empty-state">No topics match your filters.</div>
+        ) : null}
+      </div>
+    </>
+  );
+}
 
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
-            <Metric label="Today's MCAT move" value={todayMove.title} />
-            <Metric label="Current best topic" value={summary.currentBestTopic?.title ?? "No topic"} />
-            <Metric label="Weakest topic" value={summary.weakestTopic?.title ?? "No topic"} />
-            <Metric label="Next retest" value={summary.nextRetest?.title ?? "No retest"} />
-          </div>
+/* --------------------------------- CARS tab ------------------------------- */
 
-          <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
-            <Metric label="CARS passages" value={String(summary.carsPassageCountThisWeek)} />
-            <Metric label="Accuracy trend" value={`${summary.accuracyTrend >= 0 ? "+" : ""}${summary.accuracyTrend}%`} />
-            <Metric label="Flashcards due" value={String(summary.flashcardsDue)} />
-            <Metric label="This week" value={`${summary.minutesThisWeek} min`} />
-          </div>
+function CarsTab({
+  state,
+  carsForm,
+  setCarsForm,
+  onSubmit,
+  onDelete,
+  carsAccuracy,
+  summary,
+}: {
+  state: McatFoundationState;
+  carsForm: CarsFormState;
+  setCarsForm: React.Dispatch<React.SetStateAction<CarsFormState>>;
+  onSubmit: () => void;
+  onDelete: (id: string) => void;
+  carsAccuracy: string;
+  summary: ReturnType<typeof getMcatSummary>;
+}) {
+  const passagesPerWeek = useMemo(() => {
+    const out: Array<{ label: string; passages: number }> = [];
+    const today = new Date();
+    for (let i = 5; i >= 0; i--) {
+      const ref = new Date(today);
+      ref.setDate(ref.getDate() - i * 7);
+      const start = new Date(ref);
+      const day = start.getDay();
+      start.setDate(start.getDate() - day + (day === 0 ? -6 : 1));
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(start);
+      end.setDate(end.getDate() + 7);
+      let passages = 0;
+      for (const entry of state.carsEntries) {
+        const d = new Date(`${entry.date}T00:00:00`);
+        if (d >= start && d < end) passages += entry.passages;
+      }
+      out.push({
+        label: start.toLocaleDateString(undefined, { month: "numeric", day: "numeric" }),
+        passages,
+      });
+    }
+    return out;
+  }, [state.carsEntries]);
+
+  const toggleErr = (t: CarsErrorType) =>
+    setCarsForm((current) => ({
+      ...current,
+      errorTypes: current.errorTypes.includes(t)
+        ? current.errorTypes.filter((x) => x !== t)
+        : [...current.errorTypes, t],
+    }));
+
+  return (
+    <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_1.1fr]">
+      <div className="card-surface p-4">
+        <div className="mb-3 flex items-center gap-2">
+          <FlaskConical size={16} className="text-violet-500" />
+          <h2 className="text-sm font-semibold text-foreground">Log a CARS session</h2>
         </div>
-
-        <div className="card-surface p-4">
-          <div className="mb-3 flex items-center gap-2">
-            <AlertCircle size={15} className="text-[#c39a4e]" />
-            <h2 className="text-sm font-semibold text-[#25313c]">What Not To Study Yet</h2>
-          </div>
-          <p className="mb-3 text-xs text-[#6f685f]">
-            These stay delayed until coursework gives you the scaffolding.
-          </p>
+        <div className="grid grid-cols-2 gap-3">
+          <NumberField
+            label="Passages"
+            value={carsForm.passages}
+            onChange={(passages) => setCarsForm((c) => ({ ...c, passages }))}
+          />
+          <NumberField
+            label="Minutes"
+            value={carsForm.minutes}
+            onChange={(minutes) => setCarsForm((c) => ({ ...c, minutes }))}
+          />
+          <NumberField
+            label="Attempted"
+            value={carsForm.questionsAttempted}
+            onChange={(questionsAttempted) => setCarsForm((c) => ({ ...c, questionsAttempted }))}
+          />
+          <NumberField
+            label="Correct"
+            value={carsForm.questionsCorrect}
+            onChange={(questionsCorrect) => setCarsForm((c) => ({ ...c, questionsCorrect }))}
+          />
+        </div>
+        <div className="mt-3">
+          <div className="mb-2 text-[10px] uppercase tracking-wider text-muted-foreground">CARS miss types</div>
           <div className="flex flex-wrap gap-2">
-            {delayedTopics.slice(0, 12).map((topic) => (
-              <span
-                key={topic.id}
-                className="rounded-full border border-[#6f7f8f]/20 bg-[#6f7f8f]/10 px-2.5 py-1 text-xs text-[#5d6d7e]"
-              >
-                {topic.title}
-              </span>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section className="grid grid-cols-1 gap-3 xl:grid-cols-[1fr_0.9fr]">
-        <div className="card-surface p-4">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <ListChecks size={16} className="text-[#6b87ae]" />
-              <h2 className="text-sm font-semibold text-[#25313c]">Study Queue</h2>
-            </div>
-            <span className="text-xs text-[#6f685f]">Decision = study priority + retest - delay</span>
-          </div>
-          <div className="space-y-2">
-            {studyQueue.map(({ topic, studyDecision, topicMastery, retestPriority }) => (
-              <div key={topic.id} className="rounded-lg border border-[#ddd4c6] bg-[#fdfaf4] p-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <div className="text-sm font-semibold text-[#25313c]">{topic.title}</div>
-                    <div className="mt-0.5 text-xs text-[#6f685f]">{topic.unit}</div>
-                  </div>
-                  <span className={`rounded-full border px-2.5 py-1 text-xs ${priorityClass(topic.priorityLabel)}`}>
-                    {topic.priorityLabel}
-                  </span>
-                </div>
-                <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-[#6f685f]">
-                  <span>Decision {studyDecision.toFixed(1)}</span>
-                  <span>Mastery {topicMastery.toFixed(1)}</span>
-                  <span>Retest {retestPriority.toFixed(1)}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="card-surface p-4">
-          <div className="mb-3 flex items-center gap-2">
-            <BookOpenCheck size={16} className="text-[#6b87ae]" />
-            <h2 className="text-sm font-semibold text-[#25313c]">Session Log</h2>
-          </div>
-          <div className="space-y-3">
-            <label className="block text-[10px] uppercase tracking-wider text-[#6f685f]">
-              Topic
-              <select
-                className="input-dark mt-1 w-full"
-                value={sessionForm.topicId}
-                onChange={(event) =>
-                  setSessionForm((current) => ({ ...current, topicId: event.target.value }))
-                }
-              >
-                {state.topics.map((topic) => (
-                  <option key={topic.id} value={topic.id}>
-                    {topic.title}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <div className="grid grid-cols-2 gap-3">
-              <NumberField label="Minutes" value={sessionForm.minutes} onChange={(minutes) => setSessionForm((current) => ({ ...current, minutes }))} />
-              <NumberField label="Attempted" value={sessionForm.questionsAttempted} onChange={(questionsAttempted) => setSessionForm((current) => ({ ...current, questionsAttempted }))} />
-              <NumberField label="Correct" value={sessionForm.questionsCorrect} onChange={(questionsCorrect) => setSessionForm((current) => ({ ...current, questionsCorrect }))} />
-              <NumberField label="Flashcards" value={sessionForm.flashcardsMade} onChange={(flashcardsMade) => setSessionForm((current) => ({ ...current, flashcardsMade }))} />
-            </div>
-            <RangeField label="Confidence before" value={sessionForm.confidenceBefore} onChange={(confidenceBefore) => setSessionForm((current) => ({ ...current, confidenceBefore }))} />
-            <RangeField label="Confidence after" value={sessionForm.confidenceAfter} onChange={(confidenceAfter) => setSessionForm((current) => ({ ...current, confidenceAfter }))} />
-            <div>
-              <div className="mb-2 text-[10px] uppercase tracking-wider text-[#6f685f]">Mistake types</div>
-              <ToggleList
-                values={[...MCAT_ERROR_TYPES, ...CARS_ERROR_TYPES]}
-                selected={sessionForm.mistakeTypes}
-                onToggle={toggleSessionMistake}
-              />
-            </div>
-            <textarea
-              className="input-dark min-h-20 w-full"
-              placeholder="What happened in this session?"
-              value={sessionForm.notes}
-              onChange={(event) =>
-                setSessionForm((current) => ({ ...current, notes: event.target.value }))
-              }
-            />
-            <button className="btn-primary flex w-full items-center justify-center gap-2" onClick={addSession}>
-              <Check size={15} />
-              Log Session
-            </button>
-            <div className="space-y-2">
-              {state.sessions.slice(0, 3).map((session) => (
-                <div
-                  key={session.id}
-                  className="rounded-lg border border-[#ddd4c6] bg-[#fdfaf4] p-3 text-xs"
+            {CARS_ERROR_TYPES.map((t) => {
+              const active = carsForm.errorTypes.includes(t);
+              return (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => toggleErr(t)}
+                  className={cn(
+                    "rounded-full border px-2.5 py-1 text-xs transition-colors",
+                    active
+                      ? "border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-300"
+                      : "border-border bg-card text-muted-foreground hover:bg-muted",
+                  )}
                 >
-                  <div className="font-semibold text-[#25313c]">
-                    {topicById.get(session.topicId)?.title ?? "Unknown topic"}
-                  </div>
-                  <div className="mt-1 text-[#6f685f]">
-                    {session.minutes} min -{" "}
-                    {formatAccuracy(session.questionsCorrect, session.questionsAttempted)} -{" "}
-                    {session.notes || "No notes"}
-                  </div>
-                </div>
-              ))}
-              {state.sessions.length === 0 ? (
-                <p className="rounded-lg border border-[#ddd4c6] bg-[#fdfaf4] p-3 text-sm text-[#8c8478]">
-                  No MCAT session yet. Start with a foundation topic or CARS passage.
-                </p>
-              ) : null}
-            </div>
+                  {t}
+                </button>
+              );
+            })}
           </div>
         </div>
-      </section>
+        <button className="btn-primary mt-3 flex w-full items-center justify-center gap-2" onClick={onSubmit}>
+          <Check size={15} />
+          Log CARS passage
+        </button>
 
-      <section className="grid grid-cols-1 gap-3 xl:grid-cols-[0.9fr_1fr]">
+        <div className="mt-4 grid grid-cols-3 gap-2 text-xs">
+          <Metric label="This week" value={`${summary.carsPassageCountThisWeek}`} />
+          <Metric label="CARS risk" value={summary.carsRisk.toFixed(1)} />
+          <Metric label="All-time accuracy" value={carsAccuracy} />
+        </div>
+      </div>
+
+      <div className="card-surface p-4">
+        <div className="mb-3 flex items-center gap-2">
+          <TrendingUp size={16} className="text-violet-500" />
+          <h2 className="text-sm font-semibold text-foreground">Passages per week</h2>
+        </div>
+        <div className="h-[180px]">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={passagesPerWeek} margin={{ top: 8, right: 8, bottom: 4, left: 0 }}>
+              <CartesianGrid stroke="rgba(111, 104, 95, 0.14)" vertical={false} />
+              <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={11} />
+              <YAxis allowDecimals={false} tickLine={false} axisLine={false} fontSize={11} width={28} />
+              <RechartsTooltip
+                contentStyle={{
+                  background: "hsl(var(--card))",
+                  border: "1px solid hsl(var(--border))",
+                  borderRadius: 12,
+                  fontSize: 12,
+                }}
+                cursor={{ fill: "rgba(154, 123, 189, 0.08)" }}
+              />
+              <Bar dataKey="passages" fill="#9a7bbd" radius={[6, 6, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+
+        <div className="mt-4 max-h-[300px] space-y-2 overflow-auto pr-1">
+          {state.carsEntries.length === 0 ? (
+            <div className="empty-state">
+              No CARS entries yet. Log one untimed passage to start a baseline.
+            </div>
+          ) : (
+            state.carsEntries.map((entry) => (
+              <div key={entry.id} className="flex items-start justify-between gap-3 rounded-lg border border-border bg-card p-3 text-xs">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-foreground">
+                    {entry.date} · {entry.passages} passage{entry.passages === 1 ? "" : "s"}
+                  </div>
+                  <div className="mt-1 text-muted-foreground">
+                    {entry.minutes} min · {formatAccuracy(entry.questionsCorrect, entry.questionsAttempted)} · {entry.questionsAttempted}Q
+                  </div>
+                  {entry.errorTypes.length > 0 ? (
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {entry.errorTypes.map((t) => (
+                        <span
+                          key={t}
+                          className="rounded-full border border-violet-500/20 bg-violet-500/5 px-2 py-0.5 text-[10px] text-violet-700 dark:text-violet-300"
+                        >
+                          {t}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+                <button
+                  className="text-muted-foreground hover:text-rose-600"
+                  onClick={() => onDelete(entry.id)}
+                  aria-label="Delete CARS entry"
+                >
+                  <Trash2 size={13} />
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* -------------------------------- Review tab ------------------------------ */
+
+function ReviewTab({
+  summary,
+  dailySeries,
+  weeklyAccuracy,
+  mistakeBreakdown,
+  onCopy,
+  copied,
+}: {
+  summary: ReturnType<typeof getMcatSummary>;
+  dailySeries: ReturnType<typeof getDailyMinutesSeries>;
+  weeklyAccuracy: ReturnType<typeof getWeeklyAccuracySeries>;
+  mistakeBreakdown: ReturnType<typeof getMistakeBreakdown>;
+  onCopy: (kind: "tutor" | "weekly", text: string) => void;
+  copied: "tutor" | "weekly" | null;
+}) {
+  const weeklyStats = {
+    topicsStudied: summary.topicsStudiedThisWeek.join(", ") || "None yet",
+    sessions: summary.sessionsThisWeek.length,
+    minutes: summary.minutesThisWeek,
+    accuracy: summary.questionsAttempted > 0 ? `${summary.accuracy}%` : "—",
+    mistakeTypes:
+      Object.entries(summary.mistakeTypeCounts)
+        .map(([type, count]) => `${type}: ${count}`)
+        .join(", ") || "None logged",
+  };
+
+  return (
+    <>
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <Metric label="Sessions" value={String(weeklyStats.sessions)} />
+        <Metric label="Minutes" value={String(weeklyStats.minutes)} />
+        <Metric label="Accuracy" value={weeklyStats.accuracy} />
+        <Metric label="Topics studied" value={String(summary.topicsStudiedThisWeek.length)} />
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <div className="card-surface p-4">
           <div className="mb-3 flex items-center gap-2">
-            <AlertCircle size={16} className="text-[#c39a4e]" />
-            <h2 className="text-sm font-semibold text-[#25313c]">Error Log</h2>
+            <TrendingUp size={16} className="text-primary" />
+            <h2 className="text-sm font-semibold text-foreground">Accuracy by week</h2>
           </div>
-          <div className="space-y-3">
+          <div className="h-[200px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={weeklyAccuracy} margin={{ top: 8, right: 8, bottom: 4, left: 0 }}>
+                <CartesianGrid stroke="rgba(111, 104, 95, 0.14)" vertical={false} />
+                <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={11} />
+                <YAxis domain={[0, 100]} tickLine={false} axisLine={false} fontSize={11} width={32} />
+                <RechartsTooltip
+                  contentStyle={{
+                    background: "hsl(var(--card))",
+                    border: "1px solid hsl(var(--border))",
+                    borderRadius: 12,
+                    fontSize: 12,
+                  }}
+                  formatter={(value: number) => [`${value}%`, "Accuracy"]}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="accuracy"
+                  stroke="#6b87ae"
+                  strokeWidth={2}
+                  dot={{ r: 3, fill: "#6b87ae" }}
+                  activeDot={{ r: 5 }}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        <div className="card-surface p-4">
+          <div className="mb-3 flex items-center gap-2">
+            <Clock size={16} className="text-primary" />
+            <h2 className="text-sm font-semibold text-foreground">Daily minutes (14 days)</h2>
+          </div>
+          <div className="h-[200px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={dailySeries} margin={{ top: 8, right: 8, bottom: 4, left: 0 }}>
+                <CartesianGrid stroke="rgba(111, 104, 95, 0.14)" vertical={false} />
+                <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={11} />
+                <YAxis tickLine={false} axisLine={false} fontSize={11} width={28} />
+                <RechartsTooltip
+                  contentStyle={{
+                    background: "hsl(var(--card))",
+                    border: "1px solid hsl(var(--border))",
+                    borderRadius: 12,
+                    fontSize: 12,
+                  }}
+                  cursor={{ fill: "rgba(107, 135, 174, 0.08)" }}
+                  formatter={(value: number) => [`${value} min`, "Minutes"]}
+                />
+                <Bar dataKey="minutes" fill="#6b87ae" radius={[6, 6, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+        <div className="card-surface p-4">
+          <div className="mb-3 flex items-center gap-2">
+            <AlertCircle size={16} className="text-amber-600" />
+            <h2 className="text-sm font-semibold text-foreground">Mistakes (last 30 days)</h2>
+          </div>
+          {mistakeBreakdown.length === 0 ? (
+            <div className="empty-state">No mistakes logged yet. Classify each miss when it happens.</div>
+          ) : (
+            <div className="h-[260px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart
+                  data={mistakeBreakdown.slice(0, 8)}
+                  margin={{ top: 8, right: 8, bottom: 4, left: 0 }}
+                  layout="vertical"
+                >
+                  <CartesianGrid stroke="rgba(111, 104, 95, 0.14)" horizontal={false} />
+                  <XAxis type="number" allowDecimals={false} tickLine={false} axisLine={false} fontSize={11} />
+                  <YAxis
+                    dataKey="type"
+                    type="category"
+                    tickLine={false}
+                    axisLine={false}
+                    width={140}
+                    fontSize={11}
+                  />
+                  <RechartsTooltip
+                    contentStyle={{
+                      background: "hsl(var(--card))",
+                      border: "1px solid hsl(var(--border))",
+                      borderRadius: 12,
+                      fontSize: 12,
+                    }}
+                    cursor={{ fill: "rgba(195, 154, 78, 0.08)" }}
+                  />
+                  <Bar dataKey="count" radius={[0, 6, 6, 0]}>
+                    {mistakeBreakdown.slice(0, 8).map((_, idx) => (
+                      <Cell key={idx} fill={CHART_COLORS[idx % CHART_COLORS.length]} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </div>
+
+        <div className="card-surface p-4">
+          <div className="mb-3 flex items-center gap-2">
+            <Clipboard size={16} className="text-primary" />
+            <h2 className="text-sm font-semibold text-foreground">Weekly summary</h2>
+          </div>
+          <div className="rounded-xl border border-border bg-card p-3 text-xs text-muted-foreground">
+            <div className="text-foreground"><span className="text-muted-foreground">Topics studied: </span>{weeklyStats.topicsStudied}</div>
+            <div className="mt-1.5 text-foreground"><span className="text-muted-foreground">Mistake types: </span>{weeklyStats.mistakeTypes}</div>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button className="btn-primary flex items-center gap-2" onClick={() => onCopy("tutor", MCAT_TUTOR_PROMPT)}>
+              {copied === "tutor" ? <Check size={15} /> : <Clipboard size={15} />}
+              {copied === "tutor" ? "Copied tutor prompt" : "Copy ChatGPT tutor prompt"}
+            </button>
+            <button className="btn-secondary flex items-center gap-2" onClick={() => onCopy("weekly", MCAT_WEEKLY_REVIEW_PROMPT)}>
+              {copied === "weekly" ? <Check size={15} /> : <Clipboard size={15} />}
+              {copied === "weekly" ? "Copied weekly prompt" : "Copy weekly review prompt"}
+            </button>
+          </div>
+          <p className="mt-3 text-xs text-muted-foreground">
+            Paste into ChatGPT after filling in the blanks at the top of each prompt.
+          </p>
+        </div>
+      </div>
+    </>
+  );
+}
+
+/* ----------------------------- Log dialog -------------------------------- */
+
+function LogSessionDialog({
+  open,
+  onOpenChange,
+  form,
+  setForm,
+  topics,
+  prefill,
+  onSubmit,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  form: SessionFormState;
+  setForm: React.Dispatch<React.SetStateAction<SessionFormState>>;
+  topics: McatTopic[];
+  prefill: LogDialogPrefill;
+  onSubmit: () => void;
+}) {
+  const selectedTopic = topics.find((t) => t.id === form.topicId) ?? null;
+  const showCarsErrors = isCarsTopic(selectedTopic);
+  const errorChoices: AnyMcatErrorType[] = showCarsErrors
+    ? [...CARS_ERROR_TYPES]
+    : [...MCAT_ERROR_TYPES];
+
+  const toggleMistake = (t: AnyMcatErrorType) =>
+    setForm((current) => ({
+      ...current,
+      mistakeTypes: current.mistakeTypes.includes(t)
+        ? current.mistakeTypes.filter((x) => x !== t)
+        : [...current.mistakeTypes, t],
+    }));
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Log session</DialogTitle>
+          <DialogDescription>
+            {prefill ? `Pre-filled from your ${prefill.minutes}-minute timer.` : "Capture the session so the queue can recalibrate."}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <label className="block text-[10px] uppercase tracking-wider text-muted-foreground">
+            Topic
             <select
-              className="input-dark w-full"
-              value={errorForm.topicId}
-              onChange={(event) =>
-                setErrorForm((current) => ({ ...current, topicId: event.target.value }))
-              }
+              className="input-dark mt-1 w-full"
+              value={form.topicId}
+              onChange={(e) => setForm((c) => ({ ...c, topicId: e.target.value }))}
             >
-              {state.topics.map((topic) => (
+              {topics.map((topic) => (
                 <option key={topic.id} value={topic.id}>
                   {topic.title}
                 </option>
               ))}
             </select>
-            <select
-              className="input-dark w-full"
-              value={errorForm.type}
-              onChange={(event) =>
-                setErrorForm((current) => ({
-                  ...current,
-                  type: event.target.value as AnyMcatErrorType,
-                }))
-              }
-            >
-              {[...MCAT_ERROR_TYPES, ...CARS_ERROR_TYPES].map((type) => (
-                <option key={type} value={type}>
-                  {type}
-                </option>
-              ))}
-            </select>
-            <textarea
-              className="input-dark min-h-20 w-full"
-              placeholder="Write the exact miss or gap."
-              value={errorForm.note}
-              onChange={(event) => setErrorForm((current) => ({ ...current, note: event.target.value }))}
-            />
-            <button className="btn-secondary flex w-full items-center justify-center gap-2" onClick={addError}>
-              <AlertCircle size={15} />
-              Add Error
-            </button>
+          </label>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <NumberField label="Minutes" value={form.minutes} onChange={(minutes) => setForm((c) => ({ ...c, minutes }))} />
+            <NumberField label="Attempted" value={form.questionsAttempted} onChange={(questionsAttempted) => setForm((c) => ({ ...c, questionsAttempted }))} />
+            <NumberField label="Correct" value={form.questionsCorrect} onChange={(questionsCorrect) => setForm((c) => ({ ...c, questionsCorrect }))} />
+            <NumberField label="Flashcards" value={form.flashcardsMade} onChange={(flashcardsMade) => setForm((c) => ({ ...c, flashcardsMade }))} />
           </div>
-          <div className="mt-4 space-y-2">
-            {state.errors.slice(0, 5).map((error) => (
-              <div key={error.id} className="rounded-lg border border-[#ddd4c6] bg-[#fdfaf4] p-3 text-xs">
-                <div className="font-semibold text-[#25313c]">{error.type}</div>
-                <div className="mt-1 text-[#6f685f]">
-                  {topicById.get(error.topicId)?.title ?? "Unknown topic"} - {error.note || "No note"}
-                </div>
-              </div>
-            ))}
-            {state.errors.length === 0 ? (
-              <p className="text-sm text-[#8c8478]">
-                No MCAT errors logged yet. When you miss something, classify why immediately.
-              </p>
-            ) : null}
-          </div>
-        </div>
-
-        <div className="card-surface p-4">
-          <div className="mb-3 flex items-center gap-2">
-            <CalendarClock size={16} className="text-[#6b87ae]" />
-            <h2 className="text-sm font-semibold text-[#25313c]">Retest Schedule</h2>
-          </div>
-          <div className="space-y-2">
-            {retestQueue.map(({ topic, retestPriority }) => (
-              <div key={topic.id} className="flex items-center justify-between gap-3 rounded-lg border border-[#ddd4c6] bg-[#fdfaf4] p-3">
-                <div>
-                  <div className="text-sm font-semibold text-[#25313c]">{topic.title}</div>
-                  <div className="text-xs text-[#6f685f]">
-                    Retest priority {retestPriority.toFixed(1)} - last reviewed {topic.lastReviewed ?? "never"}
-                  </div>
-                </div>
-                <button className="btn-secondary flex items-center gap-2 whitespace-nowrap" onClick={() => markRetested(topic.id)}>
-                  <RotateCcw size={14} />
-                  Retested
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section className="grid grid-cols-1 gap-3 xl:grid-cols-[0.95fr_1.05fr]">
-        <div className="card-surface p-4">
-          <div className="mb-3 flex items-center gap-2">
-            <FlaskConical size={16} className="text-[#9a7bbd]" />
-            <h2 className="text-sm font-semibold text-[#25313c]">CARS Tracker</h2>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <NumberField label="Passages" value={carsForm.passages} onChange={(passages) => setCarsForm((current) => ({ ...current, passages }))} />
-            <NumberField label="Minutes" value={carsForm.minutes} onChange={(minutes) => setCarsForm((current) => ({ ...current, minutes }))} />
-            <NumberField label="Attempted" value={carsForm.questionsAttempted} onChange={(questionsAttempted) => setCarsForm((current) => ({ ...current, questionsAttempted }))} />
-            <NumberField label="Correct" value={carsForm.questionsCorrect} onChange={(questionsCorrect) => setCarsForm((current) => ({ ...current, questionsCorrect }))} />
-          </div>
-          <div className="mt-3">
-            <div className="mb-2 text-[10px] uppercase tracking-wider text-[#6f685f]">CARS miss types</div>
-            <ToggleList values={[...CARS_ERROR_TYPES]} selected={carsForm.errorTypes} onToggle={toggleCarsError} />
-          </div>
-          <button className="btn-primary mt-3 flex w-full items-center justify-center gap-2" onClick={addCarsEntry}>
-            <Check size={15} />
-            Log CARS Passage
-          </button>
-          <div className="mt-4 grid grid-cols-3 gap-2 text-xs text-[#6f685f]">
-            <Metric label="This week" value={`${summary.carsPassageCountThisWeek} passages`} />
-            <Metric label="CARS risk" value={summary.carsRisk.toFixed(1)} />
-            <Metric label="CARS accuracy" value={formatAccuracy(
-              state.carsEntries.reduce((sum, entry) => sum + entry.questionsCorrect, 0),
-              state.carsEntries.reduce((sum, entry) => sum + entry.questionsAttempted, 0),
-            )} />
-          </div>
-        </div>
-
-        <div className="card-surface p-4">
-          <div className="mb-3 flex items-center gap-2">
-            <Clipboard size={16} className="text-[#6b87ae]" />
-            <h2 className="text-sm font-semibold text-[#25313c]">Weekly MCAT Review</h2>
-          </div>
-          <div className="grid grid-cols-2 gap-3 text-sm">
-            <Metric label="Topics studied" value={weeklyStats.topicsStudied} />
-            <Metric label="Sessions" value={String(weeklyStats.sessions)} />
-            <Metric label="Minutes" value={String(weeklyStats.minutes)} />
-            <Metric label="Accuracy" value={weeklyStats.accuracy} />
-          </div>
-          <div className="mt-3 rounded-lg border border-[#ddd4c6] bg-[#fdfaf4] p-3 text-xs text-[#6f685f]">
-            Mistake types: {weeklyStats.mistakeTypes}
-          </div>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <button
-              className="btn-primary flex items-center gap-2"
-              onClick={() => handleCopy("tutor", MCAT_TUTOR_PROMPT)}
-            >
-              {copied === "tutor" ? <Check size={15} /> : <Clipboard size={15} />}
-              {copied === "tutor" ? "Copied Tutor Prompt" : "Copy ChatGPT Tutor Prompt"}
-            </button>
-            <button
-              className="btn-secondary flex items-center gap-2"
-              onClick={() => handleCopy("weekly", MCAT_WEEKLY_REVIEW_PROMPT)}
-            >
-              {copied === "weekly" ? <Check size={15} /> : <Clipboard size={15} />}
-              {copied === "weekly" ? "Copied Weekly Prompt" : "Copy Weekly Review Prompt"}
-            </button>
-          </div>
-        </div>
-      </section>
-
-      <section className="card-surface p-4">
-        <div className="mb-3 flex items-center gap-2">
-          <ListChecks size={16} className="text-[#6b87ae]" />
-          <h2 className="text-sm font-semibold text-[#25313c]">Topic Map</h2>
-        </div>
-        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-          {Object.entries(topicsByUnit).map(([unit, topics]) => (
-            <div key={unit} className="rounded-lg border border-[#ddd4c6] bg-[#fdfaf4] p-3">
-              <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-[#25313c]">
-                {unit}
-              </div>
-              <div className="space-y-2">
-                {topics.map((topic) => (
-                  <div key={topic.id} className="grid grid-cols-1 gap-2 border-t border-[#ece5da] pt-2 md:grid-cols-[1fr_150px]">
-                    <div>
-                      <div className="text-sm text-[#25313c]">{topic.title}</div>
-                      <div className={`mt-1 inline-flex rounded-full border px-2 py-0.5 text-[10px] ${priorityClass(topic.priorityLabel)}`}>
-                        {topic.priorityLabel}
-                      </div>
-                    </div>
-                    <select
-                      className={`input-dark text-xs ${statusClass(topic.status)}`}
-                      value={topic.status}
-                      onChange={(event) =>
-                        updateTopic(topic.id, {
-                          status: event.target.value as McatTopicStatus,
-                        })
-                      }
-                    >
-                      {MCAT_TOPIC_STATUSES.map((status) => (
-                        <option key={status} value={status}>
-                          {status}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                ))}
-              </div>
+          <RangeField label="Confidence before" value={form.confidenceBefore} onChange={(confidenceBefore) => setForm((c) => ({ ...c, confidenceBefore }))} />
+          <RangeField label="Confidence after" value={form.confidenceAfter} onChange={(confidenceAfter) => setForm((c) => ({ ...c, confidenceAfter }))} />
+          <div>
+            <div className="mb-2 text-[10px] uppercase tracking-wider text-muted-foreground">
+              Mistake types {showCarsErrors ? "(CARS)" : "(MCAT)"}
             </div>
-          ))}
+            <div className="flex flex-wrap gap-2">
+              {errorChoices.map((t) => {
+                const active = form.mistakeTypes.includes(t);
+                return (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => toggleMistake(t)}
+                    className={cn(
+                      "rounded-full border px-2.5 py-1 text-xs transition-colors",
+                      active
+                        ? "border-primary/30 bg-primary/10 text-primary"
+                        : "border-border bg-card text-muted-foreground hover:bg-muted",
+                    )}
+                  >
+                    {t}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <textarea
+            className="input-dark min-h-20 w-full"
+            placeholder="What happened in this session?"
+            value={form.notes}
+            onChange={(e) => setForm((c) => ({ ...c, notes: e.target.value }))}
+          />
         </div>
-      </section>
-
-      <section className="card-surface p-4">
-        <div className="mb-3 text-sm font-semibold text-[#25313c]">Priority Labels</div>
-        <div className="flex flex-wrap gap-2">
-          {MCAT_PRIORITY_LABELS.map((label) => (
-            <span key={label} className={`rounded-full border px-2.5 py-1 text-xs ${priorityClass(label)}`}>
-              {label}
-            </span>
-          ))}
-        </div>
-      </section>
-    </div>
+        <DialogFooter>
+          <button className="btn-secondary" onClick={() => onOpenChange(false)}>
+            Cancel
+          </button>
+          <button className="btn-primary" onClick={onSubmit}>
+            <Check size={15} className="mr-1.5" />
+            Log session
+          </button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
+/* ----------------------------- Topic detail ------------------------------ */
+
+function TopicDetailDialog({
+  topicId,
+  state,
+  onClose,
+  onStart,
+  onRetest,
+  onUpdateStatus,
+}: {
+  topicId: string | null;
+  state: McatFoundationState;
+  onClose: () => void;
+  onStart: (id: string) => void;
+  onRetest: (id: string) => void;
+  onUpdateStatus: (id: string, status: McatTopicStatus) => void;
+}) {
+  const topic = topicId ? state.topics.find((t) => t.id === topicId) ?? null : null;
+  const sessions = topic ? getTopicSessions(state, topic.id) : [];
+  const errors = topic ? getTopicErrors(state, topic.id) : [];
+  const accuracy = topic ? getTopicAccuracy(state, topic.id) : { attempted: 0, correct: 0, accuracy: 0 };
+
+  return (
+    <Dialog open={Boolean(topic)} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-3xl">
+        {topic ? (
+          <>
+            <DialogHeader>
+              <DialogTitle>{topic.title}</DialogTitle>
+              <DialogDescription>{topic.unit}</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className={cn("rounded-full border px-2.5 py-1 text-xs", priorityClass(topic.priorityLabel))}>
+                  {topic.priorityLabel}
+                </span>
+                <span className={cn("rounded-full border px-2.5 py-1 text-xs", statusBadge(topic.status))}>
+                  {topic.status}
+                </span>
+                <span className="rounded-full border border-border bg-card px-2.5 py-1 text-xs text-muted-foreground">
+                  Weakness {topic.weakness.toFixed(1)}
+                </span>
+                <span className="rounded-full border border-border bg-card px-2.5 py-1 text-xs text-muted-foreground">
+                  Last reviewed {topic.lastReviewed ?? "never"}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                <Metric label="Accuracy" value={accuracy.attempted ? `${accuracy.accuracy}%` : "—"} />
+                <Metric label="Questions" value={String(accuracy.attempted)} />
+                <Metric label="Sessions" value={String(sessions.length)} />
+                <Metric label="Errors" value={String(errors.length)} />
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button className="btn-primary px-3 py-1.5 text-xs" onClick={() => onStart(topic.id)}>
+                  <Play size={13} className="mr-1.5" />
+                  Start session
+                </button>
+                <button className="btn-secondary px-3 py-1.5 text-xs" onClick={() => onRetest(topic.id)}>
+                  <RotateCcw size={13} className="mr-1.5" />
+                  Mark retested
+                </button>
+                <select
+                  className="input-dark h-9 w-[200px] text-xs"
+                  value={topic.status}
+                  onChange={(e) => onUpdateStatus(topic.id, e.target.value as McatTopicStatus)}
+                >
+                  {MCAT_TOPIC_STATUSES.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div>
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Recent sessions
+                  </div>
+                  {sessions.length === 0 ? (
+                    <div className="rounded-lg border border-dashed border-border bg-muted/20 p-3 text-xs text-muted-foreground">
+                      No sessions on this topic yet.
+                    </div>
+                  ) : (
+                    <div className="max-h-[220px] space-y-2 overflow-auto pr-1">
+                      {sessions.slice(0, 10).map((s) => (
+                        <div key={s.id} className="rounded-lg border border-border bg-card p-2.5 text-xs">
+                          <div className="font-mono-data text-foreground">{s.date}</div>
+                          <div className="mt-0.5 text-muted-foreground">
+                            {s.minutes} min · {formatAccuracy(s.questionsCorrect, s.questionsAttempted)} · {s.questionsAttempted}Q
+                          </div>
+                          {s.notes ? <div className="mt-1 text-foreground/80">{s.notes}</div> : null}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Recent errors
+                  </div>
+                  {errors.length === 0 ? (
+                    <div className="rounded-lg border border-dashed border-border bg-muted/20 p-3 text-xs text-muted-foreground">
+                      No errors logged on this topic.
+                    </div>
+                  ) : (
+                    <div className="max-h-[220px] space-y-2 overflow-auto pr-1">
+                      {errors.slice(0, 10).map((e) => (
+                        <div
+                          key={e.id}
+                          className={cn(
+                            "rounded-lg border p-2.5 text-xs",
+                            e.resolved ? "border-emerald-500/25 bg-emerald-500/5" : "border-border bg-card",
+                          )}
+                        >
+                          <div className="font-semibold text-foreground">{e.type}</div>
+                          <div className="mt-0.5 font-mono-data text-muted-foreground">{e.date}</div>
+                          {e.note ? <div className="mt-1 text-foreground/80">{e.note}</div> : null}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </>
+        ) : null}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/* ------------------------------- Small atoms ----------------------------- */
+
 function Metric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="min-w-0">
-      <div className="text-[10px] uppercase tracking-wider text-[#6f685f]">{label}</div>
-      <div className="mt-1 truncate text-sm font-semibold text-[#25313c]" title={value}>
+    <div className="rounded-xl border border-border bg-card p-3 text-xs">
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className="mt-1 truncate text-sm font-semibold text-foreground" title={value}>
         {value}
       </div>
     </div>
@@ -713,7 +2039,7 @@ function NumberField({
   onChange: (value: number) => void;
 }) {
   return (
-    <label className="block text-[10px] uppercase tracking-wider text-[#6f685f]">
+    <label className="block text-[10px] uppercase tracking-wider text-muted-foreground">
       {label}
       <input
         className="input-dark mt-1 w-full"
@@ -736,7 +2062,7 @@ function RangeField({
   onChange: (value: number) => void;
 }) {
   return (
-    <label className="block text-[10px] uppercase tracking-wider text-[#6f685f]">
+    <label className="block text-[10px] uppercase tracking-wider text-muted-foreground">
       <span className="flex items-center justify-between">
         {label}
         <span>{value}/10</span>
@@ -750,37 +2076,5 @@ function RangeField({
         onChange={(event) => onChange(Number(event.target.value))}
       />
     </label>
-  );
-}
-
-function ToggleList<T extends string>({
-  values,
-  selected,
-  onToggle,
-}: {
-  values: T[];
-  selected: T[];
-  onToggle: (value: T) => void;
-}) {
-  return (
-    <div className="flex flex-wrap gap-2">
-      {values.map((value) => {
-        const active = selected.includes(value);
-        return (
-          <button
-            key={value}
-            type="button"
-            onClick={() => onToggle(value)}
-            className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${
-              active
-                ? "border-[#6b87ae]/30 bg-[#6b87ae]/10 text-[#6b87ae]"
-                : "border-[#ddd4c6] bg-[#fdfaf4] text-[#6f685f] hover:bg-[#f0ebe2]"
-            }`}
-          >
-            {value}
-          </button>
-        );
-      })}
-    </div>
   );
 }
