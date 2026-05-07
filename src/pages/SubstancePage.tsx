@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import ChatGPTPrompt from "@/components/ChatGPTPrompt";
+import { SyncBadge } from "@/components/SyncBadge";
 import { useSupabaseSession } from "@/hooks/useSupabaseSession";
 import { calcSubstanceScore } from "@/lib/calculations";
 import {
   fetchSubstanceEntry,
   fetchSubstanceWeek,
-  getSyncLabel,
-  getSyncTone,
   type LifeeeSyncStatus,
   type SubstanceEntry,
   upsertSubstanceEntry,
@@ -46,6 +45,20 @@ function writeLocalSubstanceEntry(entry: SubstanceEntry) {
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify([entry, ...entries]));
 }
 
+function serializeSubstanceEntry(entry: SubstanceEntry) {
+  return JSON.stringify({
+    readingDone: entry.readingDone,
+    topicStudied: entry.topicStudied,
+    notesTaken: entry.notesTaken,
+    flashcardsMade: entry.flashcardsMade,
+    conversationPractice: entry.conversationPractice,
+    newConcept: entry.newConcept,
+    questionOfDay: entry.questionOfDay,
+    writingPractice: entry.writingPractice,
+    speakingPractice: entry.speakingPractice,
+  });
+}
+
 export default function SubstancePage() {
   const today = new Date().toISOString().split("T")[0];
   const weekStart = new Date();
@@ -58,6 +71,7 @@ export default function SubstancePage() {
   const [trend, setTrend] = useState<{ date: string; score: number }[]>([]);
   const [syncStatus, setSyncStatus] = useState<LifeeeSyncStatus>("local");
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [conflict, setConflict] = useState<{ local: SubstanceEntry; cloud: SubstanceEntry } | null>(null);
   const remoteLoadedRef = useRef(false);
 
   useEffect(() => {
@@ -102,15 +116,24 @@ export default function SubstancePage() {
         ]);
         if (!active) return;
 
-        if (!remoteEntry && localEntry) {
+        if (
+          remoteEntry &&
+          localEntry &&
+          serializeSubstanceEntry(remoteEntry) !== serializeSubstanceEntry(localEntry)
+        ) {
+          setForm(remoteEntry);
+          setConflict({ local: localEntry, cloud: remoteEntry });
+        } else if (!remoteEntry && localEntry) {
           const uploaded = await upsertSubstanceEntry(userId, localEntry);
           if (!active) return;
           setForm(uploaded);
           writeLocalSubstanceEntry(uploaded);
+          setConflict(null);
         } else {
           const next = remoteEntry ?? defaultSubstanceEntry(today);
           setForm(next);
           writeLocalSubstanceEntry(next);
+          setConflict(null);
         }
 
         setTrend(remoteTrend);
@@ -137,6 +160,11 @@ export default function SubstancePage() {
   );
 
   const handleSave = async () => {
+    if (conflict) {
+      setSyncError("Choose Use local, Use cloud, or Cancel before saving.");
+      return;
+    }
+
     const entry = { ...form, date: today, substanceScore: score };
     writeLocalSubstanceEntry(entry);
 
@@ -156,6 +184,43 @@ export default function SubstancePage() {
     } else {
       setSyncStatus(hasSupabaseConfig ? "waiting" : "local");
     }
+  };
+
+  const handleUseLocalConflict = async () => {
+    if (!conflict || !userId) return;
+    try {
+      setSyncStatus("saving");
+      setSyncError(null);
+      const localScore = calcSubstanceScore(
+        conflict.local.readingDone,
+        conflict.local.notesTaken,
+        conflict.local.writingPractice,
+        conflict.local.speakingPractice,
+        conflict.local.newConcept,
+      );
+      const saved = await upsertSubstanceEntry(userId, {
+        ...conflict.local,
+        date: today,
+        substanceScore: localScore,
+      });
+      setForm(saved);
+      writeLocalSubstanceEntry(saved);
+      setTrend(await fetchSubstanceWeek(userId, weekStartKey));
+      setConflict(null);
+      setSyncStatus("saved");
+    } catch (error) {
+      setSyncError(error instanceof Error ? error.message : "Could not save local substance draft.");
+      setSyncStatus("error");
+    }
+  };
+
+  const handleUseCloudConflict = () => {
+    if (!conflict) return;
+    setForm(conflict.cloud);
+    writeLocalSubstanceEntry(conflict.cloud);
+    setConflict(null);
+    setSyncError(null);
+    setSyncStatus("saved");
   };
 
   const promptText = `Here is what I learned or thought about today:
@@ -181,16 +246,40 @@ Turn this into a deeper explanation, 5 talking points, and 3 questions I could u
               Build depth, better thinking, better speech, and stronger conversation ability.
             </p>
           </div>
-          <span className={`rounded-full border px-2.5 py-1 text-[11px] ${getSyncTone(syncStatus)}`}>
-            {getSyncLabel(syncStatus)}
-          </span>
+          <SyncBadge status={syncStatus} />
         </div>
         {syncError && <p className="mt-2 text-xs text-destructive">{syncError}</p>}
+        {conflict ? (
+          <div className="mt-3 rounded border border-[#c39a4e]/30 bg-[#c39a4e]/10 p-3 text-xs text-[#6f685f]">
+            <div className="font-semibold text-[#25313c]">Local draft and cloud learning log both exist.</div>
+            <div className="mt-1">Choose one before saving so cloud data is not overwritten silently.</div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button type="button" onClick={handleUseLocalConflict} className="btn-primary px-3 py-1 text-xs">
+                Use local
+              </button>
+              <button type="button" onClick={handleUseCloudConflict} className="btn-primary px-3 py-1 text-xs">
+                Use cloud
+              </button>
+              <button
+                type="button"
+                onClick={() => setConflict(null)}
+                className="rounded border border-[#ddd4c6] px-3 py-1 text-xs text-[#6f685f]"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 card-surface p-4">
-          <h3 className="text-sm font-semibold text-[#25313c] mb-3">LEARNING LOG</h3>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold text-[#25313c]">LEARNING LOG</h3>
+            <span className="text-[10px] text-[#6a9a74]">
+              Topic studied and notes taken save to Supabase.
+            </span>
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <input
               type="text"

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   LineChart,
   Line,
@@ -10,7 +10,7 @@ import {
 } from "recharts";
 import { AlertTriangle, Loader2, Plus, Save, Trash2 } from "lucide-react";
 import StatusRing, { getStatusColor } from "@/components/StatusRing";
-import { supabase } from "@/lib/supabase-client";
+import { SyncBadge } from "@/components/SyncBadge";
 import type { WorkoutLogRow } from "@/lib/supabase-types";
 import {
   calcTrainingReadiness,
@@ -18,6 +18,14 @@ import {
 } from "@/lib/calculations";
 import { toDateKey } from "@/lib/date-helpers";
 import { useSupabaseSession } from "@/hooks/useSupabaseSession";
+import { useSyncStatus } from "@/hooks/useSyncStatus";
+import { runSupabasePersistence } from "@/lib/persistence-runner";
+import {
+  fetchSleepLog,
+  fetchWorkoutLog,
+  fetchWorkoutLogs,
+  upsertWorkoutLog,
+} from "@/lib/lifeee-persistence";
 
 interface Exercise {
   name: string;
@@ -88,7 +96,7 @@ function computeReadiness(sleepReadiness: number, form: WorkoutForm) {
 
 export default function WorkoutPage() {
   const today = useMemo(() => toDateKey(new Date()), []);
-  const { hasSupabaseConfig, userId } = useSupabaseSession();
+  const { hasSupabaseConfig, isLoading: sessionLoading, userId } = useSupabaseSession();
   const [form, setForm] = useState<WorkoutForm>(defaultForm);
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [history, setHistory] = useState<WorkoutLogRow[]>([]);
@@ -104,71 +112,70 @@ export default function WorkoutPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const remoteLoadedRef = useRef(false);
+  const { syncStatus, setSyncStatus } = useSyncStatus("local");
 
   useEffect(() => {
     let active = true;
 
     const load = async () => {
-      if (!supabase || !userId) {
+      if (sessionLoading) {
+        setIsLoading(true);
+        setSyncStatus("waiting");
+        return;
+      }
+
+      if (!hasSupabaseConfig || !userId) {
         if (!active) return;
+        remoteLoadedRef.current = false;
         setIsLoading(false);
         setNotice(
           hasSupabaseConfig
             ? "No Supabase session yet. Workout logs stay in local draft mode until auth is connected."
             : "Supabase env vars are missing. Workout logs stay in local draft mode.",
         );
+        setSyncStatus(hasSupabaseConfig ? "waiting" : "local");
         return;
       }
 
       setIsLoading(true);
       setError(null);
+      setSyncStatus("loading");
 
       const start = new Date();
       start.setDate(start.getDate() - 6);
 
-      const [todayWorkout, weekWorkout, sleepLog] = await Promise.all([
-        supabase
-          .from("workout_logs")
-          .select("*")
-          .eq("user_id", userId)
-          .eq("date", today)
-          .maybeSingle(),
-        supabase
-          .from("workout_logs")
-          .select("*")
-          .eq("user_id", userId)
-          .gte("date", toDateKey(start))
-          .lte("date", today)
-          .order("date", { ascending: true }),
-        supabase
-          .from("sleep_logs")
-          .select("sleep_readiness")
-          .eq("user_id", userId)
-          .eq("date", today)
-          .maybeSingle(),
-      ]);
+      try {
+        const [todayWorkout, weekWorkout, sleepLog] = await Promise.all([
+          fetchWorkoutLog(userId, today),
+          fetchWorkoutLogs(userId, toDateKey(start), today),
+          fetchSleepLog(userId, today),
+        ]);
 
-      if (!active) return;
+        if (!active) return;
 
-      if (todayWorkout.error) {
-        setError(todayWorkout.error.message);
-      } else if (todayWorkout.data) {
-        setForm(rowToForm(todayWorkout.data as WorkoutLogRow));
-        setExercises(rowToExercises((todayWorkout.data as WorkoutLogRow).exercises));
+        if (todayWorkout) {
+          setForm(rowToForm(todayWorkout));
+          setExercises(rowToExercises(todayWorkout.exercises));
+        }
+
+        setHistory(weekWorkout);
+
+        if (sleepLog?.sleep_readiness != null) {
+          setSleepReadiness(Number(sleepLog.sleep_readiness));
+        }
+
+        remoteLoadedRef.current = true;
+        setIsLoading(false);
+        setNotice("Loaded from Supabase.");
+        setSyncStatus("saved");
+      } catch (loadError) {
+        if (!active) return;
+        remoteLoadedRef.current = false;
+        setError(loadError instanceof Error ? loadError.message : "Unable to load workout logs.");
+        setIsLoading(false);
+        setSyncStatus("error");
       }
-
-      if (weekWorkout.error) {
-        setError(weekWorkout.error.message);
-      } else {
-        setHistory((weekWorkout.data ?? []) as WorkoutLogRow[]);
-      }
-
-      if (!sleepLog.error && sleepLog.data?.sleep_readiness != null) {
-        setSleepReadiness(Number(sleepLog.data.sleep_readiness));
-      }
-
-      setIsLoading(false);
-      setNotice("Loaded from Supabase.");
     };
 
     void load();
@@ -176,7 +183,7 @@ export default function WorkoutPage() {
     return () => {
       active = false;
     };
-  }, [hasSupabaseConfig, today, userId]);
+  }, [hasSupabaseConfig, sessionLoading, setSyncStatus, today, userId]);
 
   const readinessScore = computeReadiness(sleepReadiness, form);
   const decision = getWorkoutDecision(readinessScore, form.pain);
@@ -195,7 +202,6 @@ export default function WorkoutPage() {
 
   const handleSaveWorkout = async () => {
     const payload = {
-      user_id: userId,
       date: today,
       workout_type: form.workoutType,
       exercises,
@@ -208,7 +214,7 @@ export default function WorkoutPage() {
       notes: form.notes.trim() || null,
     };
 
-    if (!supabase || !userId) {
+    if (!userId) {
       setHistory((current) => {
         const nextRow: WorkoutLogRow = {
           id: crypto.randomUUID(),
@@ -230,34 +236,34 @@ export default function WorkoutPage() {
         return [...others, nextRow];
       });
       setNotice("Workout stored in local draft mode.");
+      setSyncStatus(hasSupabaseConfig ? "waiting" : "local");
       return;
     }
 
     setIsSaving(true);
     setError(null);
     setNotice(null);
+    setSyncStatus("saving");
 
-    const { error: saveError } = await supabase
-      .from("workout_logs")
-      .upsert(payload, { onConflict: "user_id,date" });
+    const result = await runSupabasePersistence({
+      hasSupabaseConfig,
+      userId,
+      hasLoadedRemote: remoteLoadedRef.current,
+      operation: () => upsertWorkoutLog(userId, payload),
+    });
 
-    if (saveError) {
-      setError(saveError.message);
-    } else {
-      const { data: savedRow } = await supabase
-        .from("workout_logs")
-        .select("*")
-        .eq("user_id", userId)
-        .eq("date", today)
-        .maybeSingle();
-
-      if (savedRow) {
+    if (result.ok) {
+      if (result.data) {
         setHistory((current) => {
           const next = current.filter((row) => row.date !== today);
-          return [...next, savedRow as WorkoutLogRow];
+          return [...next, result.data as WorkoutLogRow];
         });
       }
       setNotice("Workout saved to Supabase.");
+      setSyncStatus(result.status);
+    } else {
+      setError(result.error);
+      setSyncStatus(result.status);
     }
 
     setIsSaving(false);
@@ -277,11 +283,16 @@ export default function WorkoutPage() {
   return (
     <div className="space-y-6">
       <div className="border-b border-[#ddd4c6] pb-4">
-        <h1 className="text-2xl font-semibold text-[#25313c]">Workout</h1>
-        <p className="text-sm text-[#6f685f] mt-1">
-          Track training, athletic development, fatigue, progression, and injury
-          risk.
-        </p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-semibold text-[#25313c]">Workout</h1>
+            <p className="text-sm text-[#6f685f] mt-1">
+              Track training, athletic development, fatigue, progression, and injury
+              risk.
+            </p>
+          </div>
+          <SyncBadge status={syncStatus} />
+        </div>
       </div>
 
       <div className="card-surface p-5">
@@ -581,7 +592,7 @@ export default function WorkoutPage() {
           <button
             onClick={handleSaveWorkout}
             className="btn-primary inline-flex w-full items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={isSaving || isLoading}
+            disabled={isSaving || isLoading || sessionLoading}
           >
             {isSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
             {isSaving ? "Saving..." : "Save Workout"}

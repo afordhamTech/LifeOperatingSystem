@@ -56,6 +56,7 @@ export type Task = {
   daily_role: DailyRole | null;
   recurring: boolean;
   notes: string;
+  linked_anchor_id?: string | null;
   fixed_time: string | null; // optional ISO time string for Anchor
   created_at: string;
   updated_at: string;
@@ -109,6 +110,7 @@ export function makeTask(partial: Partial<Task> & { title: string }): Task {
     daily_role: partial.daily_role ?? null,
     recurring: partial.recurring ?? false,
     notes: partial.notes ?? "",
+    linked_anchor_id: partial.linked_anchor_id ?? null,
     fixed_time: partial.fixed_time ?? null,
     created_at: now,
     updated_at: now,

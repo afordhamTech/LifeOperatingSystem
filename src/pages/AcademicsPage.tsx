@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Bar,
   BarChart,
@@ -9,12 +9,20 @@ import {
   YAxis,
 } from "recharts";
 import { AlertTriangle, Loader2, Plus, Trash2 } from "lucide-react";
-import { supabase } from "@/lib/supabase-client";
+import { SyncBadge } from "@/components/SyncBadge";
 import type { AcademicTaskRow } from "@/lib/supabase-types";
 import { calculateAcademicPriorityScore } from "@/lib/life-scoring";
 import { toDateKey } from "@/lib/date-helpers";
 import { useSupabaseSession } from "@/hooks/useSupabaseSession";
 import { getStatusColor } from "@/components/StatusRing";
+import { useSyncStatus } from "@/hooks/useSyncStatus";
+import { runSupabasePersistence } from "@/lib/persistence-runner";
+import {
+  deleteAcademicTask,
+  fetchAcademicTasks,
+  upsertAcademicTask,
+  type AcademicTaskPayload,
+} from "@/lib/lifeee-persistence";
 
 type AcademicTaskForm = {
   className: string;
@@ -76,46 +84,95 @@ function formToRowDraft(form: AcademicTaskForm, userId: string) {
   } satisfies AcademicTaskRow;
 }
 
+function taskPayloadFromForm(form: AcademicTaskForm): AcademicTaskPayload {
+  const priorityScore = calculateAcademicPriorityScore({
+    gradeImpact: form.gradeImpact,
+    urgency: estimateUrgency(form.dueDate),
+    difficulty: form.difficulty,
+    timeRequiredScore: Math.min(10, form.estimatedHours),
+  });
+
+  return {
+    class_name: form.className.trim(),
+    task_name: form.taskName.trim(),
+    due_date: new Date(form.dueDate).toISOString(),
+    estimated_hours: form.estimatedHours,
+    difficulty: form.difficulty,
+    grade_impact: form.gradeImpact,
+    status: form.status,
+    priority_score: priorityScore,
+    notes: form.notes.trim() || null,
+  };
+}
+
+function taskPayloadFromRow(task: AcademicTaskRow): AcademicTaskPayload {
+  return {
+    id: task.id,
+    class_name: task.class_name,
+    task_name: task.task_name,
+    due_date: task.due_date,
+    estimated_hours: task.estimated_hours,
+    difficulty: task.difficulty,
+    grade_impact: task.grade_impact,
+    status: task.status,
+    priority_score: task.priority_score,
+    notes: task.notes,
+  };
+}
+
 export default function AcademicsPage() {
-  const { hasSupabaseConfig: supabaseConfigured, userId } = useSupabaseSession();
+  const { hasSupabaseConfig: supabaseConfigured, isLoading: sessionLoading, userId } =
+    useSupabaseSession();
   const [form, setForm] = useState<AcademicTaskForm>(() => createDefaultForm());
   const [tasks, setTasks] = useState<AcademicTaskRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const remoteLoadedRef = useRef(false);
+  const { syncStatus, setSyncStatus } = useSyncStatus("local");
 
   useEffect(() => {
     let active = true;
 
     const load = async () => {
-      if (!supabase || !userId) {
+      if (sessionLoading) {
+        setIsLoading(true);
+        setSyncStatus("waiting");
+        return;
+      }
+
+      if (!supabaseConfigured || !userId) {
         if (!active) return;
+        remoteLoadedRef.current = false;
         setIsLoading(false);
         setNotice(
           supabaseConfigured
             ? "No Supabase session yet. Tasks stay in local draft mode until auth is connected."
             : "Supabase env vars are missing. Tasks stay in local draft mode.",
         );
+        setSyncStatus(supabaseConfigured ? "waiting" : "local");
         return;
       }
 
       setIsLoading(true);
       setError(null);
+      setSyncStatus("loading");
 
-      const { data, error: loadError } = await supabase
-        .from("academic_tasks")
-        .select("*")
-        .eq("user_id", userId)
-        .order("priority_score", { ascending: false });
+      try {
+        const data = await fetchAcademicTasks(userId);
 
-      if (!active) return;
+        if (!active) return;
 
-      if (loadError) {
-        setError(loadError.message);
-      } else {
-        setTasks((data ?? []) as AcademicTaskRow[]);
+        setTasks(data);
+        remoteLoadedRef.current = true;
         setNotice("Loaded from Supabase.");
+        setSyncStatus("saved");
+      } catch (loadError) {
+        if (!active) return;
+        remoteLoadedRef.current = false;
+        setError(loadError instanceof Error ? loadError.message : "Unable to load academic tasks.");
+        setSyncStatus("error");
       }
 
       setIsLoading(false);
@@ -126,7 +183,7 @@ export default function AcademicsPage() {
     return () => {
       active = false;
     };
-  }, [supabaseConfigured, userId]);
+  }, [sessionLoading, setSyncStatus, supabaseConfigured, userId]);
 
   const sortedTasks = useMemo(
     () => [...tasks].sort((a, b) => Number(b.priority_score ?? 0) - Number(a.priority_score ?? 0)),
@@ -148,52 +205,38 @@ export default function AcademicsPage() {
   const handleAddTask = async () => {
     if (!form.className.trim() || !form.taskName.trim()) return;
 
-    const priorityScore = calculateAcademicPriorityScore({
-      gradeImpact: form.gradeImpact,
-      urgency: estimateUrgency(form.dueDate),
-      difficulty: form.difficulty,
-      timeRequiredScore: Math.min(10, form.estimatedHours),
-    });
-
-    if (!supabase || !userId) {
+    if (!userId) {
       setTasks((current) => [
         formToRowDraft(form, "local-draft"),
         ...current,
       ]);
       setForm(createDefaultForm());
       setNotice("Task added in local draft mode.");
+      setSyncStatus(supabaseConfigured ? "waiting" : "local");
       return;
     }
 
     setIsSaving(true);
     setError(null);
     setNotice(null);
+    setSyncStatus("saving");
 
-    const payload = {
-      user_id: userId,
-      class_name: form.className.trim(),
-      task_name: form.taskName.trim(),
-      due_date: new Date(form.dueDate).toISOString(),
-      estimated_hours: form.estimatedHours,
-      difficulty: form.difficulty,
-      grade_impact: form.gradeImpact,
-      status: form.status,
-      priority_score: priorityScore,
-      notes: form.notes.trim() || null,
-    };
+    const result = await runSupabasePersistence({
+      hasSupabaseConfig: supabaseConfigured,
+      userId,
+      hasLoadedRemote: remoteLoadedRef.current,
+      operation: () => upsertAcademicTask(userId, taskPayloadFromForm(form)),
+    });
 
-    const { data, error: insertError } = await supabase
-      .from("academic_tasks")
-      .insert(payload)
-      .select("*")
-      .maybeSingle();
-
-    if (insertError) {
-      setError(insertError.message);
-    } else if (data) {
-      setTasks((current) => [data as AcademicTaskRow, ...current]);
+    if (result.ok && result.data) {
+      const savedTask = result.data;
+      setTasks((current) => [savedTask, ...current]);
       setForm(createDefaultForm());
       setNotice("Task saved to Supabase.");
+      setSyncStatus(result.status);
+    } else if (!result.ok) {
+      setError(result.error);
+      setSyncStatus(result.status);
     }
 
     setIsSaving(false);
@@ -203,47 +246,69 @@ export default function AcademicsPage() {
     id: string,
     status: "pending" | "in_progress" | "completed",
   ) => {
-    setTasks((current) =>
-      current.map((task) => (task.id === id ? { ...task, status } : task)),
-    );
+    const existingTask = tasks.find((task) => task.id === id);
+    if (!existingTask) return;
+    const nextTask = { ...existingTask, status };
+    setTasks((current) => current.map((task) => (task.id === id ? nextTask : task)));
 
-    if (!supabase || !userId) return;
+    if (!userId) {
+      setSyncStatus(supabaseConfigured ? "waiting" : "local");
+      return;
+    }
 
-    const { error: updateError } = await supabase
-      .from("academic_tasks")
-      .update({ status })
-      .eq("id", id)
-      .eq("user_id", userId);
+    setSyncStatus("saving");
+    const result = await runSupabasePersistence({
+      hasSupabaseConfig: supabaseConfigured,
+      userId,
+      hasLoadedRemote: remoteLoadedRef.current,
+      operation: () => upsertAcademicTask(userId, taskPayloadFromRow(nextTask)),
+    });
 
-    if (updateError) {
-      setError(updateError.message);
+    if (result.ok) {
+      setSyncStatus(result.status);
+    } else {
+      setError(result.error);
+      setSyncStatus(result.status);
     }
   };
 
   const deleteTask = async (id: string) => {
     setTasks((current) => current.filter((task) => task.id !== id));
 
-    if (!supabase || !userId) return;
+    if (!userId) {
+      setSyncStatus(supabaseConfigured ? "waiting" : "local");
+      return;
+    }
 
-    const { error: deleteError } = await supabase
-      .from("academic_tasks")
-      .delete()
-      .eq("id", id)
-      .eq("user_id", userId);
+    setSyncStatus("saving");
+    const result = await runSupabasePersistence({
+      hasSupabaseConfig: supabaseConfigured,
+      userId,
+      hasLoadedRemote: remoteLoadedRef.current,
+      operation: () => deleteAcademicTask(userId, id),
+    });
 
-    if (deleteError) {
-      setError(deleteError.message);
+    if (result.ok) {
+      setSyncStatus(result.status);
+    } else {
+      setError(result.error);
+      setSyncStatus(result.status);
     }
   };
 
   return (
     <div className="space-y-6">
       <div className="border-b border-[#ddd4c6] pb-4">
-        <h1 className="text-2xl font-semibold text-[#25313c]">Academics</h1>
-        <p className="text-sm text-[#6f685f] mt-1">
-          Track assignments, exams, study load, grade risk, and weekly academic
-          execution.
-        </p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-semibold text-[#25313c]">Academics</h1>
+            <p className="text-sm text-[#6f685f] mt-1">
+              Track assignments, exams, study load, grade risk, and weekly academic
+              execution.
+            </p>
+          </div>
+          <SyncBadge status={syncStatus} />
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
@@ -375,7 +440,7 @@ export default function AcademicsPage() {
             <button
               onClick={handleAddTask}
               className="btn-primary mt-3 inline-flex items-center gap-2 disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={isSaving || isLoading}
+              disabled={isSaving || isLoading || sessionLoading}
             >
               {isSaving ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
               Add Task
@@ -557,8 +622,8 @@ export default function AcademicsPage() {
             </h3>
             <div className="text-xs text-[#6f685f]">
               {supabaseConfigured
-                ? "Once Supabase Auth is connected, these tasks will save to your user row set."
-                : "The form works locally, but saving to Supabase is disabled until the env vars are added."}
+                ? "Waiting for login. Unsynced tasks shown here are local draft only."
+                : "Local draft only. Supabase writes are disabled until the env vars are added."}
             </div>
           </div>
         </div>

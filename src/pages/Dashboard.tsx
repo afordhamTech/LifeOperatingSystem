@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   LineChart,
   Line,
@@ -20,7 +20,9 @@ import {
   Wrench,
 } from "lucide-react";
 import DailyLogPanel from "@/components/DailyLogPanel";
+import { DailyOpModeChip, deriveDailyOpMode } from "@/components/DailyOpModeChip";
 import StatusRing, { getStatusColor } from "@/components/StatusRing";
+import { SyncBadge } from "@/components/SyncBadge";
 import { supabase } from "@/lib/supabase-client";
 import type {
   AcademicTaskRow,
@@ -38,14 +40,21 @@ import { useSupabaseSession } from "@/hooks/useSupabaseSession";
 import { Link } from "react-router";
 import { buildDayPlan, loadTasks, type Task } from "@/lib/task-system";
 import {
+  buildDailyPlanPayload,
+  fetchCalendarAnchors,
+  fetchUniversalTasks,
+  type LifeeeSyncStatus,
+  upsertDailyPlan,
+} from "@/lib/lifeee-persistence";
+import {
   CATEGORY_COLORS,
   buildCalendarPlanningPrompt,
   buildTodayTimeline,
   calculateAvailableTime,
   calculateRealityScore,
-  loadAnchors,
   parseTimeToMinutes,
   type CalendarAnchor,
+  loadAnchors,
 } from "@/lib/calendar-system";
 
 type DashboardState = {
@@ -89,6 +98,11 @@ export default function Dashboard() {
   const [isLoading, setIsLoading] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [taskList, setTaskList] = useState<Task[]>(() => loadTasks());
+  const [anchorList, setAnchorList] = useState<CalendarAnchor[]>(() => loadAnchors());
+  const [planSyncStatus, setPlanSyncStatus] = useState<LifeeeSyncStatus>("local");
+  const [planSyncError, setPlanSyncError] = useState<string | null>(null);
+  const planSaveSequenceRef = useRef(0);
 
   useEffect(() => {
     let active = true;
@@ -96,6 +110,9 @@ export default function Dashboard() {
     const load = async () => {
       if (!supabase || !userId) {
         if (!active) return;
+        setTaskList(loadTasks());
+        setAnchorList(loadAnchors());
+        setPlanSyncStatus(hasSupabaseConfig ? "waiting" : "local");
         setIsLoading(false);
         setNotice(
           hasSupabaseConfig
@@ -111,7 +128,18 @@ export default function Dashboard() {
       const start = new Date();
       start.setDate(start.getDate() - 6);
 
-      const [dailyLogResult, sleepTodayResult, sleepWeekResult, tasksResult, workoutTodayResult, workoutWeekResult, nutritionTodayResult, weeklyReviewResult] =
+      const [
+        dailyLogResult,
+        sleepTodayResult,
+        sleepWeekResult,
+        tasksResult,
+        workoutTodayResult,
+        workoutWeekResult,
+        nutritionTodayResult,
+        weeklyReviewResult,
+        universalTasksResult,
+        calendarAnchorsResult,
+      ] =
         await Promise.all([
           supabase
             .from("daily_logs")
@@ -163,6 +191,12 @@ export default function Dashboard() {
             .eq("user_id", userId)
             .eq("week_start", weekStart)
             .maybeSingle(),
+          fetchUniversalTasks(userId)
+            .then((data) => ({ data, error: null }))
+            .catch((caughtError: unknown) => ({ data: [] as Task[], error: caughtError })),
+          fetchCalendarAnchors(userId)
+            .then((data) => ({ data, error: null }))
+            .catch((caughtError: unknown) => ({ data: [] as CalendarAnchor[], error: caughtError })),
         ]);
 
       if (!active) return;
@@ -175,10 +209,12 @@ export default function Dashboard() {
         workoutTodayResult.error ??
         workoutWeekResult.error ??
         nutritionTodayResult.error ??
-        weeklyReviewResult.error;
+        weeklyReviewResult.error ??
+        universalTasksResult.error ??
+        calendarAnchorsResult.error;
 
       if (firstError) {
-        setError(firstError.message);
+        setError(firstError instanceof Error ? firstError.message : "Dashboard Supabase load failed.");
       }
 
       setState({
@@ -191,8 +227,11 @@ export default function Dashboard() {
         nutritionToday: (nutritionTodayResult.data as NutritionLogRow | null) ?? null,
         weeklyReview: (weeklyReviewResult.data as WeeklyReviewRow | null) ?? null,
       });
+      setTaskList(universalTasksResult.data);
+      setAnchorList(calendarAnchorsResult.data);
 
       setIsLoading(false);
+      setPlanSyncStatus("saved");
       setNotice("Dashboard loaded from Supabase.");
     };
 
@@ -240,12 +279,6 @@ export default function Dashboard() {
   const workoutExercises = rowExercises(state.workoutToday).slice(0, 3);
 
   const statusAverage = (sleepScore + academicScore + workoutScore) / 3;
-  const [taskList, setTaskList] = useState<Task[]>([]);
-  const [anchorList, setAnchorList] = useState<CalendarAnchor[]>([]);
-  useEffect(() => {
-    setTaskList(loadTasks());
-    setAnchorList(loadAnchors());
-  }, []);
   const currentEnergy = Number(state.dailyLog?.energy ?? 7);
   const dayPlan = useMemo(
     () => buildDayPlan(taskList, currentEnergy),
@@ -283,6 +316,67 @@ export default function Dashboard() {
       }),
     [availableTime, dayPlan, currentEnergy, sleepScore, academicScore, workoutScore],
   );
+  const operatingMode = useMemo(
+    () => deriveDailyOpMode(realityScore.score, currentEnergy, sleepScore || 6),
+    [currentEnergy, realityScore.score, sleepScore],
+  );
+
+  useEffect(() => {
+    if (!hasSupabaseConfig) {
+      setPlanSyncStatus("local");
+      return;
+    }
+    if (!userId) {
+      setPlanSyncStatus("waiting");
+      return;
+    }
+    if (isLoading || error) return;
+
+    const saveSequence = planSaveSequenceRef.current + 1;
+    planSaveSequenceRef.current = saveSequence;
+    const timeout = window.setTimeout(() => {
+      setPlanSyncStatus("saving");
+      setPlanSyncError(null);
+
+      const payload = {
+        ...buildDailyPlanPayload({
+          date: today,
+          plan: dayPlan,
+          realityScore: realityScore.score,
+          mainBottleneck: realityScore.recommendations[0] ?? null,
+          shutdownTime: availableTime.bestShutdownTarget,
+        }),
+        operating_mode: operatingMode,
+      };
+
+      void upsertDailyPlan(userId, payload)
+        .then(() => {
+          if (planSaveSequenceRef.current === saveSequence) {
+            setPlanSyncStatus("saved");
+          }
+        })
+        .catch((caughtError: unknown) => {
+          if (planSaveSequenceRef.current !== saveSequence) return;
+          setPlanSyncStatus("error");
+          setPlanSyncError(
+            caughtError instanceof Error ? caughtError.message : "Dashboard daily plan did not save.",
+          );
+        });
+    }, 900);
+
+    return () => window.clearTimeout(timeout);
+  }, [
+    availableTime.bestShutdownTarget,
+    dayPlan,
+    error,
+    hasSupabaseConfig,
+    isLoading,
+    operatingMode,
+    realityScore.recommendations,
+    realityScore.score,
+    today,
+    userId,
+  ]);
 
   const [calendarPromptCopied, setCalendarPromptCopied] = useState(false);
   const copyCalendarPrompt = async () => {
@@ -326,10 +420,11 @@ export default function Dashboard() {
         <h1 className="text-2xl font-semibold text-[#25313c]">
           Daily Operating System
         </h1>
-        <p className="text-sm text-[#6f685f] mt-1">
-          Your command center. Inputs, calculations, status, and next actions -
-          all in one place.
-        </p>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <DailyOpModeChip mode={operatingMode} />
+          <SyncBadge status={planSyncStatus} />
+          {planSyncError ? <span className="text-xs text-destructive">{planSyncError}</span> : null}
+        </div>
       </div>
 
       <div className="card-surface p-4 flex flex-wrap items-center justify-between gap-4">
@@ -493,7 +588,7 @@ export default function Dashboard() {
               Today's Plan
             </div>
             <div className="text-sm text-[#25313c]">
-              Pulled from Task Command. Energy: {currentEnergy}/10.
+              Saved to daily_plans from Task Command, Calendar, and energy. Energy: {currentEnergy}/10.
             </div>
           </div>
           <Link
@@ -615,6 +710,14 @@ export default function Dashboard() {
                 time {realityScore.available_time_fit.toFixed(1)} · energy {realityScore.energy_fit.toFixed(1)} · focus {realityScore.priority_focus.toFixed(1)} · recovery {realityScore.recovery_protection.toFixed(1)}
               </div>
             </div>
+            <div className="rounded-xl border border-border bg-card/70 p-3">
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+                Anti Drift
+              </div>
+              <div className="mt-1 text-sm text-foreground">
+                {realityScore.recommendations[0] ?? "Keep only anchors, one must-do, maintenance, and recovery if today slips."}
+              </div>
+            </div>
             <ul className="space-y-1.5 text-xs text-muted-foreground">
               {realityScore.recommendations.slice(0, 3).map((r, i) => (
                 <li key={i} className="flex items-start gap-2">
@@ -655,7 +758,7 @@ export default function Dashboard() {
             <div className="flex items-center gap-2">
               <FlaskConical size={14} className="text-[#2f4f6f]" />
               <span className="text-[10px] uppercase tracking-wider text-[#2f4f6f] font-semibold">
-                MCAT Next Move
+                MCAT readiness gating
               </span>
             </div>
             <div className="mt-2 text-sm font-semibold text-[#25313c]">

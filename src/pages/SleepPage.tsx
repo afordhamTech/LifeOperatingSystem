@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CartesianGrid,
   Line,
@@ -13,7 +13,7 @@ import StatusRing, {
   getStatusColor,
   getStatusLabel,
 } from "@/components/StatusRing";
-import { supabase } from "@/lib/supabase-client";
+import { SyncBadge } from "@/components/SyncBadge";
 import type { SleepLogRow } from "@/lib/supabase-types";
 import {
   calculateSleepDebt,
@@ -21,6 +21,13 @@ import {
 } from "@/lib/life-scoring";
 import { toDateKey } from "@/lib/date-helpers";
 import { useSupabaseSession } from "@/hooks/useSupabaseSession";
+import { useSyncStatus } from "@/hooks/useSyncStatus";
+import { runSupabasePersistence } from "@/lib/persistence-runner";
+import {
+  fetchSleepLog,
+  fetchSleepLogs,
+  upsertSleepLog,
+} from "@/lib/lifeee-persistence";
 
 type SleepForm = {
   bedtime: string;
@@ -128,62 +135,61 @@ export default function SleepPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const remoteLoadedRef = useRef(false);
+  const { syncStatus, setSyncStatus } = useSyncStatus("local");
 
   useEffect(() => {
     let active = true;
 
     const load = async () => {
-      if (!supabase || !userId) {
+      if (sessionLoading) {
+        setIsLoading(true);
+        setSyncStatus("waiting");
+        return;
+      }
+
+      if (!supabaseConfigured || !userId) {
         if (!active) return;
+        remoteLoadedRef.current = false;
         setIsLoading(false);
         setNotice(
           supabaseConfigured
             ? "No Supabase session yet. Sleep logs stay in draft mode until auth is connected."
             : "Supabase env vars are missing. Sleep logs stay in local draft mode.",
         );
+        setSyncStatus(supabaseConfigured ? "waiting" : "local");
         return;
       }
 
       setIsLoading(true);
       setError(null);
+      setSyncStatus("loading");
 
       const start = new Date();
       start.setDate(start.getDate() - 6);
 
-      const [todayResult, weekResult] = await Promise.all([
-        supabase
-          .from("sleep_logs")
-          .select("*")
-          .eq("user_id", userId)
-          .eq("date", today)
-          .maybeSingle(),
-        supabase
-          .from("sleep_logs")
-          .select("*")
-          .eq("user_id", userId)
-          .gte("date", toDateKey(start))
-          .lte("date", today)
-          .order("date", { ascending: true }),
-      ]);
+      try {
+        const [todayRow, weekRows] = await Promise.all([
+          fetchSleepLog(userId, today),
+          fetchSleepLogs(userId, toDateKey(start), today),
+        ]);
 
-      if (!active) return;
+        if (!active) return;
 
-      if (todayResult.error) {
-        setError(todayResult.error.message);
-      } else if (todayResult.data) {
-        setForm(rowToForm(todayResult.data as SleepLogRow));
-      } else {
-        setForm(defaultForm);
+        setForm(todayRow ? rowToForm(todayRow) : defaultForm);
+        setHistory(weekRows);
+
+        remoteLoadedRef.current = true;
+        setIsLoading(false);
+        setNotice("Loaded from Supabase.");
+        setSyncStatus("saved");
+      } catch (loadError) {
+        if (!active) return;
+        remoteLoadedRef.current = false;
+        setError(loadError instanceof Error ? loadError.message : "Unable to load sleep logs.");
+        setIsLoading(false);
+        setSyncStatus("error");
       }
-
-      if (weekResult.error) {
-        setError(weekResult.error.message);
-      } else {
-        setHistory((weekResult.data ?? []) as SleepLogRow[]);
-      }
-
-      setIsLoading(false);
-      setNotice("Loaded from Supabase.");
     };
 
     void load();
@@ -191,7 +197,7 @@ export default function SleepPage() {
     return () => {
       active = false;
     };
-  }, [supabaseConfigured, today, userId]);
+  }, [sessionLoading, setSyncStatus, supabaseConfigured, today, userId]);
 
   const hoursSlept = calculateHoursSlept(form.bedtime, form.wakeTime);
   const sleepDebt = calculateSleepDebt(hoursSlept);
@@ -210,48 +216,43 @@ export default function SleepPage() {
   }));
 
   const handleSave = async () => {
-    if (!supabase || !userId) return;
+    if (!userId) {
+      setSyncStatus(supabaseConfigured ? "waiting" : "local");
+      setNotice(
+        supabaseConfigured
+          ? "Waiting for login. This is not saved to Supabase yet."
+          : "Local draft only. Supabase is not configured.",
+      );
+      return;
+    }
 
     setIsSaving(true);
     setError(null);
     setNotice(null);
+    setSyncStatus("saving");
 
-    const payload = {
-      user_id: userId,
+    const result = await runSupabasePersistence({
+      hasSupabaseConfig: supabaseConfigured,
+      userId,
+      hasLoadedRemote: remoteLoadedRef.current,
+      operation: () =>
+        upsertSleepLog(userId, {
       date: today,
       ...formToPayload(form, today),
-    };
+        }),
+    });
 
-    const { error: saveError } = await supabase
-      .from("sleep_logs")
-      .upsert(payload, { onConflict: "user_id,date" });
-
-    if (saveError) {
-      setError(saveError.message);
-    } else {
+    if (result.ok) {
       setNotice("Sleep log saved to Supabase.");
-      const { data } = await supabase
-        .from("sleep_logs")
-        .select("*")
-        .eq("user_id", userId)
-        .eq("date", today)
-        .maybeSingle();
-
-      if (data) {
-        setForm(rowToForm(data as SleepLogRow));
-      }
+      if (result.data) setForm(rowToForm(result.data));
 
       const start = new Date();
       start.setDate(start.getDate() - 6);
-      const { data: weekRows } = await supabase
-        .from("sleep_logs")
-        .select("*")
-        .eq("user_id", userId)
-        .gte("date", toDateKey(start))
-        .lte("date", today)
-        .order("date", { ascending: true });
-
-      setHistory((weekRows ?? []) as SleepLogRow[]);
+      setHistory(await fetchSleepLogs(userId, toDateKey(start), today));
+      setSyncStatus(result.status);
+    } else {
+      setError(result.error);
+      setSyncStatus(result.status);
     }
 
     setIsSaving(false);
@@ -269,11 +270,16 @@ export default function SleepPage() {
   return (
     <div className="space-y-6">
       <div className="border-b border-[#ddd4c6] pb-4">
-        <h1 className="text-2xl font-semibold text-[#25313c]">Sleep</h1>
-        <p className="text-sm text-[#6f685f] mt-1">
-          Track sleep quality, debt, recovery, and whether your body is ready to
-          perform.
-        </p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-semibold text-[#25313c]">Sleep</h1>
+            <p className="text-sm text-[#6f685f] mt-1">
+              Track sleep quality, debt, recovery, and whether your body is ready to
+              perform.
+            </p>
+          </div>
+          <SyncBadge status={syncStatus} />
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -451,7 +457,7 @@ export default function SleepPage() {
           <button
             onClick={handleSave}
             className="btn-primary mt-4 inline-flex w-full items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={!supabase || !userId || isSaving || isLoading || sessionLoading}
+            disabled={isSaving || isLoading || sessionLoading}
           >
             {isSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
             {isSaving ? "Saving..." : "Calculate & Save"}
