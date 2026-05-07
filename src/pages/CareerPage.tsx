@@ -7,13 +7,24 @@ import { SyncBadge } from "@/components/SyncBadge";
 import { useSupabaseSession } from "@/hooks/useSupabaseSession";
 import {
   createLifeeeId,
+  deleteProofItem,
   fetchProofItems,
   type LifeeeSyncStatus,
   type ProofItem,
   upsertProofItem,
 } from "@/lib/lifeee-persistence";
 import { calcProofScore } from "@/lib/calculations";
-import { Plus, Github, Linkedin, FileText, CheckCircle2, Circle } from "lucide-react";
+import {
+  CheckCircle2,
+  Circle,
+  FileText,
+  Github,
+  Linkedin,
+  Pencil,
+  Plus,
+  Trash2,
+  X,
+} from "lucide-react";
 
 const STORAGE_KEY = "lifeee.proof_items.v1";
 
@@ -32,6 +43,41 @@ function writeLocalProofItems(items: ProofItem[]) {
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
 }
 
+type ProofForm = {
+  projectName: string;
+  artifactType: string;
+  hoursWorked: number;
+  visibility: number;
+  difficulty: number;
+  relevance: number;
+  completion: number;
+  privacyLayer: string;
+};
+
+const emptyProofForm: ProofForm = {
+  projectName: "",
+  artifactType: "code",
+  hoursWorked: 1,
+  visibility: 5,
+  difficulty: 5,
+  relevance: 5,
+  completion: 5,
+  privacyLayer: "Private",
+};
+
+function formFromProofItem(item: ProofItem): ProofForm {
+  return {
+    projectName: item.projectName,
+    artifactType: item.artifactType,
+    hoursWorked: item.hoursWorked,
+    visibility: item.visibility,
+    difficulty: item.difficulty,
+    relevance: item.relevance,
+    completion: item.completion,
+    privacyLayer: item.privacyLayer,
+  };
+}
+
 export default function CareerPage() {
   const { hasSupabaseConfig, isLoading: sessionLoading, userId } = useSupabaseSession();
   const [items, setItems] = useState<ProofItem[]>(() => readLocalProofItems());
@@ -39,16 +85,8 @@ export default function CareerPage() {
   const [syncError, setSyncError] = useState<string | null>(null);
   const remoteLoadedRef = useRef(false);
 
-  const [form, setForm] = useState({
-    projectName: "",
-    artifactType: "code",
-    hoursWorked: 1,
-    visibility: 5,
-    difficulty: 5,
-    relevance: 5,
-    completion: 5,
-    privacyLayer: "Private",
-  });
+  const [form, setForm] = useState<ProofForm>(emptyProofForm);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -98,10 +136,31 @@ export default function CareerPage() {
     };
   }, [hasSupabaseConfig, sessionLoading, userId]);
 
-  const handleAdd = async () => {
+  const persistProofItem = async (item: ProofItem, fallback = "Could not save proof item.") => {
+    if (!hasSupabaseConfig || !userId || !remoteLoadedRef.current) {
+      setSyncStatus(hasSupabaseConfig ? "waiting" : "local");
+      return item;
+    }
+
+    setSyncStatus("saving");
+    setSyncError(null);
+
+    try {
+      const saved = await upsertProofItem(userId, item);
+      setSyncStatus("saved");
+      return saved;
+    } catch (error) {
+      setSyncError(error instanceof Error ? error.message : fallback);
+      setSyncStatus("error");
+      return null;
+    }
+  };
+
+  const handleSave = async () => {
     if (!form.projectName.trim()) return;
+    const existing = editingId ? items.find((item) => item.id === editingId) : null;
     const item: ProofItem = {
-      id: createLifeeeId(),
+      id: editingId ?? createLifeeeId(),
       projectName: form.projectName.trim(),
       artifactType: form.artifactType,
       hoursWorked: form.hoursWorked,
@@ -110,45 +169,81 @@ export default function CareerPage() {
       relevance: form.relevance,
       completion: form.completion,
       proofScore: calcProofScore(form.visibility, form.difficulty, form.relevance, form.completion),
-      githubUpdated: false,
-      linkedinUpdated: false,
-      resumeBulletAdded: false,
-      applicationSubmitted: false,
-      mentorContact: "",
-      skillPracticed: "",
+      githubUpdated: existing?.githubUpdated ?? false,
+      linkedinUpdated: existing?.linkedinUpdated ?? false,
+      resumeBulletAdded: existing?.resumeBulletAdded ?? false,
+      applicationSubmitted: existing?.applicationSubmitted ?? false,
+      mentorContact: existing?.mentorContact ?? "",
+      skillPracticed: existing?.skillPracticed ?? "",
       privacyLayer: form.privacyLayer,
     };
-    const optimistic = [item, ...items];
+    const optimistic = editingId
+      ? items.map((current) => (current.id === editingId ? item : current))
+      : [item, ...items];
     setItems(optimistic);
     writeLocalProofItems(optimistic);
 
-    if (hasSupabaseConfig && userId && remoteLoadedRef.current) {
-      try {
-        setSyncStatus("saving");
-        const saved = await upsertProofItem(userId, item);
-        const next = [saved, ...items];
-        setItems(next);
-        writeLocalProofItems(next);
-        setSyncStatus("saved");
-        setSyncError(null);
-      } catch (error) {
-        setSyncError(error instanceof Error ? error.message : "Could not save proof item.");
-        setSyncStatus("error");
-      }
-    } else {
-      setSyncStatus(hasSupabaseConfig ? "waiting" : "local");
+    const saved = await persistProofItem(item);
+    if (saved) {
+      const next = editingId
+        ? items.map((current) => (current.id === editingId ? saved : current))
+        : [saved, ...items];
+      setItems(next);
+      writeLocalProofItems(next);
     }
 
-    setForm({
-      projectName: "",
-      artifactType: "code",
-      hoursWorked: 1,
-      visibility: 5,
-      difficulty: 5,
-      relevance: 5,
-      completion: 5,
-      privacyLayer: "Private",
-    });
+    setForm(emptyProofForm);
+    setEditingId(null);
+  };
+
+  const startEdit = (item: ProofItem) => {
+    setEditingId(item.id);
+    setForm(formFromProofItem(item));
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setForm(emptyProofForm);
+  };
+
+  const removeProject = async (item: ProofItem) => {
+    const next = items.filter((current) => current.id !== item.id);
+    setItems(next);
+    writeLocalProofItems(next);
+
+    if (!hasSupabaseConfig || !userId || !remoteLoadedRef.current) {
+      setSyncStatus(hasSupabaseConfig ? "waiting" : "local");
+      return;
+    }
+
+    setSyncStatus("saving");
+    setSyncError(null);
+
+    try {
+      await deleteProofItem(userId, item.id);
+      setSyncStatus("saved");
+    } catch (error) {
+      setItems(items);
+      writeLocalProofItems(items);
+      setSyncError(error instanceof Error ? error.message : "Could not delete proof item.");
+      setSyncStatus("error");
+    }
+  };
+
+  const toggleProjectFlag = async (
+    item: ProofItem,
+    field: "githubUpdated" | "linkedinUpdated" | "resumeBulletAdded",
+  ) => {
+    const updated = { ...item, [field]: !item[field] };
+    const next = items.map((current) => (current.id === item.id ? updated : current));
+    setItems(next);
+    writeLocalProofItems(next);
+    const saved = await persistProofItem(updated, "Could not update proof item.");
+    if (saved) {
+      const savedItems = items.map((current) => (current.id === item.id ? saved : current));
+      setItems(savedItems);
+      writeLocalProofItems(savedItems);
+    }
   };
 
   const bulletsToUpdate = items.filter((item) => !item.resumeBulletAdded).length;
@@ -197,7 +292,20 @@ Tell me what proof is strongest, what I should polish, what I should add to my r
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="card-surface p-4">
-          <h3 className="text-sm font-semibold text-[#25313c] mb-3">ADD PROJECT</h3>
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold text-[#25313c]">
+              {editingId ? "EDIT PROJECT" : "ADD PROJECT"}
+            </h3>
+            {editingId ? (
+              <button
+                onClick={cancelEdit}
+                className="inline-flex items-center gap-1 rounded-md border border-[#ddd4c6] px-2 py-1 text-xs text-[#6f685f] hover:bg-[#f7f3ec]"
+              >
+                <X size={12} />
+                Cancel
+              </button>
+            ) : null}
+          </div>
           <div className="space-y-3">
             <input
               type="text"
@@ -262,9 +370,9 @@ Tell me what proof is strongest, what I should polish, what I should add to my r
                 </div>
               ))}
             </div>
-            <button onClick={handleAdd} className="btn-primary flex items-center gap-2">
-              <Plus size={14} />
-              Add Entry
+            <button onClick={() => void handleSave()} className="btn-primary flex items-center gap-2">
+              {editingId ? <CheckCircle2 size={14} /> : <Plus size={14} />}
+              {editingId ? "Save Changes" : "Add Entry"}
             </button>
           </div>
         </div>
@@ -300,7 +408,7 @@ Tell me what proof is strongest, what I should polish, what I should add to my r
         <div className="space-y-3">
           {items.map((project) => (
             <div key={project.id} className="p-3 bg-[#f0ebe2] rounded">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-medium text-[#25313c]">{project.projectName}</span>
                   <span className="text-[10px] px-1.5 py-0.5 bg-[#6b87ae]/10 text-[#6b87ae] rounded">
@@ -308,15 +416,31 @@ Tell me what proof is strongest, what I should polish, what I should add to my r
                   </span>
                   <PrivacyChip label={project.privacyLayer} />
                 </div>
-                <span
-                  className="text-xs font-bold px-2 py-0.5 rounded-full"
-                  style={{
-                    backgroundColor: `${getStatusColor(Number(project.proofScore || 0) * 1.2)}20`,
-                    color: getStatusColor(Number(project.proofScore || 0) * 1.2),
-                  }}
-                >
-                  {Number(project.proofScore || 0).toFixed(1)}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span
+                    className="text-xs font-bold px-2 py-0.5 rounded-full"
+                    style={{
+                      backgroundColor: `${getStatusColor(Number(project.proofScore || 0) * 1.2)}20`,
+                      color: getStatusColor(Number(project.proofScore || 0) * 1.2),
+                    }}
+                  >
+                    {Number(project.proofScore || 0).toFixed(1)}
+                  </span>
+                  <button
+                    onClick={() => startEdit(project)}
+                    className="inline-flex items-center gap-1 rounded-md border border-[#ddd4c6] bg-white px-2 py-1 text-xs text-[#25313c] hover:bg-[#f7f3ec]"
+                  >
+                    <Pencil size={12} />
+                    Edit
+                  </button>
+                  <button
+                    onClick={() => void removeProject(project)}
+                    className="rounded-md border border-[#ddd4c6] bg-white p-1 text-[#8c8478] hover:bg-[#f7f3ec] hover:text-destructive"
+                    title="Delete project"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
               </div>
               <div className="mt-2 text-xs text-[#6f685f]">
                 {Number(project.hoursWorked ?? 0)} hours worked
@@ -340,24 +464,42 @@ Tell me what proof is strongest, what I should polish, what I should add to my r
                 ))}
               </div>
               <div className="flex items-center gap-3 mt-2">
-                {project.githubUpdated ? (
-                  <CheckCircle2 size={12} className="text-[#6a9a74]" />
-                ) : (
-                  <Circle size={12} className="text-[#8c8478]" />
-                )}
-                <Github size={12} className={project.githubUpdated ? "text-[#6a9a74]" : "text-[#8c8478]"} />
-                {project.linkedinUpdated ? (
-                  <CheckCircle2 size={12} className="text-[#6a9a74]" />
-                ) : (
-                  <Circle size={12} className="text-[#8c8478]" />
-                )}
-                <Linkedin size={12} className={project.linkedinUpdated ? "text-[#6a9a74]" : "text-[#8c8478]"} />
-                {project.resumeBulletAdded ? (
-                  <CheckCircle2 size={12} className="text-[#6a9a74]" />
-                ) : (
-                  <Circle size={12} className="text-[#8c8478]" />
-                )}
-                <FileText size={12} className={project.resumeBulletAdded ? "text-[#6a9a74]" : "text-[#8c8478]"} />
+                <button
+                  onClick={() => void toggleProjectFlag(project, "githubUpdated")}
+                  className="inline-flex items-center gap-1 rounded-md border border-[#ddd4c6] bg-white px-2 py-1 text-[11px] text-[#6f685f] hover:bg-[#f7f3ec]"
+                >
+                  {project.githubUpdated ? (
+                    <CheckCircle2 size={12} className="text-[#6a9a74]" />
+                  ) : (
+                    <Circle size={12} className="text-[#8c8478]" />
+                  )}
+                  <Github size={12} className={project.githubUpdated ? "text-[#6a9a74]" : "text-[#8c8478]"} />
+                  GitHub
+                </button>
+                <button
+                  onClick={() => void toggleProjectFlag(project, "linkedinUpdated")}
+                  className="inline-flex items-center gap-1 rounded-md border border-[#ddd4c6] bg-white px-2 py-1 text-[11px] text-[#6f685f] hover:bg-[#f7f3ec]"
+                >
+                  {project.linkedinUpdated ? (
+                    <CheckCircle2 size={12} className="text-[#6a9a74]" />
+                  ) : (
+                    <Circle size={12} className="text-[#8c8478]" />
+                  )}
+                  <Linkedin size={12} className={project.linkedinUpdated ? "text-[#6a9a74]" : "text-[#8c8478]"} />
+                  LinkedIn
+                </button>
+                <button
+                  onClick={() => void toggleProjectFlag(project, "resumeBulletAdded")}
+                  className="inline-flex items-center gap-1 rounded-md border border-[#ddd4c6] bg-white px-2 py-1 text-[11px] text-[#6f685f] hover:bg-[#f7f3ec]"
+                >
+                  {project.resumeBulletAdded ? (
+                    <CheckCircle2 size={12} className="text-[#6a9a74]" />
+                  ) : (
+                    <Circle size={12} className="text-[#8c8478]" />
+                  )}
+                  <FileText size={12} className={project.resumeBulletAdded ? "text-[#6a9a74]" : "text-[#8c8478]"} />
+                  Resume
+                </button>
               </div>
             </div>
           ))}
