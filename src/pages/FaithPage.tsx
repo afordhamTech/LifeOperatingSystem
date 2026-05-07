@@ -59,6 +59,20 @@ function serializeFaithEntry(entry: FaithEntry) {
   });
 }
 
+function hasMeaningfulFaithDraft(entry: FaithEntry) {
+  return (
+    entry.prayerDone ||
+    entry.churchInvolvement ||
+    Boolean(entry.bibleReading.trim()) ||
+    Boolean(entry.chapterStudied.trim()) ||
+    Boolean(entry.mainLesson.trim()) ||
+    Boolean(entry.question.trim()) ||
+    Boolean(entry.actionStep.trim()) ||
+    Boolean(entry.temptation.trim()) ||
+    Boolean(entry.gratitude.trim())
+  );
+}
+
 export default function FaithPage() {
   const today = new Date().toISOString().split("T")[0];
   const weekStart = new Date();
@@ -83,7 +97,8 @@ export default function FaithPage() {
       }
 
       const localEntries = readLocalFaithEntries();
-      const localEntry = localEntries.find((entry) => entry.date === today) ?? null;
+      const localDraft = localEntries.find((entry) => entry.date === today) ?? null;
+      const localEntry = localDraft && hasMeaningfulFaithDraft(localDraft) ? localDraft : null;
 
       if (!hasSupabaseConfig || !userId) {
         remoteLoadedRef.current = false;
@@ -110,25 +125,31 @@ export default function FaithPage() {
         ]);
         if (!active) return;
 
+        let nextSyncStatus: LifeeeSyncStatus = "saved";
+
         if (remoteEntry && localEntry && serializeFaithEntry(remoteEntry) !== serializeFaithEntry(localEntry)) {
           setForm(remoteEntry);
           setConflict({ local: localEntry, cloud: remoteEntry });
+          nextSyncStatus = "local";
         } else if (!remoteEntry && localEntry) {
           const uploaded = await upsertFaithEntry(userId, localEntry);
           if (!active) return;
           setForm(uploaded);
           writeLocalFaithEntry(uploaded);
           setConflict(null);
-        } else {
-          const next = remoteEntry ?? defaultFaithEntry(today);
-          setForm(next);
-          writeLocalFaithEntry(next);
+        } else if (remoteEntry) {
+          setForm(remoteEntry);
+          writeLocalFaithEntry(remoteEntry);
           setConflict(null);
+        } else {
+          setForm(defaultFaithEntry(today));
+          setConflict(null);
+          nextSyncStatus = "local";
         }
 
         setDailyScores(remoteWeek);
         remoteLoadedRef.current = true;
-        setSyncStatus("saved");
+        setSyncStatus(nextSyncStatus);
       } catch (error) {
         if (!active) return;
         setSyncError(error instanceof Error ? error.message : "Could not load faith log.");

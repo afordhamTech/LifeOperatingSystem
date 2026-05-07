@@ -47,6 +47,20 @@ function writeLocalMoneyEntry(entry: MoneyEntry) {
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify([entry, ...entries]));
 }
 
+function hasMeaningfulMoneyDraft(entry: MoneyEntry) {
+  return (
+    entry.income > 0 ||
+    entry.spending > 0 ||
+    entry.savings > 0 ||
+    entry.debt > 0 ||
+    entry.subscriptions > 0 ||
+    entry.upcomingExpenses > 0 ||
+    Boolean(entry.biggestLeak.trim()) ||
+    Boolean(entry.notes.trim()) ||
+    entry.subscriptionItems.length > 0
+  );
+}
+
 export default function MoneyPage() {
   const today = new Date().toISOString().split("T")[0];
   const monthStart = `${today.slice(0, 7)}-01`;
@@ -70,7 +84,8 @@ export default function MoneyPage() {
       }
 
       const localEntries = readLocalMoneyEntries();
-      const localEntry = localEntries.find((entry) => entry.date === today) ?? null;
+      const localDraft = localEntries.find((entry) => entry.date === today) ?? null;
+      const localEntry = localDraft && hasMeaningfulMoneyDraft(localDraft) ? localDraft : null;
 
       if (!hasSupabaseConfig || !userId) {
         remoteLoadedRef.current = false;
@@ -90,6 +105,8 @@ export default function MoneyPage() {
         ]);
         if (!active) return;
 
+        let nextSyncStatus: LifeeeSyncStatus = "saved";
+
         if (!remoteEntry && localEntry) {
           const uploaded = await upsertMoneyLog(userId, localEntry);
           if (!active) return;
@@ -97,15 +114,18 @@ export default function MoneyPage() {
           setForm(nextEntry);
           writeLocalMoneyEntry(nextEntry);
           setMonthLogs(await fetchMoneyMonth(userId, monthStart));
-        } else {
-          const nextEntry = remoteEntry ?? defaultMoneyEntry(today);
-          setForm(nextEntry);
-          writeLocalMoneyEntry(nextEntry);
+        } else if (remoteEntry) {
+          setForm(remoteEntry);
+          writeLocalMoneyEntry(remoteEntry);
           setMonthLogs(remoteMonth);
+        } else {
+          setForm(defaultMoneyEntry(today));
+          setMonthLogs(remoteMonth);
+          nextSyncStatus = "local";
         }
 
         remoteLoadedRef.current = true;
-        setSyncStatus("saved");
+        setSyncStatus(nextSyncStatus);
       } catch (error) {
         if (!active) return;
         setSyncError(error instanceof Error ? error.message : "Could not load money log.");

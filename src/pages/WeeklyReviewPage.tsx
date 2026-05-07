@@ -247,8 +247,12 @@ export default function WeeklyReviewPage() {
 
         remoteLoadedRef.current = true;
         setIsLoading(false);
-        setNotice("Loaded from Supabase.");
-        setSyncStatus("saved");
+        setNotice(
+          existingReview
+            ? "Loaded from Supabase."
+            : "Supabase source data loaded. Weekly review is local draft only until you save.",
+        );
+        setSyncStatus(existingReview ? "saved" : "local");
       } catch (loadError) {
         if (!active) return;
         remoteLoadedRef.current = false;

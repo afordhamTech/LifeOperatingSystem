@@ -1,16 +1,27 @@
 import { useEffect, useState } from "react";
-import { trpc } from "@/providers/trpc";
 import { EmptyState } from "@/components/EmptyState";
 import { getStatusColor } from "@/components/StatusRing";
 import { SyncBadge } from "@/components/SyncBadge";
 import { useSupabaseSession } from "@/hooks/useSupabaseSession";
 import {
   deleteDecisionLog,
+  fetchAcademicTasks,
   fetchDecisionLogs,
+  fetchNutritionLogs,
+  fetchProofItems,
+  fetchSleepLogs,
+  fetchWorkoutLogs,
   type DecisionLog,
   type LifeeeSyncStatus,
+  type ProofItem,
   upsertDecisionLog,
 } from "@/lib/lifeee-persistence";
+import type {
+  AcademicTaskRow,
+  NutritionLogRow,
+  SleepLogRow,
+  WorkoutLogRow,
+} from "@/lib/supabase-types";
 import {
   Moon,
   GraduationCap,
@@ -38,67 +49,107 @@ const emptyDecisionDraft: DecisionDraft = {
   options_text: "",
 };
 
+type ArchiveData = {
+  sleepLogs: SleepLogRow[];
+  academicTasks: AcademicTaskRow[];
+  workoutLogs: WorkoutLogRow[];
+  nutritionLogs: NutritionLogRow[];
+  proofItems: ProofItem[];
+};
+
+const emptyArchiveData: ArchiveData = {
+  sleepLogs: [],
+  academicTasks: [],
+  workoutLogs: [],
+  nutritionLogs: [],
+  proofItems: [],
+};
+
+function addDays(date: Date, days: number) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next.toISOString().split("T")[0] ?? "";
+}
+
 export default function ArchivePage() {
-  const today = new Date().toISOString().split("T")[0];
+  const today = new Date().toISOString().split("T")[0] ?? "";
+  const archiveStart = addDays(new Date(), -90);
   const { hasSupabaseConfig, isLoading: sessionLoading, userId } = useSupabaseSession();
+  const [archiveData, setArchiveData] = useState<ArchiveData>(emptyArchiveData);
   const [decisionLogs, setDecisionLogs] = useState<DecisionLog[]>([]);
   const [decisionDraft, setDecisionDraft] = useState<DecisionDraft>(emptyDecisionDraft);
-  const [decisionSyncStatus, setDecisionSyncStatus] = useState<LifeeeSyncStatus>("waiting");
-  const [decisionSyncError, setDecisionSyncError] = useState<string | null>(null);
-
-  const { data: sleepLogs } = trpc.sleep.getWeek.useQuery({ endDate: today });
-  const { data: tasks } = trpc.academics.list.useQuery({});
-  const { data: workoutLogs } = trpc.workout.getWeek.useQuery({ endDate: today });
-  const { data: nutritionLogs } = trpc.nutrition.getWeek.useQuery({ endDate: today });
-  const { data: careerItems } = trpc.career.list.useQuery();
+  const [syncStatus, setSyncStatus] = useState<LifeeeSyncStatus>("waiting");
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
 
-    const loadDecisions = async () => {
+    const loadArchive = async () => {
       if (sessionLoading) {
-        setDecisionSyncStatus("loading");
+        setSyncStatus("loading");
         return;
       }
 
       if (!hasSupabaseConfig || !userId) {
+        setArchiveData(emptyArchiveData);
         setDecisionLogs([]);
-        setDecisionSyncStatus(hasSupabaseConfig ? "waiting" : "local");
-        setDecisionSyncError(null);
+        setSyncStatus(hasSupabaseConfig ? "waiting" : "local");
+        setSyncError(null);
         return;
       }
 
-      setDecisionSyncStatus("loading");
-      setDecisionSyncError(null);
+      setSyncStatus("loading");
+      setSyncError(null);
 
       try {
-        const rows = await fetchDecisionLogs(userId);
+        const [
+          sleepLogs,
+          academicTasks,
+          workoutLogs,
+          nutritionLogs,
+          proofItems,
+          decisions,
+        ] = await Promise.all([
+          fetchSleepLogs(userId, archiveStart, today),
+          fetchAcademicTasks(userId),
+          fetchWorkoutLogs(userId, archiveStart, today),
+          fetchNutritionLogs(userId, archiveStart, today),
+          fetchProofItems(userId),
+          fetchDecisionLogs(userId),
+        ]);
         if (!active) return;
-        setDecisionLogs(rows);
-        setDecisionSyncStatus("saved");
+        setArchiveData({
+          sleepLogs,
+          academicTasks,
+          workoutLogs,
+          nutritionLogs,
+          proofItems,
+        });
+        setDecisionLogs(decisions);
+        setSyncStatus("saved");
       } catch (error) {
         if (!active) return;
-        setDecisionSyncStatus("error");
-        setDecisionSyncError(error instanceof Error ? error.message : "Could not load decisions.");
+        setSyncStatus("error");
+        setSyncError(error instanceof Error ? error.message : "Could not load Archive from Supabase.");
       }
     };
 
-    void loadDecisions();
+    void loadArchive();
 
     return () => {
       active = false;
     };
-  }, [hasSupabaseConfig, sessionLoading, userId]);
+  }, [archiveStart, hasSupabaseConfig, sessionLoading, today, userId]);
 
   const saveDecision = async () => {
     if (!decisionDraft.decision.trim()) return;
     if (!hasSupabaseConfig || !userId) {
-      setDecisionSyncStatus(hasSupabaseConfig ? "waiting" : "local");
+      setSyncStatus(hasSupabaseConfig ? "waiting" : "local");
       return;
     }
 
-    setDecisionSyncStatus("saving");
-    setDecisionSyncError(null);
+    setSyncStatus("saving");
+    setSyncError(null);
 
     try {
       const saved = (await upsertDecisionLog(userId, {
@@ -114,29 +165,29 @@ export default function ArchivePage() {
       })) as DecisionLog;
       setDecisionLogs((current) => [saved, ...current.filter((row) => row.id !== saved.id)]);
       setDecisionDraft(emptyDecisionDraft);
-      setDecisionSyncStatus("saved");
+      setSyncStatus("saved");
     } catch (error) {
-      setDecisionSyncStatus("error");
-      setDecisionSyncError(error instanceof Error ? error.message : "Could not save decision.");
+      setSyncStatus("error");
+      setSyncError(error instanceof Error ? error.message : "Could not save decision.");
     }
   };
 
   const removeDecision = async (id: string) => {
     if (!userId) {
-      setDecisionSyncStatus(hasSupabaseConfig ? "waiting" : "local");
+      setSyncStatus(hasSupabaseConfig ? "waiting" : "local");
       return;
     }
 
-    setDecisionSyncStatus("saving");
-    setDecisionSyncError(null);
+    setSyncStatus("saving");
+    setSyncError(null);
 
     try {
       await deleteDecisionLog(userId, id);
       setDecisionLogs((current) => current.filter((row) => row.id !== id));
-      setDecisionSyncStatus("saved");
+      setSyncStatus("saved");
     } catch (error) {
-      setDecisionSyncStatus("error");
-      setDecisionSyncError(error instanceof Error ? error.message : "Could not delete decision.");
+      setSyncStatus("error");
+      setSyncError(error instanceof Error ? error.message : "Could not delete decision.");
     }
   };
 
@@ -144,55 +195,55 @@ export default function ArchivePage() {
     {
       title: "Sleep Logs",
       icon: Moon,
-      count: sleepLogs?.length ?? 0,
+      count: archiveData.sleepLogs.length,
       color: "#6b87ae",
-      data: sleepLogs?.map((s) => ({
+      data: archiveData.sleepLogs.map((s) => ({
         label: s.date,
-        value: `${Number(s.hoursSlept || 0).toFixed(1)}h`,
-        score: Number(s.readinessScore || 0),
+        value: `${Number(s.hours_slept || 0).toFixed(1)}h`,
+        score: Number(s.sleep_readiness || 0),
       })),
     },
     {
       title: "Academic Tasks",
       icon: GraduationCap,
-      count: tasks?.length ?? 0,
+      count: archiveData.academicTasks.length,
       color: "#c39a4e",
-      data: tasks?.slice(0, 7).map((t) => ({
-        label: t.taskName.slice(0, 20),
-        value: t.className,
-        score: Number(t.priorityScore || 0),
+      data: archiveData.academicTasks.slice(0, 7).map((t) => ({
+        label: t.task_name,
+        value: `${t.class_name} - ${t.status}`,
+        score: Number(t.priority_score || 0),
       })),
     },
     {
       title: "Workouts",
       icon: Dumbbell,
-      count: workoutLogs?.length ?? 0,
+      count: archiveData.workoutLogs.length,
       color: "#6a9a74",
-      data: workoutLogs?.map((w) => ({
+      data: archiveData.workoutLogs.map((w) => ({
         label: w.date,
-        value: w.workoutType || "-",
-        score: Number(w.readinessScore || 0),
+        value: w.workout_type || "-",
+        score: Number(w.training_readiness || 0),
       })),
     },
     {
       title: "Nutrition Logs",
       icon: Apple,
-      count: nutritionLogs?.length ?? 0,
+      count: archiveData.nutritionLogs.length,
       color: "#d38a5d",
-      data: nutritionLogs?.map((n) => ({
+      data: archiveData.nutritionLogs.map((n) => ({
         label: n.date,
-        value: `${n.caloriesEaten ?? 0} cal`,
-        score: n.protein ? Math.min(10, (n.protein / 150) * 10) : 0,
+        value: `${n.calories ?? 0} cal`,
+        score: n.protein_g ? Math.min(10, (Number(n.protein_g) / 150) * 10) : 0,
       })),
     },
     {
       title: "Career Artifacts",
       icon: Briefcase,
-      count: careerItems?.length ?? 0,
+      count: archiveData.proofItems.length,
       color: "#9a7bbd",
-      data: careerItems?.slice(0, 7).map((c) => ({
-        label: c.projectName.slice(0, 20),
-        value: c.artifactType || "-",
+      data: archiveData.proofItems.slice(0, 7).map((c) => ({
+        label: c.projectName,
+        value: `${c.artifactType || "-"} - ${Number(c.hoursWorked || 0)}h`,
         score: Number(c.proofScore || 0),
       })),
     },
@@ -208,9 +259,9 @@ export default function ArchivePage() {
               Historical data from all life modules. Browse and review past entries.
             </p>
           </div>
-          <SyncBadge status={decisionSyncStatus} />
+          <SyncBadge status={syncStatus} />
         </div>
-        {decisionSyncError ? <p className="mt-2 text-xs text-destructive">{decisionSyncError}</p> : null}
+        {syncError ? <p className="mt-2 text-xs text-destructive">{syncError}</p> : null}
       </div>
 
       <div className="card-surface p-4">

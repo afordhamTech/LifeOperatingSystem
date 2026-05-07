@@ -1220,32 +1220,72 @@ export async function upsertSubstanceEntry(userId: string, entry: SubstanceEntry
     entry.speakingPractice,
     entry.newConcept,
   );
+
+  const payload = {
+    user_id: userId,
+    date: entry.date,
+    reading: entry.readingDone,
+    topic_studied: entry.topicStudied,
+    notes_taken: entry.notesTaken,
+    notes: entry.notesTaken,
+    flashcards_made: entry.flashcardsMade,
+    conversation_practice: entry.conversationPractice,
+    conversation_topic: entry.topicStudied,
+    concept_learned: entry.newConcept,
+    question: entry.questionOfDay,
+    question_of_day: entry.questionOfDay,
+    writing: entry.writingPractice ? "Completed" : "",
+    writing_practice: entry.writingPractice,
+    speaking_practice: entry.speakingPractice ? "Completed" : "",
+    speaking_practice_done: entry.speakingPractice,
+    substance_score: substanceScore,
+  };
+
+  const findExistingId = async () => {
+    const { data: existingRows, error: lookupError } = await client
+      .from("substance_logs")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("date", entry.date)
+      .order("updated_at", { ascending: false })
+      .limit(1);
+
+    if (lookupError) throw lookupError;
+    return existingRows?.[0]?.id as string | undefined;
+  };
+
+  let targetId = entry.id ?? (await findExistingId());
+
+  if (targetId) {
+    let { data, error } = await client
+      .from("substance_logs")
+      .update(payload)
+      .eq("id", targetId)
+      .eq("user_id", userId)
+      .select("*")
+      .maybeSingle();
+
+    if (error) throw error;
+    if (data) return { ...entry, id: data.id, substanceScore };
+
+    targetId = await findExistingId();
+    if (targetId) {
+      ({ data, error } = await client
+        .from("substance_logs")
+        .update(payload)
+        .eq("id", targetId)
+        .eq("user_id", userId)
+        .select("*")
+        .maybeSingle());
+
+      if (error) throw error;
+      if (data) return { ...entry, id: data.id, substanceScore };
+    }
+  }
+
   const { data, error } = await client
     .from("substance_logs")
-    .upsert(
-      {
-        id: entry.id,
-        user_id: userId,
-        date: entry.date,
-        reading: entry.readingDone,
-        topic_studied: entry.topicStudied,
-        notes_taken: entry.notesTaken,
-        notes: entry.notesTaken,
-        flashcards_made: entry.flashcardsMade,
-        flashcards: { count: entry.flashcardsMade },
-        conversation_practice: entry.conversationPractice,
-        conversation_topic: entry.topicStudied,
-        concept_learned: entry.newConcept,
-        question: entry.questionOfDay,
-        question_of_day: entry.questionOfDay,
-        writing: entry.writingPractice ? "Completed" : "",
-        writing_practice: entry.writingPractice,
-        speaking_practice: entry.speakingPractice ? "Completed" : "",
-        speaking_practice_done: entry.speakingPractice,
-        substance_score: substanceScore,
-      },
-      { onConflict: "user_id,date" },
-    )
+    .insert({ ...payload, id: entry.id ?? createLifeeeId() })
     .select("*")
     .maybeSingle();
 

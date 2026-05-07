@@ -59,6 +59,20 @@ function serializeSubstanceEntry(entry: SubstanceEntry) {
   });
 }
 
+function hasMeaningfulSubstanceDraft(entry: SubstanceEntry) {
+  return (
+    Boolean(entry.readingDone.trim()) ||
+    Boolean(entry.topicStudied.trim()) ||
+    Boolean(entry.notesTaken.trim()) ||
+    entry.flashcardsMade > 0 ||
+    entry.conversationPractice ||
+    Boolean(entry.newConcept.trim()) ||
+    Boolean(entry.questionOfDay.trim()) ||
+    entry.writingPractice ||
+    entry.speakingPractice
+  );
+}
+
 export default function SubstancePage() {
   const today = new Date().toISOString().split("T")[0];
   const weekStart = new Date();
@@ -83,7 +97,8 @@ export default function SubstancePage() {
       }
 
       const localEntries = readLocalSubstanceEntries();
-      const localEntry = localEntries.find((entry) => entry.date === today) ?? null;
+      const localDraft = localEntries.find((entry) => entry.date === today) ?? null;
+      const localEntry = localDraft && hasMeaningfulSubstanceDraft(localDraft) ? localDraft : null;
 
       if (!hasSupabaseConfig || !userId) {
         remoteLoadedRef.current = false;
@@ -116,6 +131,8 @@ export default function SubstancePage() {
         ]);
         if (!active) return;
 
+        let nextSyncStatus: LifeeeSyncStatus = "saved";
+
         if (
           remoteEntry &&
           localEntry &&
@@ -123,22 +140,26 @@ export default function SubstancePage() {
         ) {
           setForm(remoteEntry);
           setConflict({ local: localEntry, cloud: remoteEntry });
+          nextSyncStatus = "local";
         } else if (!remoteEntry && localEntry) {
           const uploaded = await upsertSubstanceEntry(userId, localEntry);
           if (!active) return;
           setForm(uploaded);
           writeLocalSubstanceEntry(uploaded);
           setConflict(null);
-        } else {
-          const next = remoteEntry ?? defaultSubstanceEntry(today);
-          setForm(next);
-          writeLocalSubstanceEntry(next);
+        } else if (remoteEntry) {
+          setForm(remoteEntry);
+          writeLocalSubstanceEntry(remoteEntry);
           setConflict(null);
+        } else {
+          setForm(defaultSubstanceEntry(today));
+          setConflict(null);
+          nextSyncStatus = "local";
         }
 
         setTrend(remoteTrend);
         remoteLoadedRef.current = true;
-        setSyncStatus("saved");
+        setSyncStatus(nextSyncStatus);
       } catch (error) {
         if (!active) return;
         setSyncError(error instanceof Error ? error.message : "Could not load substance log.");

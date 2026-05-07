@@ -273,7 +273,7 @@ export default function TaskCommandPage() {
             {getSyncLabel(visibleSyncStatus)}
           </span>
           <label className="text-xs text-[#6f685f] flex items-center gap-2">
-            Current energy
+            Current energy <span className="text-[10px] uppercase tracking-wider">(Local draft only)</span>
             <input
               type="number"
               min={1}

@@ -1109,7 +1109,7 @@ function AddAnchorPanel({
               checked={draft.recurring}
               onChange={(e) => update("recurring", e.target.checked)}
             />
-            Recurring
+            Recurring <span className="uppercase tracking-wider">(Local draft only)</span>
           </label>
         </div>
       </div>
