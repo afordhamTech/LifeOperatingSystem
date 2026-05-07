@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   BarChart,
   Bar,
@@ -10,7 +10,7 @@ import {
 } from "recharts";
 import { Frown, Loader2, Save, Sparkles, Trophy, TrendingDown } from "lucide-react";
 import StatusRing, { getStatusColor } from "@/components/StatusRing";
-import { supabase } from "@/lib/supabase-client";
+import { SyncBadge } from "@/components/SyncBadge";
 import type {
   AcademicTaskRow,
   NutritionLogRow,
@@ -22,6 +22,16 @@ import { calculateWeeklyLifeScore } from "@/lib/life-scoring";
 import { getWeekStartDateKey, toDateKey } from "@/lib/date-helpers";
 import { useSupabaseSession } from "@/hooks/useSupabaseSession";
 import { calcNutritionStatus } from "@/lib/calculations";
+import { useSyncStatus } from "@/hooks/useSyncStatus";
+import { runSupabasePersistence } from "@/lib/persistence-runner";
+import {
+  fetchAcademicTasks,
+  fetchNutritionLogs,
+  fetchSleepLogs,
+  fetchWeeklyReview,
+  fetchWorkoutLogs,
+  upsertWeeklyReview,
+} from "@/lib/lifeee-persistence";
 
 type WeeklyReviewForm = {
   academicsScore: number;
@@ -136,12 +146,14 @@ function buildSnapshot(
 export default function WeeklyReviewPage() {
   const today = useMemo(() => toDateKey(new Date()), []);
   const weekStart = useMemo(() => getWeekStartDateKey(new Date()), []);
-  const { hasSupabaseConfig, userId } = useSupabaseSession();
+  const { hasSupabaseConfig, isLoading: sessionLoading, userId } = useSupabaseSession();
   const [form, setForm] = useState<WeeklyReviewForm>(defaultForm);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const remoteLoadedRef = useRef(false);
+  const { syncStatus, setSyncStatus } = useSyncStatus("local");
   const [moduleSnapshot, setModuleSnapshot] = useState({
     academicsScore: 5,
     sleepScore: 5,
@@ -173,95 +185,77 @@ export default function WeeklyReviewPage() {
     let active = true;
 
     const load = async () => {
-      if (!supabase || !userId) {
+      if (sessionLoading) {
+        setIsLoading(true);
+        setSyncStatus("waiting");
+        return;
+      }
+
+      if (!hasSupabaseConfig || !userId) {
         if (!active) return;
+        remoteLoadedRef.current = false;
         setIsLoading(false);
         setNotice(
           hasSupabaseConfig
             ? "No Supabase session yet. Weekly review stays in draft mode until auth is connected."
             : "Supabase env vars are missing. Weekly review stays in local draft mode.",
         );
+        setSyncStatus(hasSupabaseConfig ? "waiting" : "local");
         return;
       }
 
       setIsLoading(true);
       setError(null);
+      setSyncStatus("loading");
 
       const weekStartDate = weekStart;
       const todayDate = today;
-      const [existingReview, tasksResult, sleepResult, workoutResult, nutritionResult] =
-        await Promise.all([
-          supabase
-            .from("weekly_reviews")
-            .select("*")
-            .eq("user_id", userId)
-            .eq("week_start", weekStartDate)
-            .maybeSingle(),
-          supabase
-            .from("academic_tasks")
-            .select("*")
-            .eq("user_id", userId)
-            .gte("due_date", weekStartDate)
-            .lte("due_date", todayDate),
-          supabase
-            .from("sleep_logs")
-            .select("*")
-            .eq("user_id", userId)
-            .gte("date", weekStartDate)
-            .lte("date", todayDate),
-          supabase
-            .from("workout_logs")
-            .select("*")
-            .eq("user_id", userId)
-            .gte("date", weekStartDate)
-            .lte("date", todayDate),
-          supabase
-            .from("nutrition_logs")
-            .select("*")
-            .eq("user_id", userId)
-            .gte("date", weekStartDate)
-            .lte("date", todayDate),
-        ]);
+      try {
+        const [existingReview, allTasks, sleepRows, workoutRows, nutritionRows] =
+          await Promise.all([
+            fetchWeeklyReview(userId, weekStartDate),
+            fetchAcademicTasks(userId),
+            fetchSleepLogs(userId, weekStartDate, todayDate),
+            fetchWorkoutLogs(userId, weekStartDate, todayDate),
+            fetchNutritionLogs(userId, weekStartDate, todayDate),
+          ]);
 
-      if (!active) return;
+        if (!active) return;
 
-      if (existingReview.error) {
-        setError(existingReview.error.message);
-      } else if (existingReview.data) {
-        setForm(rowToForm(existingReview.data as WeeklyReviewRow));
-      }
+        if (existingReview) {
+          setForm(rowToForm(existingReview));
+        }
 
-      if (
-        !tasksResult.error &&
-        !sleepResult.error &&
-        !workoutResult.error &&
-        !nutritionResult.error
-      ) {
+        const tasksThisWeek = allTasks.filter((task) => {
+          const dueDate = toDateKey(new Date(task.due_date));
+          return dueDate >= weekStartDate && dueDate <= todayDate;
+        });
         const snapshot = buildSnapshot(
-          (tasksResult.data ?? []) as AcademicTaskRow[],
-          (sleepResult.data ?? []) as SleepLogRow[],
-          (workoutResult.data ?? []) as WorkoutLogRow[],
-          (nutritionResult.data ?? []) as NutritionLogRow[],
+          tasksThisWeek as AcademicTaskRow[],
+          sleepRows as SleepLogRow[],
+          workoutRows as WorkoutLogRow[],
+          nutritionRows as NutritionLogRow[],
         );
         setModuleSnapshot(snapshot);
 
-        if (!existingReview.data) {
+        if (!existingReview) {
           setForm((current) => ({
             ...current,
             ...snapshot,
           }));
         }
-      } else {
-        const firstError =
-          tasksResult.error ??
-          sleepResult.error ??
-          workoutResult.error ??
-          nutritionResult.error;
-        setError(firstError?.message ?? "Unable to load module snapshot.");
-      }
 
-      setIsLoading(false);
-      setNotice("Loaded from Supabase.");
+        remoteLoadedRef.current = true;
+        setIsLoading(false);
+        setNotice("Loaded from Supabase.");
+        setSyncStatus("saved");
+      } catch (loadError) {
+        if (!active) return;
+        remoteLoadedRef.current = false;
+        setError(loadError instanceof Error ? loadError.message : "Unable to load weekly review.");
+        setIsLoading(false);
+        setSyncStatus("error");
+      }
     };
 
     void load();
@@ -269,7 +263,7 @@ export default function WeeklyReviewPage() {
     return () => {
       active = false;
     };
-  }, [hasSupabaseConfig, today, userId, weekStart]);
+  }, [hasSupabaseConfig, sessionLoading, setSyncStatus, today, userId, weekStart]);
 
   const handleUseSnapshot = () => {
     setForm((current) => ({
@@ -281,7 +275,6 @@ export default function WeeklyReviewPage() {
 
   const handleSave = async () => {
     const payload = {
-      user_id: userId,
       week_start: weekStart,
       academics_score: form.academicsScore,
       sleep_score: form.sleepScore,
@@ -297,33 +290,33 @@ export default function WeeklyReviewPage() {
       notes: form.notes.trim() || null,
     };
 
-    if (!supabase || !userId) {
-      setNotice("Weekly review stored in local draft mode.");
+    if (!userId) {
+      setNotice("Weekly review is local draft only until Supabase login is available.");
+      setSyncStatus(hasSupabaseConfig ? "waiting" : "local");
       return;
     }
 
     setIsSaving(true);
     setError(null);
     setNotice(null);
+    setSyncStatus("saving");
 
-    const { error: saveError } = await supabase
-      .from("weekly_reviews")
-      .upsert(payload, { onConflict: "user_id,week_start" });
+    const result = await runSupabasePersistence({
+      hasSupabaseConfig,
+      userId,
+      hasLoadedRemote: remoteLoadedRef.current,
+      operation: () => upsertWeeklyReview(userId, payload),
+    });
 
-    if (saveError) {
-      setError(saveError.message);
-    } else {
-      const { data } = await supabase
-        .from("weekly_reviews")
-        .select("*")
-        .eq("user_id", userId)
-        .eq("week_start", weekStart)
-        .maybeSingle();
-
-      if (data) {
-        setForm(rowToForm(data as WeeklyReviewRow));
+    if (result.ok) {
+      if (result.data) {
+        setForm(rowToForm(result.data));
       }
       setNotice("Weekly review saved to Supabase.");
+      setSyncStatus(result.status);
+    } else {
+      setError(result.error);
+      setSyncStatus(result.status);
     }
 
     setIsSaving(false);
@@ -334,10 +327,15 @@ export default function WeeklyReviewPage() {
   return (
     <div className="space-y-6">
       <div className="border-b border-[#ddd4c6] pb-4">
-        <h1 className="text-2xl font-semibold text-[#25313c]">Weekly Review</h1>
-        <p className="text-sm text-[#6f685f] mt-1">
-          Turn the week into feedback. Week of {weekStart}.
-        </p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-semibold text-[#25313c]">Weekly Review</h1>
+            <p className="text-sm text-[#6f685f] mt-1">
+              Turn the week into feedback. Week of {weekStart}.
+            </p>
+          </div>
+          <SyncBadge status={syncStatus} />
+        </div>
       </div>
 
       <div className="flex flex-wrap gap-3">
@@ -352,7 +350,7 @@ export default function WeeklyReviewPage() {
         <button
           onClick={handleSave}
           className="btn-primary inline-flex items-center gap-2"
-          disabled={isSaving || isLoading}
+          disabled={isSaving || isLoading || sessionLoading}
           type="button"
         >
           {isSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}

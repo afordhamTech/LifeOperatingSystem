@@ -1,4 +1,5 @@
 import { Link, useLocation } from "react-router";
+import { PromptDrawer } from "@/components/PromptDrawer";
 import { useAuth } from "@/hooks/useAuth";
 import { useSupabaseSession } from "@/hooks/useSupabaseSession";
 import { supabase } from "@/lib/supabase-client";
@@ -210,6 +211,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           {children}
         </div>
       </main>
+      <PromptDrawer />
     </div>
   );
 }

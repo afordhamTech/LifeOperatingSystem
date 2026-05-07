@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CheckCircle2,
   Droplets,
@@ -18,11 +18,18 @@ import {
   ResponsiveContainer,
   CartesianGrid,
 } from "recharts";
-import { supabase } from "@/lib/supabase-client";
+import { SyncBadge } from "@/components/SyncBadge";
 import type { NutritionLogRow } from "@/lib/supabase-types";
 import { calcNutritionStatus } from "@/lib/calculations";
 import { toDateKey } from "@/lib/date-helpers";
 import { useSupabaseSession } from "@/hooks/useSupabaseSession";
+import { useSyncStatus } from "@/hooks/useSyncStatus";
+import { runSupabasePersistence } from "@/lib/persistence-runner";
+import {
+  fetchNutritionLog,
+  fetchNutritionLogs,
+  upsertNutritionLog,
+} from "@/lib/lifeee-persistence";
 
 type NutritionForm = {
   bodyweight: number;
@@ -64,7 +71,7 @@ function rowToForm(row: NutritionLogRow): NutritionForm {
 
 export default function NutritionPage() {
   const today = useMemo(() => toDateKey(new Date()), []);
-  const { hasSupabaseConfig, userId } = useSupabaseSession();
+  const { hasSupabaseConfig, isLoading: sessionLoading, userId } = useSupabaseSession();
   const [form, setForm] = useState<NutritionForm>(defaultForm);
   const [history, setHistory] = useState<NutritionLogRow[]>([]);
   const [surplus, setSurplus] = useState(500);
@@ -72,60 +79,64 @@ export default function NutritionPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const remoteLoadedRef = useRef(false);
+  const { syncStatus, setSyncStatus } = useSyncStatus("local");
 
   useEffect(() => {
     let active = true;
 
     const load = async () => {
-      if (!supabase || !userId) {
+      if (sessionLoading) {
+        setIsLoading(true);
+        setSyncStatus("waiting");
+        return;
+      }
+
+      if (!hasSupabaseConfig || !userId) {
         if (!active) return;
+        remoteLoadedRef.current = false;
         setIsLoading(false);
         setNotice(
           hasSupabaseConfig
             ? "No Supabase session yet. Nutrition logs stay in local draft mode until auth is connected."
             : "Supabase env vars are missing. Nutrition logs stay in local draft mode.",
         );
+        setSyncStatus(hasSupabaseConfig ? "waiting" : "local");
         return;
       }
 
       setIsLoading(true);
       setError(null);
+      setSyncStatus("loading");
 
       const start = new Date();
       start.setDate(start.getDate() - 6);
 
-      const [todayNutrition, weekNutrition] = await Promise.all([
-        supabase
-          .from("nutrition_logs")
-          .select("*")
-          .eq("user_id", userId)
-          .eq("date", today)
-          .maybeSingle(),
-        supabase
-          .from("nutrition_logs")
-          .select("*")
-          .eq("user_id", userId)
-          .gte("date", toDateKey(start))
-          .lte("date", today)
-          .order("date", { ascending: true }),
-      ]);
+      try {
+        const [todayNutrition, weekNutrition] = await Promise.all([
+          fetchNutritionLog(userId, today),
+          fetchNutritionLogs(userId, toDateKey(start), today),
+        ]);
 
-      if (!active) return;
+        if (!active) return;
 
-      if (todayNutrition.error) {
-        setError(todayNutrition.error.message);
-      } else if (todayNutrition.data) {
-        setForm(rowToForm(todayNutrition.data as NutritionLogRow));
+        if (todayNutrition) {
+          setForm(rowToForm(todayNutrition));
+        }
+
+        setHistory(weekNutrition);
+
+        remoteLoadedRef.current = true;
+        setIsLoading(false);
+        setNotice("Loaded from Supabase.");
+        setSyncStatus("saved");
+      } catch (loadError) {
+        if (!active) return;
+        remoteLoadedRef.current = false;
+        setError(loadError instanceof Error ? loadError.message : "Unable to load nutrition logs.");
+        setIsLoading(false);
+        setSyncStatus("error");
       }
-
-      if (weekNutrition.error) {
-        setError(weekNutrition.error.message);
-      } else {
-        setHistory((weekNutrition.data ?? []) as NutritionLogRow[]);
-      }
-
-      setIsLoading(false);
-      setNotice("Loaded from Supabase.");
     };
 
     void load();
@@ -133,7 +144,7 @@ export default function NutritionPage() {
     return () => {
       active = false;
     };
-  }, [hasSupabaseConfig, today, userId]);
+  }, [hasSupabaseConfig, sessionLoading, setSyncStatus, today, userId]);
 
   const maintenance = Math.round(form.bodyweight * 15);
   const targetCalories = maintenance + surplus;
@@ -180,7 +191,6 @@ export default function NutritionPage() {
 
   const handleSave = async () => {
     const payload = {
-      user_id: userId,
       date: today,
       bodyweight: form.bodyweight,
       calories: form.calories,
@@ -193,7 +203,7 @@ export default function NutritionPage() {
       notes: form.notes.trim() || null,
     };
 
-    if (!supabase || !userId) {
+    if (!userId) {
       const localRow: NutritionLogRow = {
         id: crypto.randomUUID(),
         user_id: "local-draft",
@@ -216,36 +226,36 @@ export default function NutritionPage() {
         return [...others, localRow];
       });
       setNotice("Nutrition log stored in local draft mode.");
+      setSyncStatus(hasSupabaseConfig ? "waiting" : "local");
       return;
     }
 
     setIsSaving(true);
     setError(null);
     setNotice(null);
+    setSyncStatus("saving");
 
-    const { error: saveError } = await supabase
-      .from("nutrition_logs")
-      .upsert(payload, { onConflict: "user_id,date" });
+    const result = await runSupabasePersistence({
+      hasSupabaseConfig,
+      userId,
+      hasLoadedRemote: remoteLoadedRef.current,
+      operation: () => upsertNutritionLog(userId, payload),
+    });
 
-    if (saveError) {
-      setError(saveError.message);
-    } else {
-      const { data: savedRow } = await supabase
-        .from("nutrition_logs")
-        .select("*")
-        .eq("user_id", userId)
-        .eq("date", today)
-        .maybeSingle();
-
-      if (savedRow) {
-        setForm(rowToForm(savedRow as NutritionLogRow));
+    if (result.ok) {
+      if (result.data) {
+        setForm(rowToForm(result.data));
         setHistory((current) => {
           const others = current.filter((row) => row.date !== today);
-          return [...others, savedRow as NutritionLogRow];
+          return [...others, result.data as NutritionLogRow];
         });
       }
 
       setNotice("Nutrition log saved to Supabase.");
+      setSyncStatus(result.status);
+    } else {
+      setError(result.error);
+      setSyncStatus(result.status);
     }
 
     setIsSaving(false);
@@ -256,11 +266,16 @@ export default function NutritionPage() {
   return (
     <div className="space-y-6">
       <div className="border-b border-[#ddd4c6] pb-4">
-        <h1 className="text-2xl font-semibold text-[#25313c]">Nutrition</h1>
-        <p className="text-sm text-[#6f685f] mt-1">
-          Track whether your food supports muscle gain, energy, school, and
-          recovery.
-        </p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-semibold text-[#25313c]">Nutrition</h1>
+            <p className="text-sm text-[#6f685f] mt-1">
+              Track whether your food supports muscle gain, energy, school, and
+              recovery.
+            </p>
+          </div>
+          <SyncBadge status={syncStatus} />
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -572,7 +587,7 @@ export default function NutritionPage() {
             <button
               onClick={handleSave}
               className="btn-primary inline-flex w-full items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={isSaving || isLoading}
+              disabled={isSaving || isLoading || sessionLoading}
             >
               {isSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
               {isSaving ? "Saving..." : "Save Nutrition"}

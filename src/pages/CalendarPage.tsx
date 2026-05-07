@@ -35,7 +35,7 @@ import {
   calculateRealityScore,
   listRecurringLoops,
 } from "@/lib/calendar-system";
-import { buildDayPlan, loadTasks, type Task } from "@/lib/task-system";
+import { buildDayPlan, loadTasks, makeTask, saveTasks, type Task, type TaskType } from "@/lib/task-system";
 import { toDateKey } from "@/lib/date-helpers";
 import { useSupabaseSession } from "@/hooks/useSupabaseSession";
 import {
@@ -48,6 +48,7 @@ import {
   type LifeeeSyncStatus,
   upsertCalendarAnchor,
   upsertDailyPlan,
+  upsertUniversalTask,
 } from "@/lib/lifeee-persistence";
 
 type View = "today" | "week" | "month" | "agenda";
@@ -71,6 +72,13 @@ function readEnergy(): number {
     // ignore
   }
   return 7;
+}
+
+function taskTypeFromAnchor(category: CalendarAnchor["category"]): TaskType {
+  if (category === "Connex") return "Connex / Project";
+  if (category === "MCAT") return "Academic";
+  if (category === "Recovery") return "Health";
+  return category;
 }
 
 export default function CalendarPage() {
@@ -241,6 +249,50 @@ export default function CalendarPage() {
     const nextAnchor = { ...current, ...patch, updated_at: new Date().toISOString() };
     setAnchors((prev) => prev.map((a) => (a.id === id ? nextAnchor : a)));
     void persistAnchor(nextAnchor);
+  };
+
+  const generateFollowUpTask = (anchor: CalendarAnchor) => {
+    const title = anchor.follow_up.trim() || `Follow up: ${anchor.title}`;
+    const reference = `Calendar anchor reference: ${anchor.title} on ${anchor.date} ${anchor.start_time}-${anchor.end_time}. Anchor id: ${anchor.id}.`;
+    const task = makeTask({
+      title,
+      task_type: taskTypeFromAnchor(anchor.category),
+      due_date: anchor.date,
+      estimated_minutes: 20,
+      energy_required: 4,
+      urgency: anchor.date <= today ? 7 : 5,
+      importance: 6,
+      consequence_if_delayed: 6,
+      trust_impact: 6,
+      time_efficiency: 7,
+      status: "inbox",
+      daily_role: "Should Do",
+      linked_anchor_id: anchor.id,
+      notes: [reference, anchor.follow_up ? `Follow up: ${anchor.follow_up}` : null, anchor.notes]
+        .filter(Boolean)
+        .join("\n"),
+    });
+
+    const optimistic = [task, ...tasks];
+    setTasks(optimistic);
+
+    if (!userId || !remoteLoadedRef.current) {
+      saveTasks(optimistic);
+      setSyncStatus(hasSupabaseConfig ? "waiting" : "local");
+      return;
+    }
+
+    setSyncStatus("saving");
+    setSyncError(null);
+    void upsertUniversalTask(userId, task, currentEnergy)
+      .then((savedTask) => {
+        setTasks((current) => current.map((item) => (item.id === task.id ? savedTask : item)));
+        setSyncStatus("saved");
+      })
+      .catch((error: unknown) => {
+        setSyncStatus("error");
+        setSyncError(error instanceof Error ? error.message : "Unable to save follow-up task.");
+      });
   };
 
   const copy = async (key: string, text: string) => {
@@ -433,6 +485,7 @@ export default function CalendarPage() {
           conflicts={conflicts}
           onUpdate={updateAnchor}
           onRemove={removeAnchor}
+          onGenerateFollowUpTask={generateFollowUpTask}
         />
       )}
       {view === "agenda" && (
@@ -539,12 +592,14 @@ function TodayView({
   conflicts,
   onUpdate,
   onRemove,
+  onGenerateFollowUpTask,
 }: {
   anchors: CalendarAnchor[];
   timeline: ReturnType<typeof buildTodayTimeline>;
   conflicts: ReturnType<typeof detectConflicts>;
   onUpdate: (id: string, patch: Partial<CalendarAnchor>) => void;
   onRemove: (id: string) => void;
+  onGenerateFollowUpTask: (anchor: CalendarAnchor) => void;
 }) {
   return (
     <div className="grid gap-4 lg:grid-cols-[1.2fr_1fr]">
@@ -581,7 +636,13 @@ function TodayView({
         ) : (
           <ul className="divide-y divide-border">
             {anchors.map((a) => (
-              <AnchorRow key={a.id} anchor={a} onUpdate={onUpdate} onRemove={onRemove} />
+              <AnchorRow
+                key={a.id}
+                anchor={a}
+                onUpdate={onUpdate}
+                onRemove={onRemove}
+                onGenerateFollowUpTask={onGenerateFollowUpTask}
+              />
             ))}
           </ul>
         )}
@@ -642,12 +703,18 @@ function AnchorRow({
   anchor,
   onUpdate,
   onRemove,
+  onGenerateFollowUpTask,
 }: {
   anchor: CalendarAnchor;
   onUpdate: (id: string, patch: Partial<CalendarAnchor>) => void;
   onRemove: (id: string) => void;
+  onGenerateFollowUpTask: (anchor: CalendarAnchor) => void;
 }) {
   const palette = CATEGORY_COLORS[anchor.category];
+  const prepItems = anchor.prep
+    .split(/\n|;|,/)
+    .map((item) => item.trim())
+    .filter(Boolean);
   return (
     <li className="py-3 space-y-2">
       <div className="flex items-start justify-between gap-3">
@@ -690,8 +757,15 @@ function AnchorRow({
         <div className="grid gap-2 md:grid-cols-3 text-xs">
           {anchor.prep ? (
             <div className="rounded-lg bg-muted/60 p-2">
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Prep</div>
-              <div className="text-foreground">{anchor.prep}</div>
+              <div className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+                <ListChecks size={11} />
+                Prep checklist
+              </div>
+              <ul className="mt-1 space-y-0.5 text-foreground">
+                {prepItems.map((item) => (
+                  <li key={item}>- {item}</li>
+                ))}
+              </ul>
             </div>
           ) : null}
           {anchor.follow_up ? (
@@ -731,6 +805,16 @@ function AnchorRow({
             </option>
           ))}
         </select>
+        <button
+          onClick={() => onGenerateFollowUpTask(anchor)}
+          className="inline-flex items-center gap-1 rounded-md border border-border bg-card px-2 py-1 text-foreground hover:bg-muted/70"
+        >
+          <ListChecks size={12} />
+          Generate follow up task
+        </button>
+        <span className="inline-flex items-center text-[11px] text-muted-foreground">
+          linked_anchor_id plus notes reference
+        </span>
       </div>
     </li>
   );

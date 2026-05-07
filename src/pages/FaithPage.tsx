@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import ChatGPTPrompt from "@/components/ChatGPTPrompt";
+import { SyncBadge } from "@/components/SyncBadge";
 import { useSupabaseSession } from "@/hooks/useSupabaseSession";
 import { calcFaithScore } from "@/lib/calculations";
 import {
   fetchFaithEntry,
   fetchFaithWeek,
-  getSyncLabel,
-  getSyncTone,
   type FaithEntry,
   type LifeeeSyncStatus,
   upsertFaithEntry,
@@ -46,6 +45,20 @@ function writeLocalFaithEntry(entry: FaithEntry) {
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify([entry, ...entries]));
 }
 
+function serializeFaithEntry(entry: FaithEntry) {
+  return JSON.stringify({
+    prayerDone: entry.prayerDone,
+    bibleReading: entry.bibleReading,
+    chapterStudied: entry.chapterStudied,
+    mainLesson: entry.mainLesson,
+    question: entry.question,
+    actionStep: entry.actionStep,
+    temptation: entry.temptation,
+    gratitude: entry.gratitude,
+    churchInvolvement: entry.churchInvolvement,
+  });
+}
+
 export default function FaithPage() {
   const today = new Date().toISOString().split("T")[0];
   const weekStart = new Date();
@@ -58,6 +71,7 @@ export default function FaithPage() {
   const [dailyScores, setDailyScores] = useState<{ date: string; score: number }[]>([]);
   const [syncStatus, setSyncStatus] = useState<LifeeeSyncStatus>("local");
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [conflict, setConflict] = useState<{ local: FaithEntry; cloud: FaithEntry } | null>(null);
   const remoteLoadedRef = useRef(false);
 
   useEffect(() => {
@@ -96,15 +110,20 @@ export default function FaithPage() {
         ]);
         if (!active) return;
 
-        if (!remoteEntry && localEntry) {
+        if (remoteEntry && localEntry && serializeFaithEntry(remoteEntry) !== serializeFaithEntry(localEntry)) {
+          setForm(remoteEntry);
+          setConflict({ local: localEntry, cloud: remoteEntry });
+        } else if (!remoteEntry && localEntry) {
           const uploaded = await upsertFaithEntry(userId, localEntry);
           if (!active) return;
           setForm(uploaded);
           writeLocalFaithEntry(uploaded);
+          setConflict(null);
         } else {
           const next = remoteEntry ?? defaultFaithEntry(today);
           setForm(next);
           writeLocalFaithEntry(next);
+          setConflict(null);
         }
 
         setDailyScores(remoteWeek);
@@ -125,6 +144,11 @@ export default function FaithPage() {
   const score = calcFaithScore(form.prayerDone, form.bibleReading, form.mainLesson, form.actionStep);
 
   const handleSave = async () => {
+    if (conflict) {
+      setSyncError("Choose Use local, Use cloud, or Cancel before saving.");
+      return;
+    }
+
     const entry = { ...form, date: today, faithScore: score };
     writeLocalFaithEntry(entry);
 
@@ -144,6 +168,41 @@ export default function FaithPage() {
     } else {
       setSyncStatus(hasSupabaseConfig ? "waiting" : "local");
     }
+  };
+
+  const handleUseLocalConflict = async () => {
+    if (!conflict || !userId) return;
+    try {
+      setSyncStatus("saving");
+      setSyncError(null);
+      const saved = await upsertFaithEntry(userId, {
+        ...conflict.local,
+        date: today,
+        faithScore: calcFaithScore(
+          conflict.local.prayerDone,
+          conflict.local.bibleReading,
+          conflict.local.mainLesson,
+          conflict.local.actionStep,
+        ),
+      });
+      setForm(saved);
+      writeLocalFaithEntry(saved);
+      setDailyScores(await fetchFaithWeek(userId, weekStartKey));
+      setConflict(null);
+      setSyncStatus("saved");
+    } catch (error) {
+      setSyncError(error instanceof Error ? error.message : "Could not save local faith draft.");
+      setSyncStatus("error");
+    }
+  };
+
+  const handleUseCloudConflict = () => {
+    if (!conflict) return;
+    setForm(conflict.cloud);
+    writeLocalFaithEntry(conflict.cloud);
+    setConflict(null);
+    setSyncError(null);
+    setSyncStatus("saved");
   };
 
   const streak = [...dailyScores]
@@ -174,16 +233,40 @@ Help me turn this into a short Bible study, reflection, prayer, and one action s
               Track spiritual discipline, Bible study, prayer, and alignment with your values.
             </p>
           </div>
-          <span className={`rounded-full border px-2.5 py-1 text-[11px] ${getSyncTone(syncStatus)}`}>
-            {getSyncLabel(syncStatus)}
-          </span>
+          <SyncBadge status={syncStatus} />
         </div>
         {syncError && <p className="mt-2 text-xs text-destructive">{syncError}</p>}
+        {conflict ? (
+          <div className="mt-3 rounded border border-[#c39a4e]/30 bg-[#c39a4e]/10 p-3 text-xs text-[#6f685f]">
+            <div className="font-semibold text-[#25313c]">Local draft and cloud faith log both exist.</div>
+            <div className="mt-1">Choose one before saving so cloud data is not overwritten silently.</div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button type="button" onClick={handleUseLocalConflict} className="btn-primary px-3 py-1 text-xs">
+                Use local
+              </button>
+              <button type="button" onClick={handleUseCloudConflict} className="btn-primary px-3 py-1 text-xs">
+                Use cloud
+              </button>
+              <button
+                type="button"
+                onClick={() => setConflict(null)}
+                className="rounded border border-[#ddd4c6] px-3 py-1 text-xs text-[#6f685f]"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 card-surface p-4">
-          <h3 className="text-sm font-semibold text-[#25313c] mb-3">DAILY CHECK-IN</h3>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold text-[#25313c]">DAILY CHECK-IN</h3>
+            <span className="text-[10px] text-[#6a9a74]">
+              Church involvement and temptation save to Supabase.
+            </span>
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <label className="flex items-center gap-2 text-sm text-[#6f685f] cursor-pointer">
               <input

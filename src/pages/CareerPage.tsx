@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import ChatGPTPrompt from "@/components/ChatGPTPrompt";
+import { EmptyState } from "@/components/EmptyState";
+import { PrivacyChip } from "@/components/PrivacyChip";
 import { getStatusColor } from "@/components/StatusRing";
+import { SyncBadge } from "@/components/SyncBadge";
 import { useSupabaseSession } from "@/hooks/useSupabaseSession";
 import {
   createLifeeeId,
   fetchProofItems,
-  getSyncLabel,
-  getSyncTone,
   type LifeeeSyncStatus,
   type ProofItem,
   upsertProofItem,
@@ -46,6 +47,7 @@ export default function CareerPage() {
     difficulty: 5,
     relevance: 5,
     completion: 5,
+    privacyLayer: "Private",
   });
 
   useEffect(() => {
@@ -114,6 +116,7 @@ export default function CareerPage() {
       applicationSubmitted: false,
       mentorContact: "",
       skillPracticed: "",
+      privacyLayer: form.privacyLayer,
     };
     const optimistic = [item, ...items];
     setItems(optimistic);
@@ -144,6 +147,7 @@ export default function CareerPage() {
       difficulty: 5,
       relevance: 5,
       completion: 5,
+      privacyLayer: "Private",
     });
   };
 
@@ -186,9 +190,7 @@ Tell me what proof is strongest, what I should polish, what I should add to my r
               Track whether you are creating evidence that future people can trust.
             </p>
           </div>
-          <span className={`rounded-full border px-2.5 py-1 text-[11px] ${getSyncTone(syncStatus)}`}>
-            {getSyncLabel(syncStatus)}
-          </span>
+          <SyncBadge status={syncStatus} />
         </div>
         {syncError && <p className="mt-2 text-xs text-destructive">{syncError}</p>}
       </div>
@@ -215,6 +217,31 @@ Tell me what proof is strongest, what I should polish, what I should add to my r
               <option value="video">Video</option>
               <option value="other">Other</option>
             </select>
+            <div className="grid grid-cols-2 gap-3">
+              <label className="text-[10px] uppercase text-[#6f685f]">
+                Hours worked
+                <input
+                  type="number"
+                  min={0}
+                  step={0.5}
+                  value={form.hoursWorked}
+                  onChange={(e) => setForm((p) => ({ ...p, hoursWorked: Number(e.target.value) }))}
+                  className="input-dark mt-1 w-full"
+                />
+              </label>
+              <label className="text-[10px] uppercase text-[#6f685f]">
+                Privacy
+                <select
+                  value={form.privacyLayer}
+                  onChange={(e) => setForm((p) => ({ ...p, privacyLayer: e.target.value }))}
+                  className="input-dark mt-1 w-full"
+                >
+                  <option value="Private">Private</option>
+                  <option value="Mentor Shareable">Mentor Shareable</option>
+                  <option value="Public Proof">Public Proof</option>
+                </select>
+              </label>
+            </div>
             <div className="grid grid-cols-2 gap-3">
               {(["visibility", "difficulty", "relevance", "completion"] as const).map((field) => (
                 <div key={field}>
@@ -279,6 +306,7 @@ Tell me what proof is strongest, what I should polish, what I should add to my r
                   <span className="text-[10px] px-1.5 py-0.5 bg-[#6b87ae]/10 text-[#6b87ae] rounded">
                     {project.artifactType}
                   </span>
+                  <PrivacyChip label={project.privacyLayer} />
                 </div>
                 <span
                   className="text-xs font-bold px-2 py-0.5 rounded-full"
@@ -289,6 +317,9 @@ Tell me what proof is strongest, what I should polish, what I should add to my r
                 >
                   {Number(project.proofScore || 0).toFixed(1)}
                 </span>
+              </div>
+              <div className="mt-2 text-xs text-[#6f685f]">
+                {Number(project.hoursWorked ?? 0)} hours worked
               </div>
               <div className="grid grid-cols-4 gap-2 mt-2">
                 {[
@@ -331,9 +362,10 @@ Tell me what proof is strongest, what I should polish, what I should add to my r
             </div>
           ))}
           {items.length === 0 && (
-            <div className="text-center py-8 text-sm text-[#8c8478]">
-              No projects yet. Add a proof artifact, shipped feature, or portfolio piece.
-            </div>
+            <EmptyState
+              title="No proof items yet"
+              description="Add a proof artifact, shipped feature, or portfolio piece."
+            />
           )}
         </div>
       </div>

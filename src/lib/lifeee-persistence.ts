@@ -1,4 +1,11 @@
 import type { CalendarAnchor } from "@/lib/calendar-system";
+import type {
+  AcademicTaskRow,
+  NutritionLogRow,
+  SleepLogRow,
+  WeeklyReviewRow,
+  WorkoutLogRow,
+} from "@/lib/supabase-types";
 import {
   calcFaithScore,
   calcInjuryRisk,
@@ -14,7 +21,8 @@ export type LifeeeSyncStatus =
   | "saved"
   | "local"
   | "waiting"
-  | "error";
+  | "error"
+  | "placeholder";
 
 export type UniversalTaskRow = {
   id: string;
@@ -37,6 +45,7 @@ export type UniversalTaskRow = {
   next_physical_action: string | null;
   friction_type: string | null;
   privacy_layer: string | null;
+  linked_anchor_id: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -110,6 +119,7 @@ export type ProofItem = {
   applicationSubmitted: boolean;
   mentorContact: string;
   skillPracticed: string;
+  privacyLayer: string;
   created_at?: string;
   updated_at?: string;
 };
@@ -200,6 +210,7 @@ export function getSyncLabel(status: LifeeeSyncStatus) {
   if (status === "saved") return "Saved to Supabase";
   if (status === "waiting") return "Waiting for login";
   if (status === "error") return "Sync failed";
+  if (status === "placeholder") return "Placeholder only";
   return "Local draft only";
 }
 
@@ -207,6 +218,7 @@ export function getSyncTone(status: LifeeeSyncStatus) {
   if (status === "saved") return "border-emerald-500/25 bg-emerald-500/10 text-emerald-700";
   if (status === "saving" || status === "loading") return "border-primary/25 bg-primary/10 text-primary";
   if (status === "error") return "border-destructive/25 bg-destructive/10 text-destructive";
+  if (status === "placeholder") return "border-slate-500/25 bg-slate-500/10 text-slate-700";
   return "border-amber-500/25 bg-amber-500/10 text-amber-700";
 }
 
@@ -239,6 +251,309 @@ function timeFromTimestamp(value: string | null, fallback: string | null = null)
   return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 
+export type SleepLogPayload = Omit<
+  Partial<SleepLogRow>,
+  "id" | "user_id" | "created_at" | "updated_at"
+> & {
+  date: string;
+};
+
+export type AcademicTaskPayload = Omit<
+  Partial<AcademicTaskRow>,
+  "user_id" | "created_at" | "updated_at"
+> & {
+  class_name: string;
+  task_name: string;
+  due_date: string;
+  status: string;
+};
+
+export type WorkoutLogPayload = Omit<
+  Partial<WorkoutLogRow>,
+  "id" | "user_id" | "created_at" | "updated_at"
+> & {
+  date: string;
+};
+
+export type NutritionLogPayload = Omit<
+  Partial<NutritionLogRow>,
+  "id" | "user_id" | "created_at" | "updated_at"
+> & {
+  date: string;
+};
+
+export type WeeklyReviewPayload = Omit<
+  Partial<WeeklyReviewRow>,
+  "id" | "user_id" | "created_at" | "updated_at"
+> & {
+  week_start: string;
+};
+
+export type DecisionLogPayload = {
+  id?: string;
+  decision: string;
+  decision_date?: string | null;
+  options_considered?: unknown[];
+  reason_chosen?: string | null;
+  expected_outcome?: string | null;
+  risk?: string | null;
+  review_date?: string | null;
+  result_later?: string | null;
+  notes?: string | null;
+};
+
+export type DecisionLog = Required<Pick<DecisionLogPayload, "id" | "decision">> &
+  Omit<DecisionLogPayload, "id" | "decision"> & {
+    created_at?: string;
+    updated_at?: string;
+  };
+
+export type AiPromptExportPayload = {
+  prompt_type: string;
+  prompt_text: string;
+  source_page?: string | null;
+};
+
+export async function fetchSleepLog(userId: string, date: string) {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("sleep_logs")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("date", date)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data as SleepLogRow | null;
+}
+
+export async function fetchSleepLogs(userId: string, startDate: string, endDate: string) {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("sleep_logs")
+    .select("*")
+    .eq("user_id", userId)
+    .gte("date", startDate)
+    .lte("date", endDate)
+    .order("date", { ascending: true });
+
+  if (error) throw error;
+  return (data ?? []) as SleepLogRow[];
+}
+
+export async function upsertSleepLog(userId: string, payload: SleepLogPayload) {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("sleep_logs")
+    .upsert({ ...payload, user_id: userId }, { onConflict: "user_id,date" })
+    .select("*")
+    .maybeSingle();
+
+  if (error) throw error;
+  return data as SleepLogRow | null;
+}
+
+export async function fetchAcademicTasks(userId: string) {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("academic_tasks")
+    .select("*")
+    .eq("user_id", userId)
+    .order("priority_score", { ascending: false });
+
+  if (error) throw error;
+  return (data ?? []) as AcademicTaskRow[];
+}
+
+export async function upsertAcademicTask(userId: string, payload: AcademicTaskPayload) {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("academic_tasks")
+    .upsert(
+      {
+        ...payload,
+        id: payload.id ?? createLifeeeId(),
+        user_id: userId,
+      },
+      { onConflict: "id" },
+    )
+    .select("*")
+    .maybeSingle();
+
+  if (error) throw error;
+  return data as AcademicTaskRow | null;
+}
+
+export async function deleteAcademicTask(userId: string, id: string) {
+  const client = requireSupabase();
+  const { error } = await client
+    .from("academic_tasks")
+    .delete()
+    .eq("id", id)
+    .eq("user_id", userId);
+
+  if (error) throw error;
+}
+
+export async function fetchWorkoutLog(userId: string, date: string) {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("workout_logs")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("date", date)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data as WorkoutLogRow | null;
+}
+
+export async function fetchWorkoutLogs(userId: string, startDate: string, endDate: string) {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("workout_logs")
+    .select("*")
+    .eq("user_id", userId)
+    .gte("date", startDate)
+    .lte("date", endDate)
+    .order("date", { ascending: true });
+
+  if (error) throw error;
+  return (data ?? []) as WorkoutLogRow[];
+}
+
+export async function upsertWorkoutLog(userId: string, payload: WorkoutLogPayload) {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("workout_logs")
+    .upsert({ ...payload, user_id: userId }, { onConflict: "user_id,date" })
+    .select("*")
+    .maybeSingle();
+
+  if (error) throw error;
+  return data as WorkoutLogRow | null;
+}
+
+export async function fetchNutritionLog(userId: string, date: string) {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("nutrition_logs")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("date", date)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data as NutritionLogRow | null;
+}
+
+export async function fetchNutritionLogs(userId: string, startDate: string, endDate: string) {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("nutrition_logs")
+    .select("*")
+    .eq("user_id", userId)
+    .gte("date", startDate)
+    .lte("date", endDate)
+    .order("date", { ascending: true });
+
+  if (error) throw error;
+  return (data ?? []) as NutritionLogRow[];
+}
+
+export async function upsertNutritionLog(userId: string, payload: NutritionLogPayload) {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("nutrition_logs")
+    .upsert({ ...payload, user_id: userId }, { onConflict: "user_id,date" })
+    .select("*")
+    .maybeSingle();
+
+  if (error) throw error;
+  return data as NutritionLogRow | null;
+}
+
+export async function fetchWeeklyReview(userId: string, weekStart: string) {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("weekly_reviews")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("week_start", weekStart)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data as WeeklyReviewRow | null;
+}
+
+export async function upsertWeeklyReview(userId: string, payload: WeeklyReviewPayload) {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("weekly_reviews")
+    .upsert({ ...payload, user_id: userId }, { onConflict: "user_id,week_start" })
+    .select("*")
+    .maybeSingle();
+
+  if (error) throw error;
+  return data as WeeklyReviewRow | null;
+}
+
+export async function upsertDecisionLog(userId: string, payload: DecisionLogPayload) {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("decision_logs")
+    .upsert(
+      {
+        ...payload,
+        id: payload.id ?? createLifeeeId(),
+        user_id: userId,
+        options_considered: payload.options_considered ?? [],
+      },
+      { onConflict: "id" },
+    )
+    .select("*")
+    .maybeSingle();
+
+  if (error) throw error;
+  return data;
+}
+
+export async function fetchDecisionLogs(userId: string) {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("decision_logs")
+    .select("*")
+    .eq("user_id", userId)
+    .order("decision_date", { ascending: false, nullsFirst: false })
+    .order("created_at", { ascending: false });
+
+  if (error) throw error;
+  return (data ?? []) as DecisionLog[];
+}
+
+export async function deleteDecisionLog(userId: string, id: string) {
+  const client = requireSupabase();
+  const { error } = await client
+    .from("decision_logs")
+    .delete()
+    .eq("id", id)
+    .eq("user_id", userId);
+
+  if (error) throw error;
+}
+
+export async function insertAiPromptExport(userId: string, payload: AiPromptExportPayload) {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("ai_prompt_exports")
+    .insert({ ...payload, user_id: userId })
+    .select("*")
+    .maybeSingle();
+
+  if (error) throw error;
+  return data;
+}
+
 export function taskToRow(userId: string, task: Task, currentEnergy: number) {
   return {
     id: task.id,
@@ -258,6 +573,7 @@ export function taskToRow(userId: string, task: Task, currentEnergy: number) {
     daily_role: task.daily_role,
     recurring: task.recurring,
     notes: task.notes,
+    linked_anchor_id: task.linked_anchor_id ?? null,
   };
 }
 
@@ -282,6 +598,7 @@ export function rowToTask(row: UniversalTaskRow): Task {
     daily_role: (row.daily_role as Task["daily_role"]) ?? null,
     recurring: row.recurring ?? false,
     notes: row.notes ?? "",
+    linked_anchor_id: row.linked_anchor_id ?? null,
     fixed_time: fixedTime,
     created_at: row.created_at,
     updated_at: row.updated_at,
@@ -523,6 +840,7 @@ export async function fetchProofItems(userId: string) {
       applicationSubmitted: Boolean(row.application_submitted),
       mentorContact: row.mentor_contact ?? "",
       skillPracticed: row.skill_used ?? "",
+      privacyLayer: row.privacy_layer ?? "Private",
       created_at: row.created_at,
       updated_at: row.updated_at,
     } satisfies ProofItem;
@@ -553,6 +871,7 @@ export async function upsertProofItem(userId: string, item: ProofItem) {
         application_submitted: item.applicationSubmitted,
         mentor_contact: item.mentorContact,
         skill_used: item.skillPracticed,
+        privacy_layer: item.privacyLayer,
       },
       { onConflict: "id" },
     )
