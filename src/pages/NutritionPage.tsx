@@ -122,14 +122,20 @@ export default function NutritionPage() {
 
         if (todayNutrition) {
           setForm(rowToForm(todayNutrition));
+        } else {
+          setForm(defaultForm);
         }
 
         setHistory(weekNutrition);
 
         remoteLoadedRef.current = true;
         setIsLoading(false);
-        setNotice("Loaded from Supabase.");
-        setSyncStatus("saved");
+        setNotice(
+          todayNutrition
+            ? "Loaded from Supabase."
+            : "No Supabase nutrition log exists for today yet. Local draft only until you save.",
+        );
+        setSyncStatus(todayNutrition ? "saved" : "local");
       } catch (loadError) {
         if (!active) return;
         remoteLoadedRef.current = false;

@@ -231,7 +231,7 @@ export default function Dashboard() {
       setAnchorList(calendarAnchorsResult.data);
 
       setIsLoading(false);
-      setPlanSyncStatus("saved");
+      setPlanSyncStatus("local");
       setNotice("Dashboard loaded from Supabase.");
     };
 

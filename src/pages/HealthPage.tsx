@@ -58,6 +58,23 @@ function getRedFlags(entry: HealthEntry) {
   return flags;
 }
 
+function hasMeaningfulHealthDraft(entry: HealthEntry) {
+  return (
+    Boolean(entry.painArea.trim()) ||
+    entry.painScore > 0 ||
+    entry.painType !== "dull" ||
+    Boolean(entry.painTrigger.trim()) ||
+    Boolean(entry.painReliever.trim()) ||
+    Boolean(entry.trainingDone.trim()) ||
+    entry.sleep !== 7 ||
+    entry.hydration !== 7 ||
+    entry.mobilityDone ||
+    Boolean(entry.medicationTaken.trim()) ||
+    entry.doctorVisitNeeded ||
+    entry.painTrend !== "stable"
+  );
+}
+
 export default function HealthPage() {
   const today = new Date().toISOString().split("T")[0];
   const { hasSupabaseConfig, isLoading: sessionLoading, userId } = useSupabaseSession();
@@ -76,7 +93,8 @@ export default function HealthPage() {
         return;
       }
 
-      const localEntry = readLocalHealthEntries().find((entry) => entry.date === today) ?? null;
+      const localDraft = readLocalHealthEntries().find((entry) => entry.date === today) ?? null;
+      const localEntry = localDraft && hasMeaningfulHealthDraft(localDraft) ? localDraft : null;
 
       if (!hasSupabaseConfig || !userId) {
         remoteLoadedRef.current = false;
@@ -92,19 +110,23 @@ export default function HealthPage() {
         const remoteEntry = await fetchHealthEntry(userId, today);
         if (!active) return;
 
+        let nextSyncStatus: LifeeeSyncStatus = "saved";
+
         if (!remoteEntry && localEntry) {
           const uploaded = (await upsertHealthEntry(userId, localEntry)) ?? localEntry;
           if (!active) return;
           setForm(uploaded);
           writeLocalHealthEntry(uploaded);
+        } else if (remoteEntry) {
+          setForm(remoteEntry);
+          writeLocalHealthEntry(remoteEntry);
         } else {
-          const next = remoteEntry ?? defaultHealthEntry(today);
-          setForm(next);
-          writeLocalHealthEntry(next);
+          setForm(defaultHealthEntry(today));
+          nextSyncStatus = "local";
         }
 
         remoteLoadedRef.current = true;
-        setSyncStatus("saved");
+        setSyncStatus(nextSyncStatus);
       } catch (error) {
         if (!active) return;
         setSyncError(error instanceof Error ? error.message : "Could not load health log.");

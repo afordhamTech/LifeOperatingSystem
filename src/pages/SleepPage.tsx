@@ -181,8 +181,12 @@ export default function SleepPage() {
 
         remoteLoadedRef.current = true;
         setIsLoading(false);
-        setNotice("Loaded from Supabase.");
-        setSyncStatus("saved");
+        setNotice(
+          todayRow
+            ? "Loaded from Supabase."
+            : "No Supabase sleep log exists for today yet. Local draft only until you save.",
+        );
+        setSyncStatus(todayRow ? "saved" : "local");
       } catch (loadError) {
         if (!active) return;
         remoteLoadedRef.current = false;

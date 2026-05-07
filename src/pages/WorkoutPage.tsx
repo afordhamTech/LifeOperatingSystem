@@ -157,6 +157,9 @@ export default function WorkoutPage() {
         if (todayWorkout) {
           setForm(rowToForm(todayWorkout));
           setExercises(rowToExercises(todayWorkout.exercises));
+        } else {
+          setForm(defaultForm);
+          setExercises([]);
         }
 
         setHistory(weekWorkout);
@@ -167,8 +170,12 @@ export default function WorkoutPage() {
 
         remoteLoadedRef.current = true;
         setIsLoading(false);
-        setNotice("Loaded from Supabase.");
-        setSyncStatus("saved");
+        setNotice(
+          todayWorkout
+            ? "Loaded from Supabase."
+            : "No Supabase workout exists for today yet. Local draft only until you save.",
+        );
+        setSyncStatus(todayWorkout ? "saved" : "local");
       } catch (loadError) {
         if (!active) return;
         remoteLoadedRef.current = false;
