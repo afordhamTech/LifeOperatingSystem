@@ -80,6 +80,10 @@ import {
   buildWeeklyBottleneckSummary,
 } from "@/lib/weekly-bottleneck-diagnosis";
 import {
+  buildOneMoveVerdictSummary,
+  parseOneMoveVerdict,
+} from "@/lib/one-move-verdict";
+import {
   CATEGORY_COLORS,
   buildCalendarPlanningPrompt,
   buildTodayTimeline,
@@ -149,6 +153,7 @@ export default function Dashboard() {
   const [remoteTasksLoaded, setRemoteTasksLoaded] = useState(false);
   const [decisionLogs, setDecisionLogs] = useState<DecisionLog[]>([]);
   const [activeOneMove, setActiveOneMove] = useState<string>("");
+  const [activeOneMoveVerdictNotes, setActiveOneMoveVerdictNotes] = useState<string | null>(null);
   const planSaveSequenceRef = useRef(0);
 
   useEffect(() => {
@@ -160,10 +165,12 @@ export default function Dashboard() {
         const big3 = Array.isArray(row?.next_week_big_3) ? row?.next_week_big_3 : [];
         const first = typeof big3[0] === "string" ? big3[0].trim() : "";
         setActiveOneMove(first);
+        setActiveOneMoveVerdictNotes((row?.notes as string | null) ?? null);
       })
       .catch(() => {
         if (!active) return;
         setActiveOneMove("");
+        setActiveOneMoveVerdictNotes(null);
       });
     return () => {
       active = false;
@@ -600,6 +607,19 @@ export default function Dashboard() {
     [weeklyBottleneckDiagnosis],
   );
 
+  const activeOneMoveVerdict = useMemo(
+    () => parseOneMoveVerdict(activeOneMoveVerdictNotes),
+    [activeOneMoveVerdictNotes],
+  );
+
+  const lastWeekOneMoveVerdictSummary = useMemo(
+    () =>
+      activeOneMove
+        ? buildOneMoveVerdictSummary(activeOneMove, activeOneMoveVerdict)
+        : undefined,
+    [activeOneMove, activeOneMoveVerdict],
+  );
+
   const decisionPromptPayload = useMemo(() => {
     const inboxAndToday = [
       ...decisionLoop.todayCommitted.slice(0, 6),
@@ -641,9 +661,11 @@ export default function Dashboard() {
       decisionPatternSummary,
       weeklyBottleneckSummary,
       nextWeekOneMoveSummary: activeOneMove || undefined,
+      lastWeekOneMoveVerdictSummary,
     };
   }, [
     activeOneMove,
+    lastWeekOneMoveVerdictSummary,
     anchorList,
     decisionLoop.ignoredToday,
     decisionLoop.inboxCandidates,
@@ -792,6 +814,22 @@ export default function Dashboard() {
             This week's one move
           </span>
           <span className="font-medium">{activeOneMove}</span>
+          {activeOneMoveVerdict.outcome ? (
+            <span
+              className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${
+                activeOneMoveVerdict.outcome === "worked"
+                  ? "border-emerald-200 bg-emerald-100 text-emerald-700"
+                  : activeOneMoveVerdict.outcome === "partial"
+                    ? "border-amber-200 bg-amber-100 text-amber-700"
+                    : activeOneMoveVerdict.outcome === "missed"
+                      ? "border-rose-200 bg-rose-100 text-rose-700"
+                      : "border-stone-200 bg-stone-100 text-stone-700"
+              }`}
+              title={activeOneMoveVerdict.note || undefined}
+            >
+              Last verdict: {activeOneMoveVerdict.outcome}
+            </span>
+          ) : null}
         </div>
       ) : null}
 

@@ -47,6 +47,11 @@ import {
   buildWeeklyBottleneckDiagnosis,
   pickNextWeekOneMove,
 } from "@/lib/weekly-bottleneck-diagnosis";
+import {
+  parseOneMoveVerdict,
+  upsertOneMoveVerdictIntoNotes,
+  type OneMoveVerdictOutcome,
+} from "@/lib/one-move-verdict";
 import type { CalendarAnchor } from "@/lib/calendar-system";
 import type { Task } from "@/lib/task-system";
 
@@ -180,6 +185,18 @@ export default function WeeklyReviewPage() {
   const [decisionLogs, setDecisionLogs] = useState<DecisionLog[]>([]);
   const [universalTasks, setUniversalTasks] = useState<Task[]>([]);
   const [calendarAnchorList, setCalendarAnchorList] = useState<CalendarAnchor[]>([]);
+  const [previousWeekReview, setPreviousWeekReview] = useState<WeeklyReviewRow | null>(null);
+  const [verdictOutcome, setVerdictOutcome] = useState<OneMoveVerdictOutcome | null>(null);
+  const [verdictNote, setVerdictNote] = useState<string>("");
+  const [verdictSaving, setVerdictSaving] = useState(false);
+  const [verdictError, setVerdictError] = useState<string | null>(null);
+  const verdictHydratedRef = useRef<string | null>(null);
+
+  const previousWeekStart = useMemo(() => {
+    const date = new Date(`${weekStart}T00:00:00`);
+    date.setDate(date.getDate() - 7);
+    return toDateKey(date);
+  }, [weekStart]);
 
   const weekEnd = useMemo(() => {
     const date = new Date(`${weekStart}T00:00:00`);
@@ -196,6 +213,47 @@ export default function WeeklyReviewPage() {
     () => buildDecisionPatternDigest(decisionLogs, weekStart, weekEnd, today),
     [decisionLogs, weekStart, weekEnd, today],
   );
+
+  const previousOneMove = useMemo(() => {
+    const big3 = Array.isArray(previousWeekReview?.next_week_big_3)
+      ? previousWeekReview?.next_week_big_3
+      : [];
+    return typeof big3[0] === "string" ? big3[0].trim() : "";
+  }, [previousWeekReview]);
+
+  const savedVerdict = useMemo(
+    () => parseOneMoveVerdict(previousWeekReview?.notes ?? null),
+    [previousWeekReview],
+  );
+
+  useEffect(() => {
+    let active = true;
+    if (!hasSupabaseConfig || !userId) {
+      setPreviousWeekReview(null);
+      return;
+    }
+    void fetchWeeklyReview(userId, previousWeekStart)
+      .then((row) => {
+        if (!active) return;
+        setPreviousWeekReview(row);
+      })
+      .catch(() => {
+        if (!active) return;
+        setPreviousWeekReview(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [hasSupabaseConfig, previousWeekStart, userId]);
+
+  useEffect(() => {
+    const rowId = previousWeekReview?.id ?? null;
+    if (verdictHydratedRef.current === rowId) return;
+    verdictHydratedRef.current = rowId;
+    setVerdictOutcome(savedVerdict.outcome);
+    setVerdictNote(savedVerdict.note);
+    setVerdictError(null);
+  }, [previousWeekReview, savedVerdict]);
 
   const bottleneckDiagnosis = useMemo(
     () =>
@@ -461,6 +519,57 @@ export default function WeeklyReviewPage() {
     setIsSaving(false);
   };
 
+  const handleSaveVerdict = async () => {
+    if (!previousWeekReview || !previousOneMove || !verdictOutcome) return;
+    if (verdictSaving) return;
+    if (!userId) {
+      setVerdictError("Sign in to save the verdict to Supabase.");
+      return;
+    }
+    setVerdictSaving(true);
+    setVerdictError(null);
+    try {
+      const nextNotes = upsertOneMoveVerdictIntoNotes(
+        previousWeekReview.notes ?? null,
+        { outcome: verdictOutcome, note: verdictNote.trim() },
+      );
+      const big3 = Array.isArray(previousWeekReview.next_week_big_3)
+        ? previousWeekReview.next_week_big_3
+        : [];
+      const payload = {
+        week_start: previousWeekReview.week_start ?? previousWeekStart,
+        academics_score: previousWeekReview.academics_score ?? undefined,
+        sleep_score: previousWeekReview.sleep_score ?? undefined,
+        training_score: previousWeekReview.training_score ?? undefined,
+        nutrition_score: previousWeekReview.nutrition_score ?? undefined,
+        career_proof_score: previousWeekReview.career_proof_score ?? undefined,
+        faith_substance_score:
+          previousWeekReview.faith_substance_score ?? undefined,
+        money_admin_score: previousWeekReview.money_admin_score ?? undefined,
+        weekly_life_score: previousWeekReview.weekly_life_score ?? undefined,
+        biggest_win: previousWeekReview.biggest_win ?? null,
+        biggest_leak: previousWeekReview.biggest_leak ?? null,
+        next_week_big_3: big3,
+        notes: nextNotes,
+      };
+      const saved = await upsertWeeklyReview(userId, payload);
+      if (saved) {
+        setPreviousWeekReview(saved as WeeklyReviewRow);
+      } else {
+        setPreviousWeekReview({
+          ...previousWeekReview,
+          notes: nextNotes,
+        } as WeeklyReviewRow);
+      }
+    } catch (error) {
+      setVerdictError(
+        error instanceof Error ? error.message : "Verdict save failed.",
+      );
+    } finally {
+      setVerdictSaving(false);
+    }
+  };
+
   const categories = chartData;
 
   return (
@@ -639,6 +748,88 @@ export default function WeeklyReviewPage() {
           </div>
         ) : null}
       </div>
+
+      {previousWeekReview || previousOneMove ? (
+        <div className="card-surface p-4 border-l-2 border-[#6a9a74]">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+            <h3 className="text-sm font-semibold text-[#25313c]">
+              LAST WEEK ONE MOVE VERDICT
+            </h3>
+            <span className="text-[10px] uppercase tracking-wider text-[#6f685f]">
+              Writes to previous week notes
+            </span>
+          </div>
+          {previousOneMove ? (
+            <>
+              <div className="text-xs text-[#6f685f] mb-2">
+                Move: <span className="text-[#25313c] font-medium">{previousOneMove}</span>
+              </div>
+              <div className="flex flex-wrap gap-2 mb-2">
+                {(
+                  [
+                    { value: "worked", palette: "emerald" },
+                    { value: "partial", palette: "amber" },
+                    { value: "missed", palette: "rose" },
+                    { value: "skipped", palette: "stone" },
+                  ] as const
+                ).map((option) => {
+                  const active = verdictOutcome === option.value;
+                  const palette =
+                    option.palette === "emerald"
+                      ? "border-emerald-300 bg-emerald-50 text-emerald-800"
+                      : option.palette === "amber"
+                        ? "border-amber-300 bg-amber-50 text-amber-800"
+                        : option.palette === "rose"
+                          ? "border-rose-300 bg-rose-50 text-rose-800"
+                          : "border-stone-300 bg-stone-50 text-stone-700";
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setVerdictOutcome(option.value)}
+                      className={`rounded-full border px-3 py-1 text-xs font-medium ${
+                        active
+                          ? palette
+                          : "border-[#ddd4c6] bg-white text-[#6f685f] hover:bg-[#f7f3ec]"
+                      }`}
+                    >
+                      {option.value}
+                    </button>
+                  );
+                })}
+              </div>
+              <input
+                value={verdictNote}
+                onChange={(event) => setVerdictNote(event.target.value)}
+                placeholder="One-line note on what actually happened (optional)"
+                className="w-full rounded-md border border-[#ddd4c6] bg-white px-3 py-2 text-sm"
+              />
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void handleSaveVerdict()}
+                  disabled={!verdictOutcome || verdictSaving}
+                  className="inline-flex items-center gap-2 rounded-md bg-[#25313c] px-3 py-2 text-sm text-white hover:bg-[#3a4754] disabled:opacity-50"
+                >
+                  <Save size={14} />
+                  Save verdict
+                </button>
+                {savedVerdict.outcome ? (
+                  <span className="text-[11px] text-[#6f685f]">
+                    Currently saved: {savedVerdict.outcome}
+                    {savedVerdict.note ? ` — ${savedVerdict.note}` : ""}
+                  </span>
+                ) : null}
+                {verdictError ? (
+                  <span className="text-[11px] text-destructive">{verdictError}</span>
+                ) : null}
+              </div>
+            </>
+          ) : (
+            <div className="text-xs text-[#9b938a]">No move was set last week.</div>
+          )}
+        </div>
+      ) : null}
 
       <div className="card-surface p-4">
         <h3 className="text-sm font-semibold text-[#25313c] mb-3">
