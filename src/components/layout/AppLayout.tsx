@@ -1,5 +1,6 @@
 import { Link, useLocation } from "react-router";
 import { PromptDrawer } from "@/components/PromptDrawer";
+import { PromptContextProvider, useSharedPromptContext } from "@/providers/PromptContext";
 import { useAuth } from "@/hooks/useAuth";
 import { useSupabaseSession } from "@/hooks/useSupabaseSession";
 import { supabase } from "@/lib/supabase-client";
@@ -61,9 +62,18 @@ const navSections: NavSection[] = [
 ];
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <PromptContextProvider>
+      <AppLayoutInner>{children}</AppLayoutInner>
+    </PromptContextProvider>
+  );
+}
+
+function AppLayoutInner({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const { user: kimiUser, logout } = useAuth();
   const { session: supabaseSession } = useSupabaseSession();
+  const sharedPromptContext = useSharedPromptContext();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const user = kimiUser ?? (supabaseSession?.user ? {
@@ -211,7 +221,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           {children}
         </div>
       </main>
-      <PromptDrawer />
+      <PromptDrawer context={sharedPromptContext} />
     </div>
   );
 }

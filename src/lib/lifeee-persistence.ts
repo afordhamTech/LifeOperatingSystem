@@ -486,6 +486,23 @@ export async function fetchWeeklyReview(userId: string, weekStart: string) {
   return data as WeeklyReviewRow | null;
 }
 
+export async function fetchRecentWeeklyReviews(
+  userId: string,
+  weekStarts: string[],
+) {
+  if (weekStarts.length === 0) return [] as WeeklyReviewRow[];
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("weekly_reviews")
+    .select("*")
+    .eq("user_id", userId)
+    .in("week_start", weekStarts)
+    .order("week_start", { ascending: false });
+
+  if (error) throw error;
+  return (data ?? []) as WeeklyReviewRow[];
+}
+
 export async function upsertWeeklyReview(userId: string, payload: WeeklyReviewPayload) {
   const client = requireSupabase();
   const { data, error } = await client

@@ -23,6 +23,11 @@ import DailyLogPanel from "@/components/DailyLogPanel";
 import { DailyOpModeChip, deriveDailyOpMode } from "@/components/DailyOpModeChip";
 import StatusRing, { getStatusColor } from "@/components/StatusRing";
 import { SyncBadge } from "@/components/SyncBadge";
+import DecisionLogCard from "@/components/DecisionLogCard";
+import DecisionsDueReviewPanel from "@/components/DecisionsDueReviewPanel";
+import TodayDecisionLoop from "@/components/TodayDecisionLoop";
+import { usePushPromptContext } from "@/providers/PromptContext";
+import { buildLifeeePrompt } from "@/lib/prompt-builders";
 import { supabase } from "@/lib/supabase-client";
 import type {
   AcademicTaskRow,
@@ -41,11 +46,51 @@ import { Link } from "react-router";
 import { buildDayPlan, loadTasks, type Task } from "@/lib/task-system";
 import {
   buildDailyPlanPayload,
+  createLifeeeId,
   fetchCalendarAnchors,
+  fetchDailyPlan,
+  fetchDecisionLogs,
   fetchUniversalTasks,
+  fetchRecentWeeklyReviews,
+  fetchWeeklyReview,
+  insertAiPromptExport,
+  type DecisionLog,
   type LifeeeSyncStatus,
   upsertDailyPlan,
+  upsertDecisionLog,
 } from "@/lib/lifeee-persistence";
+import {
+  buildDecisionLoopSummary,
+  summarizeAnchors,
+  summarizeAntiDrift,
+  summarizeTaskCandidates,
+} from "@/lib/today-decision-loop";
+import {
+  buildDecisionSummary,
+  buildReviewedDecisionsSummary,
+  splitDecisionsByReview,
+} from "@/lib/decision-log-summary";
+import {
+  buildOutcomeFeedbackSummary,
+  buildOutcomeMatches,
+} from "@/lib/decision-outcome-feedback";
+import {
+  buildDecisionPatternDigest,
+  buildDecisionPatternSummary,
+} from "@/lib/decision-pattern-digest";
+import {
+  buildWeeklyBottleneckDiagnosis,
+  buildWeeklyBottleneckSummary,
+} from "@/lib/weekly-bottleneck-diagnosis";
+import {
+  buildOneMoveVerdictSummary,
+  parseOneMoveVerdict,
+} from "@/lib/one-move-verdict";
+import {
+  buildOneMoveFeedbackHistory,
+  buildOneMoveFeedbackHistorySummary,
+  type OneMoveFeedbackHistory,
+} from "@/lib/one-move-feedback-history";
 import {
   CATEGORY_COLORS,
   buildCalendarPlanningPrompt,
@@ -93,6 +138,16 @@ export default function Dashboard() {
     date.setDate(diff);
     return toDateKey(date);
   }, []);
+  const weekEnd = useMemo(() => {
+    const date = new Date(`${weekStart}T00:00:00`);
+    date.setDate(date.getDate() + 6);
+    return toDateKey(date);
+  }, [weekStart]);
+  const previousWeekStart = useMemo(() => {
+    const date = new Date(`${weekStart}T00:00:00`);
+    date.setDate(date.getDate() - 7);
+    return toDateKey(date);
+  }, [weekStart]);
   const { hasSupabaseConfig, userId } = useSupabaseSession();
   const [state, setState] = useState<DashboardState>(emptyState);
   const [isLoading, setIsLoading] = useState(true);
@@ -102,7 +157,63 @@ export default function Dashboard() {
   const [anchorList, setAnchorList] = useState<CalendarAnchor[]>(() => loadAnchors());
   const [planSyncStatus, setPlanSyncStatus] = useState<LifeeeSyncStatus>("local");
   const [planSyncError, setPlanSyncError] = useState<string | null>(null);
+  const [planNotes, setPlanNotes] = useState<string>("");
+  const [remoteTasksLoaded, setRemoteTasksLoaded] = useState(false);
+  const [decisionLogs, setDecisionLogs] = useState<DecisionLog[]>([]);
+  const [activeOneMove, setActiveOneMove] = useState<string>("");
+  const [activeOneMoveVerdictNotes, setActiveOneMoveVerdictNotes] = useState<string | null>(null);
+  const [feedbackHistory, setFeedbackHistory] = useState<OneMoveFeedbackHistory | null>(null);
   const planSaveSequenceRef = useRef(0);
+
+  useEffect(() => {
+    if (!hasSupabaseConfig || !userId) return;
+    let active = true;
+    void fetchWeeklyReview(userId, previousWeekStart)
+      .then((row) => {
+        if (!active) return;
+        const big3 = Array.isArray(row?.next_week_big_3) ? row?.next_week_big_3 : [];
+        const first = typeof big3[0] === "string" ? big3[0].trim() : "";
+        setActiveOneMove(first);
+        setActiveOneMoveVerdictNotes((row?.notes as string | null) ?? null);
+      })
+      .catch(() => {
+        if (!active) return;
+        setActiveOneMove("");
+        setActiveOneMoveVerdictNotes(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [hasSupabaseConfig, previousWeekStart, userId]);
+
+  const feedbackHistoryWeekStarts = useMemo(() => {
+    const starts: string[] = [];
+    for (let i = 1; i <= 8; i++) {
+      const date = new Date(`${weekStart}T00:00:00`);
+      date.setDate(date.getDate() - i * 7);
+      starts.push(toDateKey(date));
+    }
+    return starts;
+  }, [weekStart]);
+
+  useEffect(() => {
+    if (!hasSupabaseConfig || !userId) return;
+    let active = true;
+    void fetchRecentWeeklyReviews(userId, feedbackHistoryWeekStarts)
+      .then((rows) => {
+        if (!active) return;
+        setFeedbackHistory(
+          buildOneMoveFeedbackHistory(rows, { currentWeekStart: weekStart }),
+        );
+      })
+      .catch(() => {
+        if (!active) return;
+        setFeedbackHistory(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [feedbackHistoryWeekStarts, hasSupabaseConfig, userId, weekStart]);
 
   useEffect(() => {
     let active = true;
@@ -112,6 +223,7 @@ export default function Dashboard() {
         if (!active) return;
         setTaskList(loadTasks());
         setAnchorList(loadAnchors());
+        setRemoteTasksLoaded(false);
         setPlanSyncStatus(hasSupabaseConfig ? "waiting" : "local");
         setIsLoading(false);
         setNotice(
@@ -139,6 +251,8 @@ export default function Dashboard() {
         weeklyReviewResult,
         universalTasksResult,
         calendarAnchorsResult,
+        dailyPlanResult,
+        decisionLogsResult,
       ] =
         await Promise.all([
           supabase
@@ -197,6 +311,12 @@ export default function Dashboard() {
           fetchCalendarAnchors(userId)
             .then((data) => ({ data, error: null }))
             .catch((caughtError: unknown) => ({ data: [] as CalendarAnchor[], error: caughtError })),
+          fetchDailyPlan(userId, today)
+            .then((data) => ({ data, error: null }))
+            .catch((caughtError: unknown) => ({ data: null, error: caughtError })),
+          fetchDecisionLogs(userId)
+            .then((data) => ({ data, error: null }))
+            .catch((caughtError: unknown) => ({ data: [] as DecisionLog[], error: caughtError })),
         ]);
 
       if (!active) return;
@@ -211,7 +331,9 @@ export default function Dashboard() {
         nutritionTodayResult.error ??
         weeklyReviewResult.error ??
         universalTasksResult.error ??
-        calendarAnchorsResult.error;
+        calendarAnchorsResult.error ??
+        dailyPlanResult.error ??
+        decisionLogsResult.error;
 
       if (firstError) {
         setError(firstError instanceof Error ? firstError.message : "Dashboard Supabase load failed.");
@@ -229,6 +351,10 @@ export default function Dashboard() {
       });
       setTaskList(universalTasksResult.data);
       setAnchorList(calendarAnchorsResult.data);
+      setRemoteTasksLoaded(!universalTasksResult.error);
+      const dailyPlanRow = dailyPlanResult.data;
+      setPlanNotes((dailyPlanRow?.notes as string | null) ?? "");
+      setDecisionLogs(decisionLogsResult.data);
 
       setIsLoading(false);
       setPlanSyncStatus("local");
@@ -347,6 +473,7 @@ export default function Dashboard() {
           shutdownTime: availableTime.bestShutdownTarget,
         }),
         operating_mode: operatingMode,
+        notes: planNotes,
       };
 
       void upsertDailyPlan(userId, payload)
@@ -372,6 +499,7 @@ export default function Dashboard() {
     hasSupabaseConfig,
     isLoading,
     operatingMode,
+    planNotes,
     realityScore.recommendations,
     realityScore.score,
     today,
@@ -413,6 +541,253 @@ export default function Dashboard() {
       }),
     [academicScore, sleepScore],
   );
+
+  const handleTaskCreated = (created: Task) => {
+    setTaskList((prev) => [created, ...prev.filter((task) => task.id !== created.id)]);
+  };
+
+  const handleTaskUpserted = (saved: Task) => {
+    setTaskList((prev) => prev.map((task) => (task.id === saved.id ? saved : task)));
+  };
+
+  const handleDecisionSaved = (saved: DecisionLog) => {
+    setDecisionLogs((prev) => {
+      const filtered = prev.filter((entry) => entry.id !== saved.id);
+      return [saved, ...filtered];
+    });
+  };
+
+  const logIgnoreDecision = async (task: Task, reviewDate: string | null) => {
+    if (!userId) throw new Error("Sign in to save decisions to Supabase.");
+    const payload = {
+      id: createLifeeeId(),
+      decision: task.title,
+      decision_date: today,
+      reason_chosen: "Chose to ignore today",
+      review_date: reviewDate,
+    };
+    const saved = await upsertDecisionLog(userId, payload);
+    if (saved) {
+      handleDecisionSaved(saved as DecisionLog);
+    } else {
+      handleDecisionSaved({
+        ...payload,
+        id: payload.id,
+        options_considered: [],
+      } as DecisionLog);
+    }
+  };
+
+  const decisionSummary = useMemo(
+    () => buildDecisionSummary(decisionLogs, today),
+    [decisionLogs, today],
+  );
+
+  const reviewBuckets = useMemo(
+    () => splitDecisionsByReview(decisionLogs, today, weekStart, weekEnd),
+    [decisionLogs, today, weekStart, weekEnd],
+  );
+
+  const reviewedDecisionsSummary = useMemo(
+    () => buildReviewedDecisionsSummary(reviewBuckets),
+    [reviewBuckets],
+  );
+
+  const decisionLoop = useMemo(
+    () =>
+      buildDecisionLoopSummary({
+        tasks: taskList,
+        anchors: anchorList,
+        today,
+        currentEnergy,
+        decisions: decisionLogs,
+      }),
+    [anchorList, currentEnergy, decisionLogs, taskList, today],
+  );
+
+  const outcomeMatches = useMemo(
+    () =>
+      buildOutcomeMatches(
+        taskList.filter((t) => t.status === "inbox"),
+        decisionLogs,
+      ),
+    [decisionLogs, taskList],
+  );
+
+  const outcomeFeedbackSummary = useMemo(
+    () => buildOutcomeFeedbackSummary(decisionLogs),
+    [decisionLogs],
+  );
+
+  const decisionPatternSummary = useMemo(
+    () =>
+      buildDecisionPatternSummary(
+        buildDecisionPatternDigest(decisionLogs, weekStart, weekEnd, today),
+      ),
+    [decisionLogs, weekEnd, weekStart, today],
+  );
+
+  const weeklyBottleneckDiagnosis = useMemo(
+    () =>
+      buildWeeklyBottleneckDiagnosis({
+        tasks: taskList,
+        decisionLogs,
+        anchors: anchorList,
+        weekStart,
+        weekEnd,
+        today,
+      }),
+    [anchorList, decisionLogs, taskList, today, weekEnd, weekStart],
+  );
+
+  const weeklyBottleneckSummary = useMemo(
+    () => buildWeeklyBottleneckSummary(weeklyBottleneckDiagnosis),
+    [weeklyBottleneckDiagnosis],
+  );
+
+  const activeOneMoveVerdict = useMemo(
+    () => parseOneMoveVerdict(activeOneMoveVerdictNotes),
+    [activeOneMoveVerdictNotes],
+  );
+
+  const lastWeekOneMoveVerdictSummary = useMemo(
+    () =>
+      activeOneMove
+        ? buildOneMoveVerdictSummary(activeOneMove, activeOneMoveVerdict)
+        : undefined,
+    [activeOneMove, activeOneMoveVerdict],
+  );
+
+  const oneMoveFeedbackHistorySummary = useMemo(
+    () =>
+      feedbackHistory && feedbackHistory.totalMoves > 0
+        ? buildOneMoveFeedbackHistorySummary(feedbackHistory, { windowWeeks: 8 })
+        : undefined,
+    [feedbackHistory],
+  );
+
+  const decisionPromptPayload = useMemo(() => {
+    const inboxAndToday = [
+      ...decisionLoop.todayCommitted.slice(0, 6),
+      ...decisionLoop.inboxCandidates.slice(0, 6),
+    ];
+    return {
+      date: today,
+      sourcePage: "dashboard",
+      operatingMode,
+      taskSummary: summarizeTaskCandidates(inboxAndToday),
+      timelineSummary: summarizeAnchors(anchorList, today),
+      calendarSummary: summarizeAnchors(anchorList, today),
+      antiDriftSummary: summarizeAntiDrift({
+        computedBottleneck: realityScore.recommendations[0] ?? null,
+        userNote: planNotes || null,
+        ignored: decisionLoop.ignoredToday,
+        trustProtectors: decisionLoop.trustProtectors,
+      }),
+      sleepSummary: state.sleepToday
+        ? `Readiness ${sleepScore.toFixed(1)}/10 · ${state.sleepToday.hours_slept ?? "—"}h slept · debt ${state.sleepToday.sleep_debt ?? "—"}h`
+        : undefined,
+      academicsSummary:
+        topTask != null
+          ? `Top academic: ${topTask.task_name} (${topTask.class_name}) · priority ${Number(topTask.priority_score ?? 0).toFixed(1)}`
+          : undefined,
+      mcatSummary: `${mcatNextMove.title} — ${mcatNextMove.detail}`,
+      workoutSummary: state.workoutToday
+        ? `${state.workoutToday.workout_type} · ${Number(state.workoutToday.duration_minutes ?? 0)} min`
+        : undefined,
+      nutritionSummary: state.nutritionToday
+        ? `${nutritionChecks}/4 checks · ${Number(state.nutritionToday.calories ?? 0)} cal · ${Number(state.nutritionToday.protein_g ?? 0)}g protein`
+        : undefined,
+      weeklyReviewSummary: state.weeklyReview
+        ? `Life score ${Number(state.weeklyReview.weekly_life_score ?? 0).toFixed(1)} · win: ${state.weeklyReview.biggest_win ?? "unset"} · leak: ${state.weeklyReview.biggest_leak ?? "unset"}`
+        : undefined,
+      decisionSummary,
+      reviewedDecisionsSummary,
+      outcomeFeedbackSummary,
+      decisionPatternSummary,
+      weeklyBottleneckSummary,
+      nextWeekOneMoveSummary: activeOneMove || undefined,
+      lastWeekOneMoveVerdictSummary,
+      oneMoveFeedbackHistorySummary,
+    };
+  }, [
+    activeOneMove,
+    lastWeekOneMoveVerdictSummary,
+    oneMoveFeedbackHistorySummary,
+    anchorList,
+    decisionLoop.ignoredToday,
+    decisionLoop.inboxCandidates,
+    decisionLoop.todayCommitted,
+    decisionLoop.trustProtectors,
+    decisionSummary,
+    reviewedDecisionsSummary,
+    outcomeFeedbackSummary,
+    decisionPatternSummary,
+    weeklyBottleneckSummary,
+    mcatNextMove,
+    nutritionChecks,
+    operatingMode,
+    planNotes,
+    realityScore.recommendations,
+    sleepScore,
+    state.nutritionToday,
+    state.sleepToday,
+    state.weeklyReview,
+    state.workoutToday,
+    today,
+    topTask,
+  ]);
+
+  usePushPromptContext(decisionPromptPayload);
+
+  const [briefStatus, setBriefStatus] = useState<"idle" | "copied" | "saved" | "error">(
+    "idle",
+  );
+  const [briefError, setBriefError] = useState<string | null>(null);
+
+  const copyWeeklyBrief = async () => {
+    setBriefError(null);
+    const text = buildLifeeePrompt("weekly-strategy-brief", decisionPromptPayload);
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        ta.remove();
+      }
+      setBriefStatus("copied");
+    } catch (error) {
+      setBriefStatus("error");
+      setBriefError(error instanceof Error ? error.message : "Clipboard copy failed.");
+      return;
+    }
+
+    if (!hasSupabaseConfig || !userId) {
+      window.setTimeout(() => setBriefStatus("idle"), 1600);
+      return;
+    }
+
+    try {
+      await insertAiPromptExport(userId, {
+        prompt_type: "Weekly Strategy Brief",
+        prompt_text: text,
+        source_page: "dashboard",
+      });
+      setBriefStatus("saved");
+    } catch (error) {
+      setBriefError(
+        error instanceof Error
+          ? `${error.message} (clipboard copy ok)`
+          : "Export history did not save (clipboard copy ok).",
+      );
+    } finally {
+      window.setTimeout(() => setBriefStatus("idle"), 1800);
+    }
+  };
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -508,6 +883,118 @@ export default function Dashboard() {
           Supabase env vars are missing. The dashboard still works locally.
         </div>
       ) : null}
+
+      {weeklyBottleneckDiagnosis.bottleneckKind !== "insufficient-evidence" ? (
+        <div className="rounded-lg border border-[#ddd4c6] bg-[#fdfaf4] px-3 py-2 text-xs text-[#25313c] flex flex-wrap items-center gap-2">
+          <span className="text-[10px] uppercase tracking-wider text-[#c39a4e] font-semibold">
+            Current bottleneck
+          </span>
+          <span className="font-medium">{weeklyBottleneckDiagnosis.bottleneckLabel}</span>
+          <span
+            className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${
+              weeklyBottleneckDiagnosis.confidence === "high"
+                ? "border-rose-200 bg-rose-100 text-rose-700"
+                : weeklyBottleneckDiagnosis.confidence === "medium"
+                  ? "border-amber-200 bg-amber-100 text-amber-700"
+                  : "border-stone-200 bg-stone-100 text-stone-700"
+            }`}
+          >
+            {weeklyBottleneckDiagnosis.confidence}
+          </span>
+          <span className="text-[#6f685f]">· {weeklyBottleneckDiagnosis.suggestedFix}</span>
+        </div>
+      ) : null}
+
+      {activeOneMove ? (
+        <div className="rounded-lg border border-[#6b87ae]/30 bg-[#6b87ae]/10 px-3 py-2 text-xs text-[#25313c] flex flex-wrap items-center gap-2">
+          <span className="text-[10px] uppercase tracking-wider text-[#6b87ae] font-semibold">
+            This week's one move
+          </span>
+          <span className="font-medium">{activeOneMove}</span>
+          {activeOneMoveVerdict.outcome ? (
+            <span
+              className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${
+                activeOneMoveVerdict.outcome === "worked"
+                  ? "border-emerald-200 bg-emerald-100 text-emerald-700"
+                  : activeOneMoveVerdict.outcome === "partial"
+                    ? "border-amber-200 bg-amber-100 text-amber-700"
+                    : activeOneMoveVerdict.outcome === "missed"
+                      ? "border-rose-200 bg-rose-100 text-rose-700"
+                      : "border-stone-200 bg-stone-100 text-stone-700"
+              }`}
+              title={activeOneMoveVerdict.note || undefined}
+            >
+              Last verdict: {activeOneMoveVerdict.outcome}
+            </span>
+          ) : null}
+          {feedbackHistory && feedbackHistory.currentStreak > 0 ? (
+            <span className="rounded-full border border-[#6b87ae]/30 bg-white px-2 py-0.5 text-[10px] font-medium text-[#25313c]">
+              Verdict streak: {feedbackHistory.currentStreak}
+            </span>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => void copyWeeklyBrief()}
+            disabled={briefStatus === "copied" || briefStatus === "saved"}
+            className="ml-auto inline-flex items-center gap-1 rounded-md border border-[#ddd4c6] bg-white px-2 py-0.5 text-[10px] font-medium text-[#25313c] hover:bg-[#f7f3ec] disabled:opacity-70"
+            title="Copies a Weekly Strategy Brief prompt to clipboard"
+          >
+            <Copy size={10} />
+            {briefStatus === "saved"
+              ? "Copied + saved"
+              : briefStatus === "copied"
+                ? "Copied"
+                : briefStatus === "error"
+                  ? "Retry copy"
+                  : "Copy weekly brief"}
+          </button>
+          {briefError ? (
+            <span className="text-[10px] text-destructive">{briefError}</span>
+          ) : null}
+        </div>
+      ) : null}
+
+      <TodayDecisionLoop
+        today={today}
+        tasks={taskList}
+        anchors={anchorList}
+        currentEnergy={currentEnergy}
+        userId={userId}
+        hasSupabaseConfig={hasSupabaseConfig}
+        sessionLoading={isLoading}
+        remoteLoaded={remoteTasksLoaded}
+        onTaskCreated={handleTaskCreated}
+        onTaskUpserted={handleTaskUpserted}
+        planNotes={planNotes}
+        onPlanNotesChange={setPlanNotes}
+        planNotesSyncStatus={planSyncStatus}
+        planNotesError={planSyncError}
+        onLogIgnoreDecision={logIgnoreDecision}
+        outcomeMatches={outcomeMatches}
+        decisions={decisionLogs}
+      />
+
+      <DecisionsDueReviewPanel
+        today={today}
+        weekStart={weekStart}
+        weekEnd={weekEnd}
+        decisions={decisionLogs}
+        userId={userId}
+        hasSupabaseConfig={hasSupabaseConfig}
+        sessionLoading={isLoading}
+        remoteLoaded={remoteTasksLoaded}
+        onDecisionReviewed={handleDecisionSaved}
+      />
+
+      <DecisionLogCard
+        today={today}
+        decisions={decisionLogs}
+        userId={userId}
+        hasSupabaseConfig={hasSupabaseConfig}
+        sessionLoading={isLoading}
+        remoteLoaded={remoteTasksLoaded}
+        onDecisionSaved={handleDecisionSaved}
+      />
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div className="card-surface p-4 border-l-2 border-[#6b87ae]">
