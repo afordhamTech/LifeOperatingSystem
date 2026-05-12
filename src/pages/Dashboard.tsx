@@ -23,6 +23,8 @@ import DailyLogPanel from "@/components/DailyLogPanel";
 import { DailyOpModeChip, deriveDailyOpMode } from "@/components/DailyOpModeChip";
 import StatusRing, { getStatusColor } from "@/components/StatusRing";
 import { SyncBadge } from "@/components/SyncBadge";
+import TodayDecisionLoop from "@/components/TodayDecisionLoop";
+import { usePushPromptContext } from "@/providers/PromptContext";
 import { supabase } from "@/lib/supabase-client";
 import type {
   AcademicTaskRow,
@@ -42,10 +44,17 @@ import { buildDayPlan, loadTasks, type Task } from "@/lib/task-system";
 import {
   buildDailyPlanPayload,
   fetchCalendarAnchors,
+  fetchDailyPlan,
   fetchUniversalTasks,
   type LifeeeSyncStatus,
   upsertDailyPlan,
 } from "@/lib/lifeee-persistence";
+import {
+  buildDecisionLoopSummary,
+  summarizeAnchors,
+  summarizeAntiDrift,
+  summarizeTaskCandidates,
+} from "@/lib/today-decision-loop";
 import {
   CATEGORY_COLORS,
   buildCalendarPlanningPrompt,
@@ -102,6 +111,8 @@ export default function Dashboard() {
   const [anchorList, setAnchorList] = useState<CalendarAnchor[]>(() => loadAnchors());
   const [planSyncStatus, setPlanSyncStatus] = useState<LifeeeSyncStatus>("local");
   const [planSyncError, setPlanSyncError] = useState<string | null>(null);
+  const [planNotes, setPlanNotes] = useState<string>("");
+  const [remoteTasksLoaded, setRemoteTasksLoaded] = useState(false);
   const planSaveSequenceRef = useRef(0);
 
   useEffect(() => {
@@ -112,6 +123,7 @@ export default function Dashboard() {
         if (!active) return;
         setTaskList(loadTasks());
         setAnchorList(loadAnchors());
+        setRemoteTasksLoaded(false);
         setPlanSyncStatus(hasSupabaseConfig ? "waiting" : "local");
         setIsLoading(false);
         setNotice(
@@ -139,6 +151,7 @@ export default function Dashboard() {
         weeklyReviewResult,
         universalTasksResult,
         calendarAnchorsResult,
+        dailyPlanResult,
       ] =
         await Promise.all([
           supabase
@@ -197,6 +210,9 @@ export default function Dashboard() {
           fetchCalendarAnchors(userId)
             .then((data) => ({ data, error: null }))
             .catch((caughtError: unknown) => ({ data: [] as CalendarAnchor[], error: caughtError })),
+          fetchDailyPlan(userId, today)
+            .then((data) => ({ data, error: null }))
+            .catch((caughtError: unknown) => ({ data: null, error: caughtError })),
         ]);
 
       if (!active) return;
@@ -211,7 +227,8 @@ export default function Dashboard() {
         nutritionTodayResult.error ??
         weeklyReviewResult.error ??
         universalTasksResult.error ??
-        calendarAnchorsResult.error;
+        calendarAnchorsResult.error ??
+        dailyPlanResult.error;
 
       if (firstError) {
         setError(firstError instanceof Error ? firstError.message : "Dashboard Supabase load failed.");
@@ -229,6 +246,9 @@ export default function Dashboard() {
       });
       setTaskList(universalTasksResult.data);
       setAnchorList(calendarAnchorsResult.data);
+      setRemoteTasksLoaded(!universalTasksResult.error);
+      const dailyPlanRow = dailyPlanResult.data;
+      setPlanNotes((dailyPlanRow?.notes as string | null) ?? "");
 
       setIsLoading(false);
       setPlanSyncStatus("local");
@@ -347,6 +367,7 @@ export default function Dashboard() {
           shutdownTime: availableTime.bestShutdownTarget,
         }),
         operating_mode: operatingMode,
+        notes: planNotes,
       };
 
       void upsertDailyPlan(userId, payload)
@@ -372,6 +393,7 @@ export default function Dashboard() {
     hasSupabaseConfig,
     isLoading,
     operatingMode,
+    planNotes,
     realityScore.recommendations,
     realityScore.score,
     today,
@@ -413,6 +435,83 @@ export default function Dashboard() {
       }),
     [academicScore, sleepScore],
   );
+
+  const handleTaskCreated = (created: Task) => {
+    setTaskList((prev) => [created, ...prev.filter((task) => task.id !== created.id)]);
+  };
+
+  const handleTaskUpserted = (saved: Task) => {
+    setTaskList((prev) => prev.map((task) => (task.id === saved.id ? saved : task)));
+  };
+
+  const decisionLoop = useMemo(
+    () =>
+      buildDecisionLoopSummary({
+        tasks: taskList,
+        anchors: anchorList,
+        today,
+        currentEnergy,
+      }),
+    [anchorList, currentEnergy, taskList, today],
+  );
+
+  const decisionPromptPayload = useMemo(() => {
+    const inboxAndToday = [
+      ...decisionLoop.todayCommitted.slice(0, 6),
+      ...decisionLoop.inboxCandidates.slice(0, 6),
+    ];
+    return {
+      date: today,
+      sourcePage: "dashboard",
+      operatingMode,
+      taskSummary: summarizeTaskCandidates(inboxAndToday),
+      timelineSummary: summarizeAnchors(anchorList, today),
+      calendarSummary: summarizeAnchors(anchorList, today),
+      antiDriftSummary: summarizeAntiDrift({
+        computedBottleneck: realityScore.recommendations[0] ?? null,
+        userNote: planNotes || null,
+        ignored: decisionLoop.ignoredToday,
+        trustProtectors: decisionLoop.trustProtectors,
+      }),
+      sleepSummary: state.sleepToday
+        ? `Readiness ${sleepScore.toFixed(1)}/10 · ${state.sleepToday.hours_slept ?? "—"}h slept · debt ${state.sleepToday.sleep_debt ?? "—"}h`
+        : undefined,
+      academicsSummary:
+        topTask != null
+          ? `Top academic: ${topTask.task_name} (${topTask.class_name}) · priority ${Number(topTask.priority_score ?? 0).toFixed(1)}`
+          : undefined,
+      mcatSummary: `${mcatNextMove.title} — ${mcatNextMove.detail}`,
+      workoutSummary: state.workoutToday
+        ? `${state.workoutToday.workout_type} · ${Number(state.workoutToday.duration_minutes ?? 0)} min`
+        : undefined,
+      nutritionSummary: state.nutritionToday
+        ? `${nutritionChecks}/4 checks · ${Number(state.nutritionToday.calories ?? 0)} cal · ${Number(state.nutritionToday.protein_g ?? 0)}g protein`
+        : undefined,
+      weeklyReviewSummary: state.weeklyReview
+        ? `Life score ${Number(state.weeklyReview.weekly_life_score ?? 0).toFixed(1)} · win: ${state.weeklyReview.biggest_win ?? "unset"} · leak: ${state.weeklyReview.biggest_leak ?? "unset"}`
+        : undefined,
+    };
+  }, [
+    anchorList,
+    decisionLoop.ignoredToday,
+    decisionLoop.inboxCandidates,
+    decisionLoop.todayCommitted,
+    decisionLoop.trustProtectors,
+    mcatNextMove,
+    nutritionChecks,
+    operatingMode,
+    planNotes,
+    realityScore.recommendations,
+    sleepScore,
+    state.nutritionToday,
+    state.sleepToday,
+    state.weeklyReview,
+    state.workoutToday,
+    today,
+    topTask,
+  ]);
+
+  usePushPromptContext(decisionPromptPayload);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -508,6 +607,23 @@ export default function Dashboard() {
           Supabase env vars are missing. The dashboard still works locally.
         </div>
       ) : null}
+
+      <TodayDecisionLoop
+        today={today}
+        tasks={taskList}
+        anchors={anchorList}
+        currentEnergy={currentEnergy}
+        userId={userId}
+        hasSupabaseConfig={hasSupabaseConfig}
+        sessionLoading={isLoading}
+        remoteLoaded={remoteTasksLoaded}
+        onTaskCreated={handleTaskCreated}
+        onTaskUpserted={handleTaskUpserted}
+        planNotes={planNotes}
+        onPlanNotesChange={setPlanNotes}
+        planNotesSyncStatus={planSyncStatus}
+        planNotesError={planSyncError}
+      />
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div className="card-surface p-4 border-l-2 border-[#6b87ae]">
