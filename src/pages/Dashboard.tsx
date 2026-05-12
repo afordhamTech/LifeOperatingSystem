@@ -50,6 +50,7 @@ import {
   fetchDailyPlan,
   fetchDecisionLogs,
   fetchUniversalTasks,
+  fetchRecentWeeklyReviews,
   fetchWeeklyReview,
   type DecisionLog,
   type LifeeeSyncStatus,
@@ -83,6 +84,11 @@ import {
   buildOneMoveVerdictSummary,
   parseOneMoveVerdict,
 } from "@/lib/one-move-verdict";
+import {
+  buildOneMoveFeedbackHistory,
+  buildOneMoveFeedbackHistorySummary,
+  type OneMoveFeedbackHistory,
+} from "@/lib/one-move-feedback-history";
 import {
   CATEGORY_COLORS,
   buildCalendarPlanningPrompt,
@@ -154,6 +160,7 @@ export default function Dashboard() {
   const [decisionLogs, setDecisionLogs] = useState<DecisionLog[]>([]);
   const [activeOneMove, setActiveOneMove] = useState<string>("");
   const [activeOneMoveVerdictNotes, setActiveOneMoveVerdictNotes] = useState<string | null>(null);
+  const [feedbackHistory, setFeedbackHistory] = useState<OneMoveFeedbackHistory | null>(null);
   const planSaveSequenceRef = useRef(0);
 
   useEffect(() => {
@@ -176,6 +183,35 @@ export default function Dashboard() {
       active = false;
     };
   }, [hasSupabaseConfig, previousWeekStart, userId]);
+
+  const feedbackHistoryWeekStarts = useMemo(() => {
+    const starts: string[] = [];
+    for (let i = 1; i <= 8; i++) {
+      const date = new Date(`${weekStart}T00:00:00`);
+      date.setDate(date.getDate() - i * 7);
+      starts.push(toDateKey(date));
+    }
+    return starts;
+  }, [weekStart]);
+
+  useEffect(() => {
+    if (!hasSupabaseConfig || !userId) return;
+    let active = true;
+    void fetchRecentWeeklyReviews(userId, feedbackHistoryWeekStarts)
+      .then((rows) => {
+        if (!active) return;
+        setFeedbackHistory(
+          buildOneMoveFeedbackHistory(rows, { currentWeekStart: weekStart }),
+        );
+      })
+      .catch(() => {
+        if (!active) return;
+        setFeedbackHistory(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [feedbackHistoryWeekStarts, hasSupabaseConfig, userId, weekStart]);
 
   useEffect(() => {
     let active = true;
@@ -620,6 +656,14 @@ export default function Dashboard() {
     [activeOneMove, activeOneMoveVerdict],
   );
 
+  const oneMoveFeedbackHistorySummary = useMemo(
+    () =>
+      feedbackHistory && feedbackHistory.totalMoves > 0
+        ? buildOneMoveFeedbackHistorySummary(feedbackHistory, { windowWeeks: 8 })
+        : undefined,
+    [feedbackHistory],
+  );
+
   const decisionPromptPayload = useMemo(() => {
     const inboxAndToday = [
       ...decisionLoop.todayCommitted.slice(0, 6),
@@ -662,10 +706,12 @@ export default function Dashboard() {
       weeklyBottleneckSummary,
       nextWeekOneMoveSummary: activeOneMove || undefined,
       lastWeekOneMoveVerdictSummary,
+      oneMoveFeedbackHistorySummary,
     };
   }, [
     activeOneMove,
     lastWeekOneMoveVerdictSummary,
+    oneMoveFeedbackHistorySummary,
     anchorList,
     decisionLoop.ignoredToday,
     decisionLoop.inboxCandidates,
@@ -828,6 +874,11 @@ export default function Dashboard() {
               title={activeOneMoveVerdict.note || undefined}
             >
               Last verdict: {activeOneMoveVerdict.outcome}
+            </span>
+          ) : null}
+          {feedbackHistory && feedbackHistory.currentStreak > 0 ? (
+            <span className="rounded-full border border-[#6b87ae]/30 bg-white px-2 py-0.5 text-[10px] font-medium text-[#25313c]">
+              Verdict streak: {feedbackHistory.currentStreak}
             </span>
           ) : null}
         </div>

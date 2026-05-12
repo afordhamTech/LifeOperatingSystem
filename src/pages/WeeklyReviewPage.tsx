@@ -29,6 +29,7 @@ import {
   fetchCalendarAnchors,
   fetchDecisionLogs,
   fetchNutritionLogs,
+  fetchRecentWeeklyReviews,
   fetchSleepLogs,
   fetchUniversalTasks,
   fetchWeeklyReview,
@@ -52,6 +53,10 @@ import {
   upsertOneMoveVerdictIntoNotes,
   type OneMoveVerdictOutcome,
 } from "@/lib/one-move-verdict";
+import {
+  buildOneMoveFeedbackHistory,
+  type OneMoveFeedbackHistory,
+} from "@/lib/one-move-feedback-history";
 import type { CalendarAnchor } from "@/lib/calendar-system";
 import type { Task } from "@/lib/task-system";
 
@@ -186,6 +191,8 @@ export default function WeeklyReviewPage() {
   const [universalTasks, setUniversalTasks] = useState<Task[]>([]);
   const [calendarAnchorList, setCalendarAnchorList] = useState<CalendarAnchor[]>([]);
   const [previousWeekReview, setPreviousWeekReview] = useState<WeeklyReviewRow | null>(null);
+  const [feedbackHistory, setFeedbackHistory] = useState<OneMoveFeedbackHistory | null>(null);
+  const FEEDBACK_HISTORY_WEEKS = 8;
   const [verdictOutcome, setVerdictOutcome] = useState<OneMoveVerdictOutcome | null>(null);
   const [verdictNote, setVerdictNote] = useState<string>("");
   const [verdictSaving, setVerdictSaving] = useState(false);
@@ -245,6 +252,38 @@ export default function WeeklyReviewPage() {
       active = false;
     };
   }, [hasSupabaseConfig, previousWeekStart, userId]);
+
+  const recentWeekStarts = useMemo(() => {
+    const starts: string[] = [];
+    for (let i = 1; i <= FEEDBACK_HISTORY_WEEKS; i++) {
+      const date = new Date(`${weekStart}T00:00:00`);
+      date.setDate(date.getDate() - i * 7);
+      starts.push(toDateKey(date));
+    }
+    return starts;
+  }, [weekStart]);
+
+  useEffect(() => {
+    let active = true;
+    if (!hasSupabaseConfig || !userId) {
+      setFeedbackHistory(null);
+      return;
+    }
+    void fetchRecentWeeklyReviews(userId, recentWeekStarts)
+      .then((rows) => {
+        if (!active) return;
+        setFeedbackHistory(
+          buildOneMoveFeedbackHistory(rows, { currentWeekStart: weekStart }),
+        );
+      })
+      .catch(() => {
+        if (!active) return;
+        setFeedbackHistory(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [hasSupabaseConfig, recentWeekStarts, userId, weekStart]);
 
   useEffect(() => {
     const rowId = previousWeekReview?.id ?? null;
@@ -827,6 +866,79 @@ export default function WeeklyReviewPage() {
             </>
           ) : (
             <div className="text-xs text-[#9b938a]">No move was set last week.</div>
+          )}
+        </div>
+      ) : null}
+
+      {feedbackHistory ? (
+        <div className="card-surface p-4 border-l-2 border-[#6b87ae]">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+            <h3 className="text-sm font-semibold text-[#25313c]">
+              ONE MOVE FEEDBACK HISTORY
+            </h3>
+            <span className="text-[10px] uppercase tracking-wider text-[#6f685f]">
+              Window: last {FEEDBACK_HISTORY_WEEKS} weeks
+            </span>
+          </div>
+          {feedbackHistory.totalMoves === 0 ? (
+            <div className="text-xs text-[#9b938a]">
+              No eligible one-move history yet. Save a One Move on this page and
+              return next week to record a verdict.
+            </div>
+          ) : (
+            <>
+              <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-4 text-xs text-[#6f685f] mb-3">
+                <Stat label="Eligible moves" value={feedbackHistory.totalMoves} />
+                <Stat
+                  label="Verdicts"
+                  value={feedbackHistory.totalVerdicts}
+                  hint={`rate ${Math.round(feedbackHistory.verdictRate * 100)}%`}
+                />
+                <Stat
+                  label="Outcomes"
+                  value={`${feedbackHistory.outcomeCounts.worked}/${feedbackHistory.outcomeCounts.partial}/${feedbackHistory.outcomeCounts.missed}/${feedbackHistory.outcomeCounts.skipped}`}
+                  hint="worked / partial / missed / skipped"
+                />
+                <Stat
+                  label="Streak"
+                  value={feedbackHistory.currentStreak}
+                  hint={`longest ${feedbackHistory.longestStreak}`}
+                />
+              </div>
+              <ul className="space-y-1.5 text-xs">
+                {feedbackHistory.entries.slice(0, 5).map((entry) => {
+                  const palette =
+                    entry.outcome === "worked"
+                      ? "border-emerald-200 bg-emerald-100 text-emerald-700"
+                      : entry.outcome === "partial"
+                        ? "border-amber-200 bg-amber-100 text-amber-700"
+                        : entry.outcome === "missed"
+                          ? "border-rose-200 bg-rose-100 text-rose-700"
+                          : entry.outcome === "skipped"
+                            ? "border-stone-200 bg-stone-100 text-stone-700"
+                            : "border-[#ddd4c6] bg-white text-[#9b938a]";
+                  return (
+                    <li
+                      key={entry.commitmentWeekStart}
+                      className="rounded-md border border-[#ece5da] bg-white/70 p-2"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-sm text-[#25313c]">
+                          {entry.move}
+                        </span>
+                        <span className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${palette}`}>
+                          {entry.outcome ?? "no verdict"}
+                        </span>
+                      </div>
+                      <div className="mt-0.5 text-[10px] text-[#9b938a]">
+                        Target {entry.targetWeekStart}
+                        {entry.note ? ` · ${entry.note.length > 60 ? `${entry.note.slice(0, 60)}…` : entry.note}` : ""}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
           )}
         </div>
       ) : null}

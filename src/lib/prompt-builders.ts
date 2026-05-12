@@ -42,6 +42,7 @@ export type PromptBuilderContext = {
   weeklyBottleneckSummary?: string;
   nextWeekOneMoveSummary?: string;
   lastWeekOneMoveVerdictSummary?: string;
+  oneMoveFeedbackHistorySummary?: string;
 };
 
 export const PROMPT_OPTIONS: PromptOption[] = [
@@ -98,6 +99,7 @@ function commonContext(context: PromptBuilderContext) {
     line("Weekly bottleneck", context.weeklyBottleneckSummary),
     line("This week's one move", context.nextWeekOneMoveSummary),
     line("Last week one move verdict", context.lastWeekOneMoveVerdictSummary),
+    line("One move feedback history", context.oneMoveFeedbackHistorySummary),
   ].join("\n");
 }
 
