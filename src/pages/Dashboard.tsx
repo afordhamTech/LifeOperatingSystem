@@ -27,6 +27,7 @@ import DecisionLogCard from "@/components/DecisionLogCard";
 import DecisionsDueReviewPanel from "@/components/DecisionsDueReviewPanel";
 import TodayDecisionLoop from "@/components/TodayDecisionLoop";
 import { usePushPromptContext } from "@/providers/PromptContext";
+import { buildLifeeePrompt } from "@/lib/prompt-builders";
 import { supabase } from "@/lib/supabase-client";
 import type {
   AcademicTaskRow,
@@ -52,6 +53,7 @@ import {
   fetchUniversalTasks,
   fetchRecentWeeklyReviews,
   fetchWeeklyReview,
+  insertAiPromptExport,
   type DecisionLog,
   type LifeeeSyncStatus,
   upsertDailyPlan,
@@ -738,6 +740,55 @@ export default function Dashboard() {
 
   usePushPromptContext(decisionPromptPayload);
 
+  const [briefStatus, setBriefStatus] = useState<"idle" | "copied" | "saved" | "error">(
+    "idle",
+  );
+  const [briefError, setBriefError] = useState<string | null>(null);
+
+  const copyWeeklyBrief = async () => {
+    setBriefError(null);
+    const text = buildLifeeePrompt("weekly-strategy-brief", decisionPromptPayload);
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        ta.remove();
+      }
+      setBriefStatus("copied");
+    } catch (error) {
+      setBriefStatus("error");
+      setBriefError(error instanceof Error ? error.message : "Clipboard copy failed.");
+      return;
+    }
+
+    if (!hasSupabaseConfig || !userId) {
+      window.setTimeout(() => setBriefStatus("idle"), 1600);
+      return;
+    }
+
+    try {
+      await insertAiPromptExport(userId, {
+        prompt_type: "Weekly Strategy Brief",
+        prompt_text: text,
+        source_page: "dashboard",
+      });
+      setBriefStatus("saved");
+    } catch (error) {
+      setBriefError(
+        error instanceof Error
+          ? `${error.message} (clipboard copy ok)`
+          : "Export history did not save (clipboard copy ok).",
+      );
+    } finally {
+      window.setTimeout(() => setBriefStatus("idle"), 1800);
+    }
+  };
+
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       <div className="border-b border-[#ddd4c6] pb-4">
@@ -880,6 +931,25 @@ export default function Dashboard() {
             <span className="rounded-full border border-[#6b87ae]/30 bg-white px-2 py-0.5 text-[10px] font-medium text-[#25313c]">
               Verdict streak: {feedbackHistory.currentStreak}
             </span>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => void copyWeeklyBrief()}
+            disabled={briefStatus === "copied" || briefStatus === "saved"}
+            className="ml-auto inline-flex items-center gap-1 rounded-md border border-[#ddd4c6] bg-white px-2 py-0.5 text-[10px] font-medium text-[#25313c] hover:bg-[#f7f3ec] disabled:opacity-70"
+            title="Copies a Weekly Strategy Brief prompt to clipboard"
+          >
+            <Copy size={10} />
+            {briefStatus === "saved"
+              ? "Copied + saved"
+              : briefStatus === "copied"
+                ? "Copied"
+                : briefStatus === "error"
+                  ? "Retry copy"
+                  : "Copy weekly brief"}
+          </button>
+          {briefError ? (
+            <span className="text-[10px] text-destructive">{briefError}</span>
           ) : null}
         </div>
       ) : null}

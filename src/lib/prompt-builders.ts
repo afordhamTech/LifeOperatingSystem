@@ -11,7 +11,8 @@ export type LifeeePromptKind =
   | "bible-study"
   | "relationship-message"
   | "career-proof"
-  | "full-context";
+  | "full-context"
+  | "weekly-strategy-brief";
 
 export type PromptOption = {
   kind: LifeeePromptKind;
@@ -59,6 +60,7 @@ export const PROMPT_OPTIONS: PromptOption[] = [
   { kind: "relationship-message", label: "Relationship Message" },
   { kind: "career-proof", label: "Career Proof" },
   { kind: "full-context", label: "Full Lifeee Context Export" },
+  { kind: "weekly-strategy-brief", label: "Weekly Strategy Brief" },
 ];
 
 const missing = "Not supplied in this export.";
@@ -190,5 +192,23 @@ Review the proof locker. Identify the strongest artifact, the weakest evidence g
 ${shared}
 
 Synthesize the full Lifeee context. Return a concise operating brief with priorities, risks, recommended next actions, and missing data.`;
+    case "weekly-strategy-brief":
+      return `${baseHeader("Weekly Strategy Brief", context)}
+
+${shared}
+
+Use ONLY the Lifeee context above. Do not invent data. Where context is absent, write "missing" or "not enough evidence" instead of guessing.
+
+Synthesize this week's strategic posture from the weekly bottleneck, this week's one move, last week's one move verdict, one move feedback history, decision summary, reviewed decisions, outcome feedback, decision pattern, and the task/calendar context.
+
+Return EXACTLY these sections, in this order, each one to three short lines:
+1. Bottleneck restated
+2. One move to protect
+3. One specific risk
+4. One habit to keep
+5. One habit to cut
+6. Next 24-hour action
+
+Keep the entire brief tight and operational. No preambles, no encouragements, no recap of the input.`;
   }
 }
