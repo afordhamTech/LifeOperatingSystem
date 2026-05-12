@@ -35,6 +35,7 @@ export type PromptBuilderContext = {
   relationshipSummary?: string;
   careerProofSummary?: string;
   antiDriftSummary?: string;
+  decisionSummary?: string;
 };
 
 export const PROMPT_OPTIONS: PromptOption[] = [
@@ -84,6 +85,7 @@ function commonContext(context: PromptBuilderContext) {
     line("Relationships", context.relationshipSummary),
     line("Career proof", context.careerProofSummary),
     line("Anti drift", context.antiDriftSummary),
+    line("Decisions", context.decisionSummary),
   ].join("\n");
 }
 

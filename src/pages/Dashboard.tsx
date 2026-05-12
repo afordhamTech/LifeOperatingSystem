@@ -23,6 +23,7 @@ import DailyLogPanel from "@/components/DailyLogPanel";
 import { DailyOpModeChip, deriveDailyOpMode } from "@/components/DailyOpModeChip";
 import StatusRing, { getStatusColor } from "@/components/StatusRing";
 import { SyncBadge } from "@/components/SyncBadge";
+import DecisionLogCard from "@/components/DecisionLogCard";
 import TodayDecisionLoop from "@/components/TodayDecisionLoop";
 import { usePushPromptContext } from "@/providers/PromptContext";
 import { supabase } from "@/lib/supabase-client";
@@ -43,11 +44,15 @@ import { Link } from "react-router";
 import { buildDayPlan, loadTasks, type Task } from "@/lib/task-system";
 import {
   buildDailyPlanPayload,
+  createLifeeeId,
   fetchCalendarAnchors,
   fetchDailyPlan,
+  fetchDecisionLogs,
   fetchUniversalTasks,
+  type DecisionLog,
   type LifeeeSyncStatus,
   upsertDailyPlan,
+  upsertDecisionLog,
 } from "@/lib/lifeee-persistence";
 import {
   buildDecisionLoopSummary,
@@ -55,6 +60,7 @@ import {
   summarizeAntiDrift,
   summarizeTaskCandidates,
 } from "@/lib/today-decision-loop";
+import { buildDecisionSummary } from "@/lib/decision-log-summary";
 import {
   CATEGORY_COLORS,
   buildCalendarPlanningPrompt,
@@ -113,6 +119,7 @@ export default function Dashboard() {
   const [planSyncError, setPlanSyncError] = useState<string | null>(null);
   const [planNotes, setPlanNotes] = useState<string>("");
   const [remoteTasksLoaded, setRemoteTasksLoaded] = useState(false);
+  const [decisionLogs, setDecisionLogs] = useState<DecisionLog[]>([]);
   const planSaveSequenceRef = useRef(0);
 
   useEffect(() => {
@@ -152,6 +159,7 @@ export default function Dashboard() {
         universalTasksResult,
         calendarAnchorsResult,
         dailyPlanResult,
+        decisionLogsResult,
       ] =
         await Promise.all([
           supabase
@@ -213,6 +221,9 @@ export default function Dashboard() {
           fetchDailyPlan(userId, today)
             .then((data) => ({ data, error: null }))
             .catch((caughtError: unknown) => ({ data: null, error: caughtError })),
+          fetchDecisionLogs(userId)
+            .then((data) => ({ data, error: null }))
+            .catch((caughtError: unknown) => ({ data: [] as DecisionLog[], error: caughtError })),
         ]);
 
       if (!active) return;
@@ -228,7 +239,8 @@ export default function Dashboard() {
         weeklyReviewResult.error ??
         universalTasksResult.error ??
         calendarAnchorsResult.error ??
-        dailyPlanResult.error;
+        dailyPlanResult.error ??
+        decisionLogsResult.error;
 
       if (firstError) {
         setError(firstError instanceof Error ? firstError.message : "Dashboard Supabase load failed.");
@@ -249,6 +261,7 @@ export default function Dashboard() {
       setRemoteTasksLoaded(!universalTasksResult.error);
       const dailyPlanRow = dailyPlanResult.data;
       setPlanNotes((dailyPlanRow?.notes as string | null) ?? "");
+      setDecisionLogs(decisionLogsResult.data);
 
       setIsLoading(false);
       setPlanSyncStatus("local");
@@ -444,6 +457,39 @@ export default function Dashboard() {
     setTaskList((prev) => prev.map((task) => (task.id === saved.id ? saved : task)));
   };
 
+  const handleDecisionSaved = (saved: DecisionLog) => {
+    setDecisionLogs((prev) => {
+      const filtered = prev.filter((entry) => entry.id !== saved.id);
+      return [saved, ...filtered];
+    });
+  };
+
+  const logIgnoreDecision = async (task: Task, reviewDate: string | null) => {
+    if (!userId) throw new Error("Sign in to save decisions to Supabase.");
+    const payload = {
+      id: createLifeeeId(),
+      decision: task.title,
+      decision_date: today,
+      reason_chosen: "Chose to ignore today",
+      review_date: reviewDate,
+    };
+    const saved = await upsertDecisionLog(userId, payload);
+    if (saved) {
+      handleDecisionSaved(saved as DecisionLog);
+    } else {
+      handleDecisionSaved({
+        ...payload,
+        id: payload.id,
+        options_considered: [],
+      } as DecisionLog);
+    }
+  };
+
+  const decisionSummary = useMemo(
+    () => buildDecisionSummary(decisionLogs, today),
+    [decisionLogs, today],
+  );
+
   const decisionLoop = useMemo(
     () =>
       buildDecisionLoopSummary({
@@ -490,6 +536,7 @@ export default function Dashboard() {
       weeklyReviewSummary: state.weeklyReview
         ? `Life score ${Number(state.weeklyReview.weekly_life_score ?? 0).toFixed(1)} · win: ${state.weeklyReview.biggest_win ?? "unset"} · leak: ${state.weeklyReview.biggest_leak ?? "unset"}`
         : undefined,
+      decisionSummary,
     };
   }, [
     anchorList,
@@ -497,6 +544,7 @@ export default function Dashboard() {
     decisionLoop.inboxCandidates,
     decisionLoop.todayCommitted,
     decisionLoop.trustProtectors,
+    decisionSummary,
     mcatNextMove,
     nutritionChecks,
     operatingMode,
@@ -623,6 +671,17 @@ export default function Dashboard() {
         onPlanNotesChange={setPlanNotes}
         planNotesSyncStatus={planSyncStatus}
         planNotesError={planSyncError}
+        onLogIgnoreDecision={logIgnoreDecision}
+      />
+
+      <DecisionLogCard
+        today={today}
+        decisions={decisionLogs}
+        userId={userId}
+        hasSupabaseConfig={hasSupabaseConfig}
+        sessionLoading={isLoading}
+        remoteLoaded={remoteTasksLoaded}
+        onDecisionSaved={handleDecisionSaved}
       />
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">

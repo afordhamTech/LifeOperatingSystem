@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   ArrowRight,
+  BookmarkPlus,
   CalendarClock,
   CheckCircle2,
   EyeOff,
@@ -44,6 +45,7 @@ export type TodayDecisionLoopProps = {
   onPlanNotesChange: (notes: string) => void;
   planNotesSyncStatus: LifeeeSyncStatus;
   planNotesError: string | null;
+  onLogIgnoreDecision?: (task: Task, reviewDate: string | null) => Promise<void> | void;
 };
 
 const QUICK_TYPES: TaskType[] = ["Academic", "Career", "Household", "Personal"];
@@ -74,6 +76,7 @@ export default function TodayDecisionLoop({
   onPlanNotesChange,
   planNotesSyncStatus,
   planNotesError,
+  onLogIgnoreDecision,
 }: TodayDecisionLoopProps) {
   const summary = useMemo(
     () =>
@@ -94,6 +97,11 @@ export default function TodayDecisionLoop({
   const captureSeqRef = useRef(0);
   const draftPlanNoteRef = useRef(planNotes);
   const [planNoteDraft, setPlanNoteDraft] = useState(planNotes);
+  const [logFormTaskId, setLogFormTaskId] = useState<string | null>(null);
+  const [logFormReviewDate, setLogFormReviewDate] = useState<string>("");
+  const [loggedIgnoreIds, setLoggedIgnoreIds] = useState<Set<string>>(() => new Set());
+  const [logSyncStatus, setLogSyncStatus] = useState<LifeeeSyncStatus>("local");
+  const [logError, setLogError] = useState<string | null>(null);
 
   if (draftPlanNoteRef.current !== planNotes) {
     draftPlanNoteRef.current = planNotes;
@@ -176,6 +184,39 @@ export default function TodayDecisionLoop({
   const commitPlanNote = () => {
     if (planNoteDraft === planNotes) return;
     onPlanNotesChange(planNoteDraft);
+  };
+
+  const beginLogDecision = (task: Task) => {
+    setLogFormTaskId(task.id);
+    setLogFormReviewDate("");
+    setLogError(null);
+  };
+
+  const cancelLogDecision = () => {
+    setLogFormTaskId(null);
+    setLogFormReviewDate("");
+    setLogError(null);
+  };
+
+  const confirmLogDecision = async (task: Task) => {
+    if (!onLogIgnoreDecision) return;
+    if (loggedIgnoreIds.has(task.id)) return;
+    setLogSyncStatus("saving");
+    setLogError(null);
+    try {
+      await onLogIgnoreDecision(task, logFormReviewDate || null);
+      setLoggedIgnoreIds((prev) => {
+        const next = new Set(prev);
+        next.add(task.id);
+        return next;
+      });
+      setLogSyncStatus("saved");
+      setLogFormTaskId(null);
+      setLogFormReviewDate("");
+    } catch (error) {
+      setLogSyncStatus("error");
+      setLogError(error instanceof Error ? error.message : "Decision log save failed.");
+    }
   };
 
   return (
@@ -399,31 +440,81 @@ export default function TodayDecisionLoop({
         >
           {summary.ignoredToday.length === 0 ? null : (
             <ul className="space-y-1.5">
-              {summary.ignoredToday.map((task) => (
-                <li
-                  key={task.id}
-                  className="rounded-md border border-[#ece5da] bg-white/70 p-2 text-xs opacity-90"
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="text-sm text-[#25313c] truncate">{task.title}</span>
-                    <span className="text-[10px] text-[#9b938a]">{task.task_type}</span>
-                  </div>
-                  <div className="mt-1 flex flex-wrap gap-1">
-                    <ActionButton
-                      label="Move to Today"
-                      icon={<CalendarClock size={10} />}
-                      onClick={() => void moveTo(task, "today")}
-                      pending={pendingId === task.id}
-                    />
-                    <ActionButton
-                      label="This Week"
-                      icon={<ArrowRight size={10} />}
-                      onClick={() => void moveTo(task, "this_week")}
-                      pending={pendingId === task.id}
-                    />
-                  </div>
-                </li>
-              ))}
+              {summary.ignoredToday.map((task) => {
+                const isLogging = logFormTaskId === task.id;
+                const alreadyLogged = loggedIgnoreIds.has(task.id);
+                return (
+                  <li
+                    key={task.id}
+                    className="rounded-md border border-[#ece5da] bg-white/70 p-2 text-xs opacity-90"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-sm text-[#25313c] truncate">{task.title}</span>
+                      <span className="text-[10px] text-[#9b938a]">{task.task_type}</span>
+                    </div>
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      <ActionButton
+                        label="Move to Today"
+                        icon={<CalendarClock size={10} />}
+                        onClick={() => void moveTo(task, "today")}
+                        pending={pendingId === task.id}
+                      />
+                      <ActionButton
+                        label="This Week"
+                        icon={<ArrowRight size={10} />}
+                        onClick={() => void moveTo(task, "this_week")}
+                        pending={pendingId === task.id}
+                      />
+                      {onLogIgnoreDecision ? (
+                        <ActionButton
+                          label={alreadyLogged ? "Logged" : "Log decision"}
+                          icon={<BookmarkPlus size={10} />}
+                          onClick={() => beginLogDecision(task)}
+                          pending={alreadyLogged || isLogging}
+                          variant="muted"
+                        />
+                      ) : null}
+                    </div>
+                    {isLogging ? (
+                      <div className="mt-2 space-y-1 rounded-md border border-[#ddd4c6] bg-white p-2">
+                        <div className="text-[10px] uppercase tracking-wider text-[#6f685f] font-semibold">
+                          Log decision: ignore today
+                        </div>
+                        <div className="text-[11px] text-[#6f685f]">
+                          decision = “{task.title}” · reason = “Chose to ignore today”
+                        </div>
+                        <label className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-[#6f685f]">
+                          Review date
+                          <input
+                            type="date"
+                            value={logFormReviewDate}
+                            onChange={(event) => setLogFormReviewDate(event.target.value)}
+                            className="rounded-md border border-[#ddd4c6] px-2 py-1 text-sm normal-case tracking-normal"
+                          />
+                        </label>
+                        <div className="flex flex-wrap gap-1 pt-1">
+                          <ActionButton
+                            label="Save"
+                            icon={<BookmarkPlus size={10} />}
+                            onClick={() => void confirmLogDecision(task)}
+                            pending={logSyncStatus === "saving"}
+                            variant="success"
+                          />
+                          <ActionButton
+                            label="Cancel"
+                            icon={<ArrowRight size={10} />}
+                            onClick={cancelLogDecision}
+                            variant="muted"
+                          />
+                        </div>
+                        {logError ? (
+                          <p className="text-[10px] text-destructive">{logError}</p>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </DecisionListPanel>
