@@ -50,6 +50,7 @@ import {
   fetchDailyPlan,
   fetchDecisionLogs,
   fetchUniversalTasks,
+  fetchWeeklyReview,
   type DecisionLog,
   type LifeeeSyncStatus,
   upsertDailyPlan,
@@ -130,6 +131,11 @@ export default function Dashboard() {
     date.setDate(date.getDate() + 6);
     return toDateKey(date);
   }, [weekStart]);
+  const previousWeekStart = useMemo(() => {
+    const date = new Date(`${weekStart}T00:00:00`);
+    date.setDate(date.getDate() - 7);
+    return toDateKey(date);
+  }, [weekStart]);
   const { hasSupabaseConfig, userId } = useSupabaseSession();
   const [state, setState] = useState<DashboardState>(emptyState);
   const [isLoading, setIsLoading] = useState(true);
@@ -142,7 +148,27 @@ export default function Dashboard() {
   const [planNotes, setPlanNotes] = useState<string>("");
   const [remoteTasksLoaded, setRemoteTasksLoaded] = useState(false);
   const [decisionLogs, setDecisionLogs] = useState<DecisionLog[]>([]);
+  const [activeOneMove, setActiveOneMove] = useState<string>("");
   const planSaveSequenceRef = useRef(0);
+
+  useEffect(() => {
+    if (!hasSupabaseConfig || !userId) return;
+    let active = true;
+    void fetchWeeklyReview(userId, previousWeekStart)
+      .then((row) => {
+        if (!active) return;
+        const big3 = Array.isArray(row?.next_week_big_3) ? row?.next_week_big_3 : [];
+        const first = typeof big3[0] === "string" ? big3[0].trim() : "";
+        setActiveOneMove(first);
+      })
+      .catch(() => {
+        if (!active) return;
+        setActiveOneMove("");
+      });
+    return () => {
+      active = false;
+    };
+  }, [hasSupabaseConfig, previousWeekStart, userId]);
 
   useEffect(() => {
     let active = true;
@@ -614,8 +640,10 @@ export default function Dashboard() {
       outcomeFeedbackSummary,
       decisionPatternSummary,
       weeklyBottleneckSummary,
+      nextWeekOneMoveSummary: activeOneMove || undefined,
     };
   }, [
+    activeOneMove,
     anchorList,
     decisionLoop.ignoredToday,
     decisionLoop.inboxCandidates,
@@ -755,6 +783,15 @@ export default function Dashboard() {
             {weeklyBottleneckDiagnosis.confidence}
           </span>
           <span className="text-[#6f685f]">· {weeklyBottleneckDiagnosis.suggestedFix}</span>
+        </div>
+      ) : null}
+
+      {activeOneMove ? (
+        <div className="rounded-lg border border-[#6b87ae]/30 bg-[#6b87ae]/10 px-3 py-2 text-xs text-[#25313c] flex flex-wrap items-center gap-2">
+          <span className="text-[10px] uppercase tracking-wider text-[#6b87ae] font-semibold">
+            This week's one move
+          </span>
+          <span className="font-medium">{activeOneMove}</span>
         </div>
       ) : null}
 

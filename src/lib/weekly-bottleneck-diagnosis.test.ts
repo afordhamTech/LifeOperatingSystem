@@ -5,6 +5,7 @@ import type { DecisionLog } from "@/lib/lifeee-persistence";
 import {
   buildWeeklyBottleneckDiagnosis,
   buildWeeklyBottleneckSummary,
+  pickNextWeekOneMove,
 } from "@/lib/weekly-bottleneck-diagnosis";
 
 const TODAY = "2026-05-13";
@@ -204,5 +205,118 @@ describe("buildWeeklyBottleneckDiagnosis", () => {
       buildWeeklyBottleneckDiagnosis(input({})),
     );
     expect(summary).toBe("Not enough weekly evidence to identify a bottleneck yet.");
+  });
+});
+
+describe("pickNextWeekOneMove", () => {
+  const empty = buildWeeklyBottleneckDiagnosis(input({}));
+  it("returns empty suggestion with log-more rationale for insufficient evidence", () => {
+    const move = pickNextWeekOneMove(empty);
+    expect(move.suggestion).toBe("");
+    expect(move.rationale).toBe("Log more weekly inputs before committing.");
+  });
+
+  it("returns a concrete overdue-task move with Academic domain", () => {
+    const diagnosis = buildWeeklyBottleneckDiagnosis(
+      input({
+        tasks: [
+          task({ title: "A", due_date: "2026-05-09", task_type: "Academic" }),
+          task({ title: "B", due_date: "2026-05-08", task_type: "Academic" }),
+        ],
+      }),
+    );
+    const move = pickNextWeekOneMove(diagnosis);
+    expect(move.suggestion).toMatch(/Academic|overdue/);
+    expect(move.suggestion.length).toBeGreaterThan(0);
+    expect(move.suggestion.length).toBeLessThan(200);
+    expect(move.rationale.toLowerCase()).toContain("overdue");
+  });
+
+  it("returns a daily-cap move for incomplete-today bottleneck", () => {
+    const diagnosis = buildWeeklyBottleneckDiagnosis(
+      input({
+        tasks: [
+          task({ title: "x", status: "today" }),
+          task({ title: "y", status: "today" }),
+          task({ title: "z", status: "today" }),
+        ],
+      }),
+    );
+    const move = pickNextWeekOneMove(diagnosis);
+    expect(move.suggestion).toMatch(/must-do|cap|supports/i);
+  });
+
+  it("returns a triage move for ignored-today bottleneck", () => {
+    const diagnosis = buildWeeklyBottleneckDiagnosis(
+      input({
+        tasks: [
+          task({ title: "a", daily_role: "Ignore Today", status: "today" }),
+          task({ title: "b", daily_role: "Ignore Today", status: "today" }),
+          task({ title: "c", daily_role: "Ignore Today", status: "today" }),
+        ],
+      }),
+    );
+    const move = pickNextWeekOneMove(diagnosis);
+    expect(move.suggestion).toMatch(/triag|deferred|drop/i);
+  });
+
+  it("returns a close-one-decision move for open-decision-reviews bottleneck", () => {
+    const diagnosis = buildWeeklyBottleneckDiagnosis(
+      input({
+        decisionLogs: [
+          makeDecision({ decision: "x", review_date: "2026-05-09", result_later: null }),
+          makeDecision({ decision: "y", review_date: "2026-05-09", result_later: null }),
+        ],
+      }),
+    );
+    const move = pickNextWeekOneMove(diagnosis);
+    expect(move.suggestion).toMatch(/close|decision review/i);
+  });
+
+  it("returns a prep-block move for calendar-prep bottleneck", () => {
+    const diagnosis = buildWeeklyBottleneckDiagnosis(
+      input({
+        anchors: [
+          anchor({ title: "Class", prep: "Read brief", date: "2026-05-12" }),
+          anchor({ title: "Standup", prep: "Update notes", date: "2026-05-13" }),
+        ],
+      }),
+    );
+    const move = pickNextWeekOneMove(diagnosis);
+    expect(move.suggestion).toMatch(/prep block/i);
+  });
+
+  it("returns a follow-up-block move for calendar-follow-up bottleneck", () => {
+    const diagnosis = buildWeeklyBottleneckDiagnosis(
+      input({
+        anchors: [
+          anchor({ title: "1:1 A", follow_up: "Send recap", date: "2026-05-12" }),
+          anchor({ title: "1:1 B", follow_up: "Send recap", date: "2026-05-13" }),
+        ],
+      }),
+    );
+    const move = pickNextWeekOneMove(diagnosis);
+    expect(move.suggestion).toMatch(/follow-up/i);
+  });
+
+  it("rationale references evidence when present", () => {
+    const diagnosis = buildWeeklyBottleneckDiagnosis(
+      input({
+        tasks: [task({ title: "A", due_date: "2026-05-09" })],
+      }),
+    );
+    const move = pickNextWeekOneMove(diagnosis);
+    expect(move.rationale).toMatch(/overdue/i);
+    expect(move.rationale).toMatch(/1|2|3|\d/);
+  });
+
+  it("suggestion stays short and actionable", () => {
+    const diagnosis = buildWeeklyBottleneckDiagnosis(
+      input({
+        tasks: [task({ title: "A", due_date: "2026-05-09" })],
+      }),
+    );
+    const move = pickNextWeekOneMove(diagnosis);
+    expect(move.suggestion.length).toBeLessThan(160);
   });
 });

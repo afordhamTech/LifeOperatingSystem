@@ -260,6 +260,69 @@ export function buildWeeklyBottleneckDiagnosis(
   };
 }
 
+export type NextWeekOneMove = {
+  suggestion: string;
+  rationale: string;
+};
+
+export function pickNextWeekOneMove(
+  diagnosis: WeeklyBottleneckDiagnosis,
+): NextWeekOneMove {
+  if (diagnosis.bottleneckKind === "insufficient-evidence") {
+    return {
+      suggestion: "",
+      rationale: "Log more weekly inputs before committing.",
+    };
+  }
+
+  const domain = diagnosis.primaryBottleneckDomain;
+  const topEvidence = diagnosis.evidence[0];
+  const evidenceTail = topEvidence
+    ? ` (${topEvidence.label.toLowerCase()} ${topEvidence.count})`
+    : "";
+
+  switch (diagnosis.bottleneckKind) {
+    case "overdue-tasks":
+      return {
+        suggestion:
+          domain === "Unknown" || domain === "Personal"
+            ? "Finish the single oldest overdue task on Monday before starting anything new."
+            : `Finish the single oldest overdue ${domain} task on Monday before starting anything new.`,
+        rationale: `Targets ${diagnosis.bottleneckLabel.toLowerCase()}${evidenceTail}.`,
+      };
+    case "incomplete-today":
+      return {
+        suggestion:
+          "Cap each day at one must-do and two supports; everything else goes to This Week.",
+        rationale: `Targets ${diagnosis.bottleneckLabel.toLowerCase()}${evidenceTail}.`,
+      };
+    case "ignored-today":
+      return {
+        suggestion:
+          "Spend 10 minutes Monday triaging deferred items: do tomorrow, schedule, or drop.",
+        rationale: `Targets ${diagnosis.bottleneckLabel.toLowerCase()}${evidenceTail}.`,
+      };
+    case "open-decision-reviews":
+      return {
+        suggestion:
+          "Close one overdue decision review before planning any new work.",
+        rationale: `Targets ${diagnosis.bottleneckLabel.toLowerCase()}${evidenceTail}.`,
+      };
+    case "calendar-prep":
+      return {
+        suggestion:
+          "Add a 15-minute prep block before every fixed calendar anchor next week.",
+        rationale: `Targets ${diagnosis.bottleneckLabel.toLowerCase()}${evidenceTail}.`,
+      };
+    case "calendar-follow-up":
+      return {
+        suggestion:
+          "Block a 15-minute follow-up window after every fixed calendar anchor next week.",
+        rationale: `Targets ${diagnosis.bottleneckLabel.toLowerCase()}${evidenceTail}.`,
+      };
+  }
+}
+
 export function buildWeeklyBottleneckSummary(
   diagnosis: WeeklyBottleneckDiagnosis,
 ): string {

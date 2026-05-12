@@ -45,6 +45,7 @@ import {
 } from "@/lib/decision-pattern-digest";
 import {
   buildWeeklyBottleneckDiagnosis,
+  pickNextWeekOneMove,
 } from "@/lib/weekly-bottleneck-diagnosis";
 import type { CalendarAnchor } from "@/lib/calendar-system";
 import type { Task } from "@/lib/task-system";
@@ -388,6 +389,78 @@ export default function WeeklyReviewPage() {
     setIsSaving(false);
   };
 
+  const oneMoveSuggestion = pickNextWeekOneMove(bottleneckDiagnosis).suggestion;
+  const currentSavedOneMove = form.nextWeekBig3[0] ?? "";
+  const [oneMoveDraft, setOneMoveDraft] = useState<string>(
+    currentSavedOneMove || oneMoveSuggestion,
+  );
+
+  useEffect(() => {
+    setOneMoveDraft((prev) => {
+      const nextDefault = currentSavedOneMove || oneMoveSuggestion;
+      // Only auto-sync if the user has not started a different draft.
+      if (prev === "" || prev === oneMoveSuggestion || prev === currentSavedOneMove) {
+        return nextDefault;
+      }
+      return prev;
+    });
+  }, [currentSavedOneMove, oneMoveSuggestion]);
+
+  const handleSaveOneMove = async () => {
+    const trimmed = oneMoveDraft.trim();
+    const nextBig3: [string, string, string] = [
+      trimmed,
+      form.nextWeekBig3[1] ?? "",
+      form.nextWeekBig3[2] ?? "",
+    ];
+    setForm((prev) => ({ ...prev, nextWeekBig3: nextBig3 }));
+
+    if (!userId) {
+      setNotice("Weekly review is local draft only until Supabase login is available.");
+      setSyncStatus(hasSupabaseConfig ? "waiting" : "local");
+      return;
+    }
+
+    setIsSaving(true);
+    setError(null);
+    setNotice(null);
+    setSyncStatus("saving");
+
+    const payload = {
+      week_start: weekStart,
+      academics_score: form.academicsScore,
+      sleep_score: form.sleepScore,
+      training_score: form.trainingScore,
+      nutrition_score: form.nutritionScore,
+      career_proof_score: form.careerProofScore,
+      faith_substance_score: form.faithSubstanceScore,
+      money_admin_score: form.moneyAdminScore,
+      weekly_life_score: weeklyLifeScore,
+      biggest_win: form.biggestWin.trim() || null,
+      biggest_leak: form.biggestLeak.trim() || null,
+      next_week_big_3: nextBig3.filter(Boolean),
+      notes: form.notes.trim() || null,
+    };
+
+    const result = await runSupabasePersistence({
+      hasSupabaseConfig,
+      userId,
+      hasLoadedRemote: remoteLoadedRef.current,
+      operation: () => upsertWeeklyReview(userId, payload),
+    });
+
+    if (result.ok) {
+      if (result.data) setForm(rowToForm(result.data));
+      setNotice("One move saved to Supabase.");
+      setSyncStatus(result.status);
+    } else {
+      setError(result.error);
+      setSyncStatus(result.status);
+    }
+
+    setIsSaving(false);
+  };
+
   const categories = chartData;
 
   return (
@@ -519,6 +592,52 @@ export default function WeeklyReviewPage() {
           </span>{" "}
           {bottleneckDiagnosis.suggestedFix}
         </div>
+      </div>
+
+      <div className="card-surface p-4 border-l-2 border-[#6b87ae]">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+          <h3 className="text-sm font-semibold text-[#25313c]">
+            NEXT WEEK ONE MOVE
+          </h3>
+          <span className="text-[10px] uppercase tracking-wider text-[#6f685f]">
+            Saves to weekly_reviews.next_week_big_3[0]
+          </span>
+        </div>
+        <p className="text-xs text-[#6f685f] mb-2">
+          One specific move that targets the diagnosed bottleneck. Next week's
+          Daily OS surfaces this as the active commitment.
+        </p>
+        <textarea
+          value={oneMoveDraft}
+          onChange={(event) => setOneMoveDraft(event.target.value)}
+          placeholder={oneMoveSuggestion || "Pick one move you can verify next week."}
+          rows={2}
+          className="w-full rounded-md border border-[#ddd4c6] bg-white px-3 py-2 text-sm"
+        />
+        <div className="mt-2 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => void handleSaveOneMove()}
+            disabled={isSaving || !oneMoveDraft.trim()}
+            className="inline-flex items-center gap-2 rounded-md bg-[#25313c] px-3 py-2 text-sm text-white hover:bg-[#3a4754] disabled:opacity-50"
+          >
+            <Save size={14} />
+            Save one move
+          </button>
+          <button
+            type="button"
+            onClick={() => setOneMoveDraft(oneMoveSuggestion)}
+            disabled={!oneMoveSuggestion}
+            className="inline-flex items-center gap-2 rounded-md border border-[#ddd4c6] bg-white px-3 py-2 text-sm hover:bg-[#f7f3ec] disabled:opacity-50"
+          >
+            Use suggestion
+          </button>
+        </div>
+        {oneMoveSuggestion ? (
+          <div className="mt-2 text-[11px] text-[#9b938a]">
+            Suggestion: {oneMoveSuggestion}
+          </div>
+        ) : null}
       </div>
 
       <div className="card-surface p-4">
