@@ -24,6 +24,7 @@ import { DailyOpModeChip, deriveDailyOpMode } from "@/components/DailyOpModeChip
 import StatusRing, { getStatusColor } from "@/components/StatusRing";
 import { SyncBadge } from "@/components/SyncBadge";
 import DecisionLogCard from "@/components/DecisionLogCard";
+import DecisionsDueReviewPanel from "@/components/DecisionsDueReviewPanel";
 import TodayDecisionLoop from "@/components/TodayDecisionLoop";
 import { usePushPromptContext } from "@/providers/PromptContext";
 import { supabase } from "@/lib/supabase-client";
@@ -60,7 +61,11 @@ import {
   summarizeAntiDrift,
   summarizeTaskCandidates,
 } from "@/lib/today-decision-loop";
-import { buildDecisionSummary } from "@/lib/decision-log-summary";
+import {
+  buildDecisionSummary,
+  buildReviewedDecisionsSummary,
+  splitDecisionsByReview,
+} from "@/lib/decision-log-summary";
 import {
   CATEGORY_COLORS,
   buildCalendarPlanningPrompt,
@@ -108,6 +113,11 @@ export default function Dashboard() {
     date.setDate(diff);
     return toDateKey(date);
   }, []);
+  const weekEnd = useMemo(() => {
+    const date = new Date(`${weekStart}T00:00:00`);
+    date.setDate(date.getDate() + 6);
+    return toDateKey(date);
+  }, [weekStart]);
   const { hasSupabaseConfig, userId } = useSupabaseSession();
   const [state, setState] = useState<DashboardState>(emptyState);
   const [isLoading, setIsLoading] = useState(true);
@@ -490,6 +500,16 @@ export default function Dashboard() {
     [decisionLogs, today],
   );
 
+  const reviewBuckets = useMemo(
+    () => splitDecisionsByReview(decisionLogs, today, weekStart, weekEnd),
+    [decisionLogs, today, weekStart, weekEnd],
+  );
+
+  const reviewedDecisionsSummary = useMemo(
+    () => buildReviewedDecisionsSummary(reviewBuckets),
+    [reviewBuckets],
+  );
+
   const decisionLoop = useMemo(
     () =>
       buildDecisionLoopSummary({
@@ -537,6 +557,7 @@ export default function Dashboard() {
         ? `Life score ${Number(state.weeklyReview.weekly_life_score ?? 0).toFixed(1)} · win: ${state.weeklyReview.biggest_win ?? "unset"} · leak: ${state.weeklyReview.biggest_leak ?? "unset"}`
         : undefined,
       decisionSummary,
+      reviewedDecisionsSummary,
     };
   }, [
     anchorList,
@@ -545,6 +566,7 @@ export default function Dashboard() {
     decisionLoop.todayCommitted,
     decisionLoop.trustProtectors,
     decisionSummary,
+    reviewedDecisionsSummary,
     mcatNextMove,
     nutritionChecks,
     operatingMode,
@@ -672,6 +694,18 @@ export default function Dashboard() {
         planNotesSyncStatus={planSyncStatus}
         planNotesError={planSyncError}
         onLogIgnoreDecision={logIgnoreDecision}
+      />
+
+      <DecisionsDueReviewPanel
+        today={today}
+        weekStart={weekStart}
+        weekEnd={weekEnd}
+        decisions={decisionLogs}
+        userId={userId}
+        hasSupabaseConfig={hasSupabaseConfig}
+        sessionLoading={isLoading}
+        remoteLoaded={remoteTasksLoaded}
+        onDecisionReviewed={handleDecisionSaved}
       />
 
       <DecisionLogCard

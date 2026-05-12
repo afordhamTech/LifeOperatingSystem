@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import type { DecisionLog } from "@/lib/lifeee-persistence";
 import {
   buildDecisionSummary,
+  buildReviewedDecisionsSummary,
   classifyReviewDate,
+  hasResult,
+  splitDecisionsByReview,
 } from "@/lib/decision-log-summary";
 
 const TODAY = "2026-05-11";
@@ -80,6 +83,13 @@ describe("decision log summary", () => {
     expect(classifyReviewDate("2026-05-12", TODAY)).toBe("upcoming");
   });
 
+  it("treats whitespace result_later as unreviewed", () => {
+    const blank = makeDecision({ decision: "x", result_later: "   " });
+    const filled = makeDecision({ decision: "y", result_later: "Worked out fine" });
+    expect(hasResult(blank)).toBe(false);
+    expect(hasResult(filled)).toBe(true);
+  });
+
   it("caps recent decisions to the requested maximum", () => {
     const decisions = Array.from({ length: 10 }, (_, i) =>
       makeDecision({
@@ -90,5 +100,123 @@ describe("decision log summary", () => {
     const summary = buildDecisionSummary(decisions, TODAY, { maxRecent: 3 });
     const matches = summary.match(/- Decision \d+/g) ?? [];
     expect(matches.length).toBe(3);
+  });
+});
+
+describe("decision review buckets", () => {
+  const WEEK_START = "2026-05-11"; // Monday
+  const WEEK_END = "2026-05-17"; // Sunday
+
+  it("returns three empty buckets for an empty input", () => {
+    const buckets = splitDecisionsByReview([], TODAY, WEEK_START, WEEK_END);
+    expect(buckets.dueForReview).toEqual([]);
+    expect(buckets.reviewedThisWeek).toEqual([]);
+    expect(buckets.openWithFutureReview).toEqual([]);
+  });
+
+  it("places overdue unreviewed decisions into dueForReview", () => {
+    const overdue = makeDecision({
+      decision: "Tuition deadline",
+      review_date: "2026-05-09",
+    });
+    const buckets = splitDecisionsByReview([overdue], TODAY, WEEK_START, WEEK_END);
+    expect(buckets.dueForReview).toEqual([overdue]);
+    expect(buckets.openWithFutureReview).toEqual([]);
+  });
+
+  it("places review_date == today into dueForReview", () => {
+    const todayReview = makeDecision({
+      decision: "Check on Connex pacing",
+      review_date: TODAY,
+    });
+    const buckets = splitDecisionsByReview(
+      [todayReview],
+      TODAY,
+      WEEK_START,
+      WEEK_END,
+    );
+    expect(buckets.dueForReview).toEqual([todayReview]);
+  });
+
+  it("places future review dates into openWithFutureReview", () => {
+    const future = makeDecision({
+      decision: "Next semester plan",
+      review_date: "2026-06-01",
+    });
+    const buckets = splitDecisionsByReview([future], TODAY, WEEK_START, WEEK_END);
+    expect(buckets.openWithFutureReview).toEqual([future]);
+    expect(buckets.dueForReview).toEqual([]);
+  });
+
+  it("includes reviewed decisions inside the week", () => {
+    const reviewed = makeDecision({
+      decision: "Skip social tonight",
+      result_later: "Slept well, study block done",
+      updated_at: "2026-05-13T22:00:00.000Z",
+    });
+    const buckets = splitDecisionsByReview(
+      [reviewed],
+      TODAY,
+      WEEK_START,
+      WEEK_END,
+    );
+    expect(buckets.reviewedThisWeek).toEqual([reviewed]);
+    expect(buckets.dueForReview).toEqual([]);
+  });
+
+  it("excludes reviewed decisions outside the week window", () => {
+    const lastWeek = makeDecision({
+      decision: "Old review",
+      result_later: "Worked",
+      updated_at: "2026-05-03T10:00:00.000Z",
+    });
+    const buckets = splitDecisionsByReview(
+      [lastWeek],
+      TODAY,
+      WEEK_START,
+      WEEK_END,
+    );
+    expect(buckets.reviewedThisWeek).toEqual([]);
+  });
+
+  it("treats whitespace-only result_later as unreviewed in split", () => {
+    const whitespace = makeDecision({
+      decision: "Ambiguous",
+      result_later: "   ",
+      review_date: "2026-05-09",
+      updated_at: "2026-05-13T10:00:00.000Z",
+    });
+    const buckets = splitDecisionsByReview(
+      [whitespace],
+      TODAY,
+      WEEK_START,
+      WEEK_END,
+    );
+    expect(buckets.reviewedThisWeek).toEqual([]);
+    expect(buckets.dueForReview).toEqual([whitespace]);
+  });
+
+  it("builds a readable summary across all three buckets", () => {
+    const buckets = splitDecisionsByReview(
+      [
+        makeDecision({ decision: "Overdue check", review_date: "2026-05-09" }),
+        makeDecision({
+          decision: "Reviewed call",
+          result_later: "Pushed launch",
+          updated_at: "2026-05-12T18:00:00.000Z",
+        }),
+        makeDecision({ decision: "Future plan", review_date: "2026-05-30" }),
+      ],
+      TODAY,
+      WEEK_START,
+      WEEK_END,
+    );
+    const text = buildReviewedDecisionsSummary(buckets);
+    expect(text).toContain("Due for review");
+    expect(text).toContain("Overdue check");
+    expect(text).toContain("Reviewed this week");
+    expect(text).toContain("Pushed launch");
+    expect(text).toContain("Open with future review");
+    expect(text).toContain("Future plan");
   });
 });

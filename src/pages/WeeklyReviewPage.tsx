@@ -26,12 +26,18 @@ import { useSyncStatus } from "@/hooks/useSyncStatus";
 import { runSupabasePersistence } from "@/lib/persistence-runner";
 import {
   fetchAcademicTasks,
+  fetchDecisionLogs,
   fetchNutritionLogs,
   fetchSleepLogs,
   fetchWeeklyReview,
   fetchWorkoutLogs,
   upsertWeeklyReview,
+  type DecisionLog,
 } from "@/lib/lifeee-persistence";
+import {
+  reviewedTimestamp,
+  splitDecisionsByReview,
+} from "@/lib/decision-log-summary";
 
 type WeeklyReviewForm = {
   academicsScore: number;
@@ -160,6 +166,18 @@ export default function WeeklyReviewPage() {
     trainingScore: 5,
     nutritionScore: 5,
   });
+  const [decisionLogs, setDecisionLogs] = useState<DecisionLog[]>([]);
+
+  const weekEnd = useMemo(() => {
+    const date = new Date(`${weekStart}T00:00:00`);
+    date.setDate(date.getDate() + 6);
+    return toDateKey(date);
+  }, [weekStart]);
+
+  const reviewedThisWeek = useMemo(
+    () => splitDecisionsByReview(decisionLogs, today, weekStart, weekEnd).reviewedThisWeek,
+    [decisionLogs, today, weekStart, weekEnd],
+  );
 
   const weeklyLifeScore = calculateWeeklyLifeScore({
     academicsScore: form.academicsScore,
@@ -211,14 +229,16 @@ export default function WeeklyReviewPage() {
       const weekStartDate = weekStart;
       const todayDate = today;
       try {
-        const [existingReview, allTasks, sleepRows, workoutRows, nutritionRows] =
+        const [existingReview, allTasks, sleepRows, workoutRows, nutritionRows, decisionRows] =
           await Promise.all([
             fetchWeeklyReview(userId, weekStartDate),
             fetchAcademicTasks(userId),
             fetchSleepLogs(userId, weekStartDate, todayDate),
             fetchWorkoutLogs(userId, weekStartDate, todayDate),
             fetchNutritionLogs(userId, weekStartDate, todayDate),
+            fetchDecisionLogs(userId).catch(() => [] as DecisionLog[]),
           ]);
+        setDecisionLogs(decisionRows);
 
         if (!active) return;
 
@@ -414,6 +434,47 @@ export default function WeeklyReviewPage() {
             <Bar dataKey="score" fill="#6b87ae" radius={[2, 2, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
+      </div>
+
+      <div className="card-surface p-4">
+        <h3 className="text-sm font-semibold text-[#25313c] mb-3">
+          DECISIONS REVIEWED THIS WEEK
+        </h3>
+        {reviewedThisWeek.length === 0 ? (
+          <div className="text-xs text-[#9b938a]">
+            No decisions were closed this week. Mark items reviewed on Daily OS to populate this section.
+          </div>
+        ) : (
+          <ul className="space-y-2">
+            {reviewedThisWeek.map((decision) => {
+              const ts = reviewedTimestamp(decision);
+              const reviewedDate = ts ? ts.slice(0, 10) : null;
+              return (
+                <li
+                  key={decision.id}
+                  className="rounded-md border border-[#ece5da] bg-white/70 p-3"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-sm text-[#25313c]">{decision.decision}</span>
+                    {decision.review_date ? (
+                      <span className="text-[10px] text-[#6f685f]">
+                        Review {decision.review_date}
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="mt-1 text-[12px] text-[#25313c]">
+                    Result: {decision.result_later?.trim()}
+                  </div>
+                  {reviewedDate ? (
+                    <div className="text-[10px] text-[#9b938a]">
+                      Reviewed {reviewedDate}
+                    </div>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">

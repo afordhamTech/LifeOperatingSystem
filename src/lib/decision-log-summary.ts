@@ -1,7 +1,111 @@
-// Pure helper for summarizing decision_logs into a compact string the
-// PromptDrawer can hand to AI prompts. No persistence, no React.
+// Pure helpers for summarizing decision_logs into compact strings the
+// PromptDrawer can hand to AI prompts, and for splitting them into
+// review buckets used by the Decision Review surface. No persistence,
+// no React.
 
 import type { DecisionLog } from "@/lib/lifeee-persistence";
+
+export function hasResult(decision: DecisionLog): boolean {
+  const result = decision.result_later?.trim();
+  return Boolean(result && result.length > 0);
+}
+
+// reviewed_at is not a column in decision_logs. Practical rule:
+// when result_later is set, treat updated_at as the reviewed timestamp;
+// fall back to created_at only if updated_at is missing.
+export function reviewedTimestamp(decision: DecisionLog): string | null {
+  if (!hasResult(decision)) return null;
+  return decision.updated_at ?? decision.created_at ?? null;
+}
+
+export type ReviewBuckets = {
+  dueForReview: DecisionLog[];
+  reviewedThisWeek: DecisionLog[];
+  openWithFutureReview: DecisionLog[];
+};
+
+export function splitDecisionsByReview(
+  decisions: DecisionLog[],
+  today: string,
+  weekStart: string,
+  weekEnd: string,
+): ReviewBuckets {
+  const dueForReview: DecisionLog[] = [];
+  const reviewedThisWeek: DecisionLog[] = [];
+  const openWithFutureReview: DecisionLog[] = [];
+
+  for (const decision of decisions) {
+    const reviewed = hasResult(decision);
+    if (reviewed) {
+      const ts = reviewedTimestamp(decision);
+      const tsDate = ts ? ts.slice(0, 10) : null;
+      if (tsDate && tsDate >= weekStart && tsDate <= weekEnd) {
+        reviewedThisWeek.push(decision);
+      }
+      continue;
+    }
+    const reviewDate = decision.review_date ?? null;
+    if (!reviewDate) continue;
+    if (reviewDate <= today) {
+      dueForReview.push(decision);
+    } else {
+      openWithFutureReview.push(decision);
+    }
+  }
+
+  dueForReview.sort((a, b) =>
+    (a.review_date ?? "").localeCompare(b.review_date ?? ""),
+  );
+  openWithFutureReview.sort((a, b) =>
+    (a.review_date ?? "").localeCompare(b.review_date ?? ""),
+  );
+  reviewedThisWeek.sort((a, b) => {
+    const aTs = reviewedTimestamp(a) ?? "";
+    const bTs = reviewedTimestamp(b) ?? "";
+    return bTs.localeCompare(aTs);
+  });
+
+  return { dueForReview, reviewedThisWeek, openWithFutureReview };
+}
+
+export function buildReviewedDecisionsSummary(
+  buckets: ReviewBuckets,
+  options: { maxEach?: number } = {},
+): string {
+  const maxEach = options.maxEach ?? 5;
+
+  const sections: string[] = [];
+
+  if (buckets.dueForReview.length > 0) {
+    const lines = buckets.dueForReview
+      .slice(0, maxEach)
+      .map(
+        (d) =>
+          `- ${d.decision}${d.review_date ? ` (review ${d.review_date})` : ""}${
+            d.reason_chosen ? ` — ${d.reason_chosen}` : ""
+          }`,
+      );
+    sections.push(`Due for review:\n${lines.join("\n")}`);
+  }
+
+  if (buckets.reviewedThisWeek.length > 0) {
+    const lines = buckets.reviewedThisWeek
+      .slice(0, maxEach)
+      .map((d) => `- ${d.decision} → ${d.result_later?.trim() ?? ""}`);
+    sections.push(`Reviewed this week:\n${lines.join("\n")}`);
+  }
+
+  if (buckets.openWithFutureReview.length > 0) {
+    const lines = buckets.openWithFutureReview
+      .slice(0, maxEach)
+      .map((d) => `- ${d.decision}${d.review_date ? ` (review ${d.review_date})` : ""}`);
+    sections.push(`Open with future review:\n${lines.join("\n")}`);
+  }
+
+  return sections.length === 0
+    ? "No decision feedback yet."
+    : sections.join("\n\n");
+}
 
 export type DecisionReviewStatus = "overdue" | "today" | "upcoming" | "none";
 
