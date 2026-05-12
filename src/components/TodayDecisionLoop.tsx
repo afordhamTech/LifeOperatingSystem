@@ -26,9 +26,11 @@ import {
 import {
   getSyncLabel,
   getSyncTone,
+  type DecisionLog,
   type LifeeeSyncStatus,
   upsertUniversalTask,
 } from "@/lib/lifeee-persistence";
+import type { OutcomeMatch } from "@/lib/decision-outcome-feedback";
 
 export type TodayDecisionLoopProps = {
   today: string;
@@ -46,6 +48,8 @@ export type TodayDecisionLoopProps = {
   planNotesSyncStatus: LifeeeSyncStatus;
   planNotesError: string | null;
   onLogIgnoreDecision?: (task: Task, reviewDate: string | null) => Promise<void> | void;
+  outcomeMatches?: Record<string, OutcomeMatch>;
+  decisions?: DecisionLog[];
 };
 
 const QUICK_TYPES: TaskType[] = ["Academic", "Career", "Household", "Personal"];
@@ -58,6 +62,10 @@ const TRUST_KIND_STYLE: Record<TrustProtector["kind"], { label: string; color: s
   "high-consequence": {
     label: "High consequence",
     color: "text-stone-700 bg-stone-100 border-stone-200",
+  },
+  "overdue-decision-review": {
+    label: "Review overdue",
+    color: "text-fuchsia-700 bg-fuchsia-100 border-fuchsia-200",
   },
 };
 
@@ -77,6 +85,8 @@ export default function TodayDecisionLoop({
   planNotesSyncStatus,
   planNotesError,
   onLogIgnoreDecision,
+  outcomeMatches,
+  decisions,
 }: TodayDecisionLoopProps) {
   const summary = useMemo(
     () =>
@@ -85,8 +95,9 @@ export default function TodayDecisionLoop({
         anchors,
         today,
         currentEnergy,
+        decisions,
       }),
-    [tasks, anchors, today, currentEnergy],
+    [tasks, anchors, today, currentEnergy, decisions],
   );
 
   const [captureTitle, setCaptureTitle] = useState("");
@@ -359,6 +370,9 @@ export default function TodayDecisionLoop({
                     <span className="text-sm text-[#25313c] truncate">{task.title}</span>
                     <span className="text-[10px] text-[#6f685f]">{task.task_type}</span>
                   </div>
+                  {outcomeMatches?.[task.id] ? (
+                    <OutcomeLensTag match={outcomeMatches[task.id]!} />
+                  ) : null}
                   <div className="mt-1 flex flex-wrap gap-1">
                     <ActionButton
                       label="Today"
@@ -616,5 +630,31 @@ function ActionButton({
       {icon}
       {label}
     </button>
+  );
+}
+
+function OutcomeLensTag({ match }: { match: OutcomeMatch }) {
+  const palette =
+    match.sentiment === "positive"
+      ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+      : match.sentiment === "negative"
+        ? "border-rose-200 bg-rose-50 text-rose-800"
+        : "border-stone-200 bg-stone-50 text-stone-700";
+  const label =
+    match.sentiment === "positive"
+      ? "Worked before"
+      : match.sentiment === "negative"
+        ? "Backfired before"
+        : "Logged before";
+  const result = (match.decision.result_later ?? "").trim();
+  const shortResult = result.length > 40 ? `${result.slice(0, 40)}…` : result;
+  return (
+    <div
+      className={`mt-1 inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[10px] font-medium ${palette}`}
+      title={result}
+    >
+      <span>{label}</span>
+      {shortResult ? <span>· Last result: {shortResult}</span> : null}
+    </div>
   );
 }

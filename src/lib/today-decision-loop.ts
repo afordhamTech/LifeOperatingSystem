@@ -4,15 +4,23 @@
 
 import type { Task } from "@/lib/task-system";
 import type { CalendarAnchor } from "@/lib/calendar-system";
+import type { DecisionLog } from "@/lib/lifeee-persistence";
 import { calcTaskPriority } from "@/lib/task-system";
 import { parseTimeToMinutes } from "@/lib/calendar-system";
+import { hasResult } from "@/lib/decision-log-summary";
 
 export type TrustProtector = {
   id: string;
   title: string;
   reason: string;
-  kind: "overdue" | "due-today" | "prep" | "follow-up" | "high-consequence";
-  source: "task" | "anchor";
+  kind:
+    | "overdue"
+    | "due-today"
+    | "prep"
+    | "follow-up"
+    | "high-consequence"
+    | "overdue-decision-review";
+  source: "task" | "anchor" | "decision";
   detail?: string;
 };
 
@@ -33,6 +41,7 @@ export function pickTrustProtectors(
   tasks: Task[],
   anchors: CalendarAnchor[],
   today: string,
+  decisions: DecisionLog[] = [],
 ): TrustProtector[] {
   const protectors: TrustProtector[] = [];
   const seen = new Set<string>();
@@ -104,16 +113,36 @@ export function pickTrustProtectors(
     }
   }
 
+  for (const decision of decisions) {
+    if (hasResult(decision)) continue;
+    const reviewDate = decision.review_date ?? null;
+    if (!reviewDate) continue;
+    if (reviewDate > today) continue;
+    const key = `decision:${decision.id}:overdue-decision-review`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    protectors.push({
+      id: key,
+      title: `Decision review: ${decision.decision}`,
+      reason: `Decision review still open since ${reviewDate}`,
+      kind: "overdue-decision-review",
+      source: "decision",
+      detail: decision.reason_chosen ?? undefined,
+    });
+  }
+
   const rank = (kind: TrustProtector["kind"]) =>
     kind === "overdue"
       ? 0
       : kind === "due-today"
         ? 1
-        : kind === "prep"
+        : kind === "overdue-decision-review"
           ? 2
-          : kind === "follow-up"
+          : kind === "prep"
             ? 3
-            : 4;
+            : kind === "follow-up"
+              ? 4
+              : 5;
 
   return protectors.sort((a, b) => rank(a.kind) - rank(b.kind)).slice(0, 8);
 }
@@ -154,9 +183,15 @@ export function buildDecisionLoopSummary(input: {
   anchors: CalendarAnchor[];
   today: string;
   currentEnergy: number;
+  decisions?: DecisionLog[];
 }): DecisionLoopSummary {
   return {
-    trustProtectors: pickTrustProtectors(input.tasks, input.anchors, input.today),
+    trustProtectors: pickTrustProtectors(
+      input.tasks,
+      input.anchors,
+      input.today,
+      input.decisions ?? [],
+    ),
     inboxCandidates: pickInboxCandidates(input.tasks, input.currentEnergy),
     ignoredToday: pickIgnoredToday(input.tasks),
     todayCommitted: pickTodayCommittedTasks(input.tasks, input.today),

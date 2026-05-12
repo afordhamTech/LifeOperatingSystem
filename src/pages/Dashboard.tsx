@@ -67,6 +67,10 @@ import {
   splitDecisionsByReview,
 } from "@/lib/decision-log-summary";
 import {
+  buildOutcomeFeedbackSummary,
+  buildOutcomeMatches,
+} from "@/lib/decision-outcome-feedback";
+import {
   CATEGORY_COLORS,
   buildCalendarPlanningPrompt,
   buildTodayTimeline,
@@ -517,8 +521,23 @@ export default function Dashboard() {
         anchors: anchorList,
         today,
         currentEnergy,
+        decisions: decisionLogs,
       }),
-    [anchorList, currentEnergy, taskList, today],
+    [anchorList, currentEnergy, decisionLogs, taskList, today],
+  );
+
+  const outcomeMatches = useMemo(
+    () =>
+      buildOutcomeMatches(
+        taskList.filter((t) => t.status === "inbox"),
+        decisionLogs,
+      ),
+    [decisionLogs, taskList],
+  );
+
+  const outcomeFeedbackSummary = useMemo(
+    () => buildOutcomeFeedbackSummary(decisionLogs),
+    [decisionLogs],
   );
 
   const decisionPromptPayload = useMemo(() => {
@@ -558,6 +577,7 @@ export default function Dashboard() {
         : undefined,
       decisionSummary,
       reviewedDecisionsSummary,
+      outcomeFeedbackSummary,
     };
   }, [
     anchorList,
@@ -567,6 +587,7 @@ export default function Dashboard() {
     decisionLoop.trustProtectors,
     decisionSummary,
     reviewedDecisionsSummary,
+    outcomeFeedbackSummary,
     mcatNextMove,
     nutritionChecks,
     operatingMode,
@@ -694,6 +715,8 @@ export default function Dashboard() {
         planNotesSyncStatus={planSyncStatus}
         planNotesError={planSyncError}
         onLogIgnoreDecision={logIgnoreDecision}
+        outcomeMatches={outcomeMatches}
+        decisions={decisionLogs}
       />
 
       <DecisionsDueReviewPanel

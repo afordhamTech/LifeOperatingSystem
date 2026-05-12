@@ -129,4 +129,53 @@ describe("today decision loop", () => {
     expect(text).toContain("Pay tuition");
     expect(text).toContain("Skip social");
   });
+
+  it("emits an overdue-decision-review trust protector for overdue unreviewed decisions", () => {
+    const protectors = pickTrustProtectors(
+      [],
+      [],
+      TODAY,
+      [
+        {
+          id: "d1",
+          decision: "Skip social tonight",
+          decision_date: "2026-05-01",
+          options_considered: [],
+          reason_chosen: "Test the loop",
+          review_date: "2026-05-09",
+          result_later: null,
+        },
+        {
+          id: "d2",
+          decision: "Already reviewed",
+          options_considered: [],
+          review_date: "2026-05-09",
+          result_later: "Worked",
+          updated_at: "2026-05-10T10:00:00.000Z",
+        },
+        {
+          id: "d3",
+          decision: "Future review",
+          options_considered: [],
+          review_date: "2026-06-01",
+          result_later: null,
+        },
+      ],
+    );
+    const titles = protectors.map((p) => p.title);
+    expect(titles).toContain("Decision review: Skip social tonight");
+    expect(titles).not.toContain("Decision review: Already reviewed");
+    expect(titles).not.toContain("Decision review: Future review");
+    const skipProtector = protectors.find((p) => p.title.includes("Skip social tonight"));
+    expect(skipProtector?.kind).toBe("overdue-decision-review");
+    expect(skipProtector?.reason).toContain("2026-05-09");
+  });
+
+  it("preserves existing trust protector behavior when no decisions are passed", () => {
+    const tasks = [
+      task({ title: "Pay tuition", due_date: TODAY, status: "today" }),
+    ];
+    const protectors = pickTrustProtectors(tasks, [], TODAY);
+    expect(protectors.map((p) => p.title)).toContain("Pay tuition");
+  });
 });
