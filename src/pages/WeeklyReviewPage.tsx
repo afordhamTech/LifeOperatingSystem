@@ -26,9 +26,11 @@ import { useSyncStatus } from "@/hooks/useSyncStatus";
 import { runSupabasePersistence } from "@/lib/persistence-runner";
 import {
   fetchAcademicTasks,
+  fetchCalendarAnchors,
   fetchDecisionLogs,
   fetchNutritionLogs,
   fetchSleepLogs,
+  fetchUniversalTasks,
   fetchWeeklyReview,
   fetchWorkoutLogs,
   upsertWeeklyReview,
@@ -41,6 +43,11 @@ import {
 import {
   buildDecisionPatternDigest,
 } from "@/lib/decision-pattern-digest";
+import {
+  buildWeeklyBottleneckDiagnosis,
+} from "@/lib/weekly-bottleneck-diagnosis";
+import type { CalendarAnchor } from "@/lib/calendar-system";
+import type { Task } from "@/lib/task-system";
 
 type WeeklyReviewForm = {
   academicsScore: number;
@@ -170,6 +177,8 @@ export default function WeeklyReviewPage() {
     nutritionScore: 5,
   });
   const [decisionLogs, setDecisionLogs] = useState<DecisionLog[]>([]);
+  const [universalTasks, setUniversalTasks] = useState<Task[]>([]);
+  const [calendarAnchorList, setCalendarAnchorList] = useState<CalendarAnchor[]>([]);
 
   const weekEnd = useMemo(() => {
     const date = new Date(`${weekStart}T00:00:00`);
@@ -185,6 +194,19 @@ export default function WeeklyReviewPage() {
   const patternDigest = useMemo(
     () => buildDecisionPatternDigest(decisionLogs, weekStart, weekEnd, today),
     [decisionLogs, weekStart, weekEnd, today],
+  );
+
+  const bottleneckDiagnosis = useMemo(
+    () =>
+      buildWeeklyBottleneckDiagnosis({
+        tasks: universalTasks,
+        decisionLogs,
+        anchors: calendarAnchorList,
+        weekStart,
+        weekEnd,
+        today,
+      }),
+    [calendarAnchorList, decisionLogs, today, universalTasks, weekEnd, weekStart],
   );
 
   const weeklyLifeScore = calculateWeeklyLifeScore({
@@ -237,16 +259,28 @@ export default function WeeklyReviewPage() {
       const weekStartDate = weekStart;
       const todayDate = today;
       try {
-        const [existingReview, allTasks, sleepRows, workoutRows, nutritionRows, decisionRows] =
-          await Promise.all([
-            fetchWeeklyReview(userId, weekStartDate),
-            fetchAcademicTasks(userId),
-            fetchSleepLogs(userId, weekStartDate, todayDate),
-            fetchWorkoutLogs(userId, weekStartDate, todayDate),
-            fetchNutritionLogs(userId, weekStartDate, todayDate),
-            fetchDecisionLogs(userId).catch(() => [] as DecisionLog[]),
-          ]);
+        const [
+          existingReview,
+          allTasks,
+          sleepRows,
+          workoutRows,
+          nutritionRows,
+          decisionRows,
+          universalRows,
+          anchorRows,
+        ] = await Promise.all([
+          fetchWeeklyReview(userId, weekStartDate),
+          fetchAcademicTasks(userId),
+          fetchSleepLogs(userId, weekStartDate, todayDate),
+          fetchWorkoutLogs(userId, weekStartDate, todayDate),
+          fetchNutritionLogs(userId, weekStartDate, todayDate),
+          fetchDecisionLogs(userId).catch(() => [] as DecisionLog[]),
+          fetchUniversalTasks(userId).catch(() => [] as Task[]),
+          fetchCalendarAnchors(userId).catch(() => [] as CalendarAnchor[]),
+        ]);
         setDecisionLogs(decisionRows);
+        setUniversalTasks(universalRows);
+        setCalendarAnchorList(anchorRows);
 
         if (!active) return;
 
@@ -442,6 +476,49 @@ export default function WeeklyReviewPage() {
             <Bar dataKey="score" fill="#6b87ae" radius={[2, 2, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
+      </div>
+
+      <div className="card-surface p-4 border-l-2 border-[#c39a4e]">
+        <h3 className="text-sm font-semibold text-[#25313c] mb-2">
+          WEEKLY BOTTLENECK DIAGNOSIS
+        </h3>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm font-medium text-[#25313c]">
+            {bottleneckDiagnosis.bottleneckLabel}
+          </span>
+          <span
+            className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${
+              bottleneckDiagnosis.confidence === "high"
+                ? "border-rose-200 bg-rose-100 text-rose-700"
+                : bottleneckDiagnosis.confidence === "medium"
+                  ? "border-amber-200 bg-amber-100 text-amber-700"
+                  : "border-stone-200 bg-stone-100 text-stone-700"
+            }`}
+          >
+            confidence: {bottleneckDiagnosis.confidence}
+          </span>
+        </div>
+        <p className="mt-2 text-xs text-[#6f685f]">
+          {bottleneckDiagnosis.bottleneckDescription}
+        </p>
+        {bottleneckDiagnosis.evidence.length > 0 ? (
+          <ul className="mt-2 flex flex-wrap gap-2 text-[11px]">
+            {bottleneckDiagnosis.evidence.slice(0, 3).map((item) => (
+              <li
+                key={item.label}
+                className="rounded-md border border-[#ece5da] bg-white/70 px-2 py-0.5 text-[#25313c]"
+              >
+                {item.label}: <span className="font-semibold">{item.count}</span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        <div className="mt-2 text-xs text-[#25313c]">
+          <span className="text-[10px] uppercase tracking-wider text-[#c39a4e] font-semibold">
+            Suggested fix
+          </span>{" "}
+          {bottleneckDiagnosis.suggestedFix}
+        </div>
       </div>
 
       <div className="card-surface p-4">

@@ -75,6 +75,10 @@ import {
   buildDecisionPatternSummary,
 } from "@/lib/decision-pattern-digest";
 import {
+  buildWeeklyBottleneckDiagnosis,
+  buildWeeklyBottleneckSummary,
+} from "@/lib/weekly-bottleneck-diagnosis";
+import {
   CATEGORY_COLORS,
   buildCalendarPlanningPrompt,
   buildTodayTimeline,
@@ -552,6 +556,24 @@ export default function Dashboard() {
     [decisionLogs, weekEnd, weekStart, today],
   );
 
+  const weeklyBottleneckDiagnosis = useMemo(
+    () =>
+      buildWeeklyBottleneckDiagnosis({
+        tasks: taskList,
+        decisionLogs,
+        anchors: anchorList,
+        weekStart,
+        weekEnd,
+        today,
+      }),
+    [anchorList, decisionLogs, taskList, today, weekEnd, weekStart],
+  );
+
+  const weeklyBottleneckSummary = useMemo(
+    () => buildWeeklyBottleneckSummary(weeklyBottleneckDiagnosis),
+    [weeklyBottleneckDiagnosis],
+  );
+
   const decisionPromptPayload = useMemo(() => {
     const inboxAndToday = [
       ...decisionLoop.todayCommitted.slice(0, 6),
@@ -591,6 +613,7 @@ export default function Dashboard() {
       reviewedDecisionsSummary,
       outcomeFeedbackSummary,
       decisionPatternSummary,
+      weeklyBottleneckSummary,
     };
   }, [
     anchorList,
@@ -602,6 +625,7 @@ export default function Dashboard() {
     reviewedDecisionsSummary,
     outcomeFeedbackSummary,
     decisionPatternSummary,
+    weeklyBottleneckSummary,
     mcatNextMove,
     nutritionChecks,
     operatingMode,
@@ -710,6 +734,27 @@ export default function Dashboard() {
       {!hasSupabaseConfig ? (
         <div className="rounded border border-[#c39a4e]/30 bg-[#c39a4e]/10 px-3 py-2 text-xs text-[#c39a4e]">
           Supabase env vars are missing. The dashboard still works locally.
+        </div>
+      ) : null}
+
+      {weeklyBottleneckDiagnosis.bottleneckKind !== "insufficient-evidence" ? (
+        <div className="rounded-lg border border-[#ddd4c6] bg-[#fdfaf4] px-3 py-2 text-xs text-[#25313c] flex flex-wrap items-center gap-2">
+          <span className="text-[10px] uppercase tracking-wider text-[#c39a4e] font-semibold">
+            Current bottleneck
+          </span>
+          <span className="font-medium">{weeklyBottleneckDiagnosis.bottleneckLabel}</span>
+          <span
+            className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${
+              weeklyBottleneckDiagnosis.confidence === "high"
+                ? "border-rose-200 bg-rose-100 text-rose-700"
+                : weeklyBottleneckDiagnosis.confidence === "medium"
+                  ? "border-amber-200 bg-amber-100 text-amber-700"
+                  : "border-stone-200 bg-stone-100 text-stone-700"
+            }`}
+          >
+            {weeklyBottleneckDiagnosis.confidence}
+          </span>
+          <span className="text-[#6f685f]">· {weeklyBottleneckDiagnosis.suggestedFix}</span>
         </div>
       ) : null}
 
