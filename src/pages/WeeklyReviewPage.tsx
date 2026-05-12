@@ -38,6 +38,9 @@ import {
   reviewedTimestamp,
   splitDecisionsByReview,
 } from "@/lib/decision-log-summary";
+import {
+  buildDecisionPatternDigest,
+} from "@/lib/decision-pattern-digest";
 
 type WeeklyReviewForm = {
   academicsScore: number;
@@ -177,6 +180,11 @@ export default function WeeklyReviewPage() {
   const reviewedThisWeek = useMemo(
     () => splitDecisionsByReview(decisionLogs, today, weekStart, weekEnd).reviewedThisWeek,
     [decisionLogs, today, weekStart, weekEnd],
+  );
+
+  const patternDigest = useMemo(
+    () => buildDecisionPatternDigest(decisionLogs, weekStart, weekEnd, today),
+    [decisionLogs, weekStart, weekEnd, today],
   );
 
   const weeklyLifeScore = calculateWeeklyLifeScore({
@@ -477,6 +485,70 @@ export default function WeeklyReviewPage() {
         )}
       </div>
 
+      <div className="card-surface p-4">
+        <h3 className="text-sm font-semibold text-[#25313c] mb-3">
+          DECISION PATTERN DIGEST
+        </h3>
+        <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-4 text-xs text-[#6f685f]">
+          <Stat label="Reviewed total" value={patternDigest.totalsReviewed} />
+          <Stat
+            label="This week"
+            value={patternDigest.currentWeekReviewedCount}
+            hint={`prior ${patternDigest.priorWeekReviewedCount} · Δ ${
+              patternDigest.weeklyDelta > 0 ? "+" : ""
+            }${patternDigest.weeklyDelta}`}
+          />
+          <Stat
+            label="Sentiment"
+            value={`${patternDigest.positiveCount}/${patternDigest.negativeCount}/${patternDigest.neutralCount}`}
+            hint="positive / negative / neutral"
+          />
+          <Stat
+            label="Open overdue reviews"
+            value={patternDigest.openOverdueReviewCount}
+            hint={
+              patternDigest.openOverdueReviewCount > 0
+                ? "review_date past, result_later empty"
+                : "all caught up"
+            }
+          />
+        </div>
+        {patternDigest.topRecurringDecisionTitles.length === 0 ? (
+          <div className="mt-3 text-xs text-[#9b938a]">
+            No repeated decisions yet. Patterns appear once a normalized decision title is reviewed at least twice.
+          </div>
+        ) : (
+          <ul className="mt-3 space-y-1.5 text-xs">
+            {patternDigest.topRecurringDecisionTitles.slice(0, 3).map((recurring) => (
+              <li
+                key={recurring.title}
+                className="rounded-md border border-[#ece5da] bg-white/70 p-2"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-sm text-[#25313c]">{recurring.title}</span>
+                  <span
+                    className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${
+                      recurring.dominantSentiment === "positive"
+                        ? "border-emerald-200 bg-emerald-100 text-emerald-700"
+                        : recurring.dominantSentiment === "negative"
+                          ? "border-rose-200 bg-rose-100 text-rose-700"
+                          : "border-stone-200 bg-stone-100 text-stone-700"
+                    }`}
+                  >
+                    ×{recurring.count} {recurring.dominantSentiment}
+                  </span>
+                </div>
+                {recurring.lastResultExcerpt ? (
+                  <div className="mt-0.5 text-[11px] text-[#6f685f]">
+                    Last result: {recurring.lastResultExcerpt}
+                  </div>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <ReviewTextCard
           title="BIGGEST WIN"
@@ -660,6 +732,26 @@ function ReviewTextCard({
         placeholder={placeholder}
         className={`input-dark w-full resize-none ${textarea ? "h-24" : "h-20"}`}
       />
+    </div>
+  );
+}
+
+function Stat({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: number | string;
+  hint?: string;
+}) {
+  return (
+    <div className="rounded-md border border-[#ece5da] bg-white/70 p-2">
+      <div className="text-[10px] uppercase tracking-wider text-[#9b938a] font-semibold">
+        {label}
+      </div>
+      <div className="text-base font-semibold text-[#25313c]">{value}</div>
+      {hint ? <div className="text-[10px] text-[#6f685f]">{hint}</div> : null}
     </div>
   );
 }

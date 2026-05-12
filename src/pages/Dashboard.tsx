@@ -71,6 +71,10 @@ import {
   buildOutcomeMatches,
 } from "@/lib/decision-outcome-feedback";
 import {
+  buildDecisionPatternDigest,
+  buildDecisionPatternSummary,
+} from "@/lib/decision-pattern-digest";
+import {
   CATEGORY_COLORS,
   buildCalendarPlanningPrompt,
   buildTodayTimeline,
@@ -540,6 +544,14 @@ export default function Dashboard() {
     [decisionLogs],
   );
 
+  const decisionPatternSummary = useMemo(
+    () =>
+      buildDecisionPatternSummary(
+        buildDecisionPatternDigest(decisionLogs, weekStart, weekEnd, today),
+      ),
+    [decisionLogs, weekEnd, weekStart, today],
+  );
+
   const decisionPromptPayload = useMemo(() => {
     const inboxAndToday = [
       ...decisionLoop.todayCommitted.slice(0, 6),
@@ -578,6 +590,7 @@ export default function Dashboard() {
       decisionSummary,
       reviewedDecisionsSummary,
       outcomeFeedbackSummary,
+      decisionPatternSummary,
     };
   }, [
     anchorList,
@@ -588,6 +601,7 @@ export default function Dashboard() {
     decisionSummary,
     reviewedDecisionsSummary,
     outcomeFeedbackSummary,
+    decisionPatternSummary,
     mcatNextMove,
     nutritionChecks,
     operatingMode,

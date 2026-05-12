@@ -38,6 +38,7 @@ export type PromptBuilderContext = {
   decisionSummary?: string;
   reviewedDecisionsSummary?: string;
   outcomeFeedbackSummary?: string;
+  decisionPatternSummary?: string;
 };
 
 export const PROMPT_OPTIONS: PromptOption[] = [
@@ -90,6 +91,7 @@ function commonContext(context: PromptBuilderContext) {
     line("Decisions", context.decisionSummary),
     line("Decision review", context.reviewedDecisionsSummary),
     line("Outcome feedback", context.outcomeFeedbackSummary),
+    line("Decision pattern", context.decisionPatternSummary),
   ].join("\n");
 }
 
