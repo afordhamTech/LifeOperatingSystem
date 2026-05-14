@@ -1,6 +1,7 @@
 import { Link, useLocation } from "react-router";
 import { PromptDrawer } from "@/components/PromptDrawer";
 import { PromptContextProvider, useSharedPromptContext } from "@/providers/PromptContext";
+import { useCanonicalPromptContext } from "@/hooks/useCanonicalPromptContext";
 import { useAuth } from "@/hooks/useAuth";
 import { useSupabaseSession } from "@/hooks/useSupabaseSession";
 import { supabase } from "@/lib/supabase-client";
@@ -74,6 +75,11 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
   const { user: kimiUser, logout } = useAuth();
   const { session: supabaseSession } = useSupabaseSession();
   const sharedPromptContext = useSharedPromptContext();
+  const canonicalPromptContext = useCanonicalPromptContext();
+  // Canonical Supabase-backed state wins for the data fields it owns; page
+  // pushes (e.g. Dashboard decision summaries) survive for keys canonical
+  // does not produce.
+  const promptContext = { ...sharedPromptContext, ...canonicalPromptContext };
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const user = kimiUser ?? (supabaseSession?.user ? {
@@ -221,7 +227,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
           {children}
         </div>
       </main>
-      <PromptDrawer context={sharedPromptContext} />
+      <PromptDrawer context={promptContext} />
     </div>
   );
 }
