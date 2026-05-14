@@ -33,6 +33,7 @@ export type PromptBuilderContext = {
   nutritionSummary?: string;
   weeklyReviewSummary?: string;
   executionTruthSummary?: string;
+  planningSummary?: string;
   faithSummary?: string;
   relationshipSummary?: string;
   careerProofSummary?: string;
@@ -92,6 +93,7 @@ function commonContext(context: PromptBuilderContext) {
     line("Nutrition", context.nutritionSummary),
     line("Weekly review", context.weeklyReviewSummary),
     line("Execution truth", context.executionTruthSummary),
+    line("Reality-constrained planning", context.planningSummary),
     line("Faith", context.faithSummary),
     line("Relationships", context.relationshipSummary),
     line("Career proof", context.careerProofSummary),
@@ -134,6 +136,8 @@ Sort the task list into Must Do, Should Do, Maintenance, Waiting, Quick Win, and
 ${shared}
 
 Use the anchors and open blocks to place the hard work, recovery, workout, and shutdown target. Flag overload honestly.
+
+The "Reality-constrained planning" section lists the only realistic open windows, the protected sleep and shutdown reserves, the best deep-work windows, and the realistic capacity. Do NOT schedule work outside those open windows. Do NOT exceed the realistic capacity. Respect the protected sleep and shutdown reserves.
 
 Return this parseable schedule block:
 SCHEDULE
@@ -239,6 +243,8 @@ Using the execution truth:
 - identify the real bottleneck (not the surface excuse)
 - suggest tomorrow's single first move
 - do not create an overloaded plan
+
+The "Reality-constrained planning" line lists the only realistic open windows, protected sleep/shutdown reserves, best deep-work windows, and realistic capacity. Do not propose work outside those windows or beyond that capacity.
 
 Synthesize the full Lifeee context. Return a concise operating brief with priorities, risks, recommended next actions, missing data, and any task IDs that need planning attention.`;
     case "weekly-strategy-brief":

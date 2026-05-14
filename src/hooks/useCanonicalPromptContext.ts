@@ -32,6 +32,7 @@ import {
   summarizeTaskCandidates,
 } from "@/lib/today-decision-loop";
 import { aggregateExecutionStats } from "@/lib/execution-truth";
+import { buildPlanningSnapshot, summarizePlanningSnapshot } from "@/lib/planning-engine";
 import { getMcatDailyNextMove, loadMcatFoundationState } from "@/lib/mcat-foundation";
 import { calcNutritionStatus } from "@/lib/calculations";
 import type { PromptBuilderContext } from "@/lib/prompt-builders";
@@ -153,6 +154,25 @@ export function useCanonicalPromptContext(): PromptBuilderContext {
         executionTruthSummary = `${executionTruthSummary ?? "No time blocks today"} · plan ${dailyPlan.lock_status} · plan changes ${dailyPlan.plan_change_count ?? 0}`;
       }
 
+      // ── Reality-constrained planning ────────────────────────────────────
+      const plannedTaskMinutes = smartViews.committedToday.reduce(
+        (sum, task) => sum + (task.estimated_minutes ?? 0),
+        0,
+      );
+      const carryForwardPressure = Math.min(
+        10,
+        tasks.reduce((max, task) => Math.max(max, task.carry_forward_count ?? 0), 0),
+      );
+      const planningSnapshot = buildPlanningSnapshot({
+        date: today,
+        anchors,
+        timeBlocks,
+        sleepDebtHours: Number(sleepRow?.sleep_debt ?? 0),
+        plannedTaskMinutes,
+        carryForwardPressure,
+      });
+      const planningSummary = summarizePlanningSnapshot(planningSnapshot);
+
       // ── Sleep ───────────────────────────────────────────────────────────
       const sleepSummary = sleepRow
         ? `Readiness ${Number(sleepRow.sleep_readiness ?? 0).toFixed(1)}/10 · ${sleepRow.hours_slept ?? "—"}h slept · debt ${sleepRow.sleep_debt ?? "—"}h · bedtime ${sleepRow.bedtime ?? "—"} · wake ${sleepRow.wake_time ?? "—"} · quality ${sleepRow.sleep_quality ?? "—"} · wake energy ${sleepRow.wake_energy ?? "—"}`
@@ -269,6 +289,7 @@ export function useCanonicalPromptContext(): PromptBuilderContext {
         timelineSummary,
         calendarSummary,
         executionTruthSummary,
+        planningSummary,
         sleepSummary,
         academicsSummary,
         mcatSummary,

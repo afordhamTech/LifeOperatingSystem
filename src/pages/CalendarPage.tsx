@@ -55,6 +55,11 @@ import { toDateKey } from "@/lib/date-helpers";
 import { useSupabaseSession } from "@/hooks/useSupabaseSession";
 import ExecutionTruthPanel from "@/components/ExecutionTruthPanel";
 import {
+  buildPlanningSnapshot,
+  validateImportRealism,
+  type PlanningSnapshot,
+} from "@/lib/planning-engine";
+import {
   buildDailyPlanPayload,
   createLifeeeId,
   deleteCalendarAnchor,
@@ -240,6 +245,15 @@ export default function CalendarPage() {
   );
 
   const available = useMemo(() => calculateAvailableTime(onDayAnchors), [onDayAnchors]);
+  const planningSnapshot = useMemo(
+    () =>
+      buildPlanningSnapshot({
+        date: activeDate,
+        anchors: onDayAnchors,
+        timeBlocks: onDayTimeBlocks,
+      }),
+    [activeDate, onDayAnchors, onDayTimeBlocks],
+  );
   const plan = useMemo(() => buildDayPlan(tasks, currentEnergy, activeDate), [activeDate, tasks, currentEnergy]);
   const smartViews = useMemo(
     () => buildTaskSmartViews(tasks, { today: activeDate, currentEnergy }),
@@ -789,7 +803,7 @@ export default function CalendarPage() {
         </div>
       </div>
 
-      <RealitySummary reality={reality} available={available} />
+      <RealitySummary planning={planningSnapshot} />
 
       <PlanningExportValidationPanel validation={planningValidation} />
 
@@ -848,67 +862,108 @@ export default function CalendarPage() {
   );
 }
 
-function RealitySummary({
-  reality,
-  available,
-}: {
-  reality: ReturnType<typeof calculateRealityScore>;
-  available: ReturnType<typeof calculateAvailableTime>;
-}) {
+function RealitySummary({ planning }: { planning: PlanningSnapshot }) {
   const tone =
-    reality.score >= 7
+    planning.realism.score >= 7
       ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-      : reality.score >= 5
+      : planning.realism.score >= 5
         ? "border-amber-200 bg-amber-50 text-amber-800"
         : "border-rose-200 bg-rose-50 text-rose-800";
+  const largest = planning.largestWindow;
+  const topDeepWork = planning.deepWorkWindows[0];
   return (
     <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-5">
       <div className={`rounded-2xl border p-4 ${tone}`}>
         <div className="text-[10px] uppercase tracking-wider font-semibold">Plan reality</div>
-        <div className="font-mono-data mt-2 text-3xl font-semibold">{reality.score.toFixed(1)}</div>
-        <div className="mt-1 text-xs">
-          time {reality.available_time_fit.toFixed(1)} · energy {reality.energy_fit.toFixed(1)} ·
-          focus {reality.priority_focus.toFixed(1)} · recovery {reality.recovery_protection.toFixed(1)}
+        <div className="font-mono-data mt-2 text-3xl font-semibold">
+          {planning.realism.score.toFixed(1)}
         </div>
+        <div className="mt-1 text-xs">{planning.realism.bottleneck}</div>
+        <div className="mt-1 text-xs opacity-80">→ {planning.realism.correction}</div>
       </div>
-      <SmallStat label="Open time" value={`${available.totalOpenMinutes} min`} hint="After anchors + maintenance + recovery" />
+      <SmallStat
+        label="Open time"
+        value={`${planning.capacity.totalAvailableMinutes} min`}
+        hint="Realistic free time after sleep, anchors, blocks, buffers, reserves"
+      />
       <SmallStat
         label="Largest block"
-        value={
-          available.largestOpenBlock
-            ? `${available.largestOpenBlock.start}–${available.largestOpenBlock.end}`
-            : "—"
-        }
-        hint={
-          available.largestOpenBlock
-            ? `${available.largestOpenBlock.durationMinutes} min`
-            : "Calendar full or unset"
-        }
+        value={largest ? `${largest.start}–${largest.end}` : "—"}
+        hint={largest ? `${largest.durationMinutes} min · ${largest.quality}` : "Calendar full or unset"}
       />
       <SmallStat
         label="Best deep work"
-        value={
-          available.bestDeepWork
-            ? `${available.bestDeepWork.start}–${available.bestDeepWork.end}`
-            : "—"
+        value={topDeepWork ? `${topDeepWork.start}–${topDeepWork.end}` : "—"}
+        hint={
+          topDeepWork
+            ? `${topDeepWork.durationMinutes} min · deep-work score ${topDeepWork.deepWorkScore}/10`
+            : "No deep-work-sized window"
         }
-        hint={available.bestDeepWork ? `${available.bestDeepWork.durationMinutes} min` : "No clean morning block"}
       />
       <SmallStat
-        label="Shutdown target"
-        value={available.bestShutdownTarget}
-        hint="Pulled earlier when sleep debt is high"
+        label="Shutdown reserve"
+        value={`${planning.shutdownReserve.start}–${planning.shutdownReserve.end}`}
+        hint={`Sleep window ${planning.sleepWindow.start}–${planning.sleepWindow.end} protected`}
       />
-      <div className="md:col-span-3 xl:col-span-5 card-surface p-4">
-        <div className="text-xs font-semibold text-foreground mb-2">Recommendations</div>
-        <ul className="space-y-1.5 text-sm text-muted-foreground">
-          {reality.recommendations.map((r, i) => (
-            <li key={i} className="flex items-start gap-2">
-              <ShieldCheck size={14} className="mt-0.5 flex-shrink-0 text-primary" />
-              <span>{r}</span>
-            </li>
-          ))}
-        </ul>
+
+      <div className="md:col-span-3 xl:col-span-3 card-surface p-4">
+        <div className="text-xs font-semibold text-foreground mb-2">
+          Realistic open windows
+        </div>
+        {planning.openWindows.length === 0 ? (
+          <div className="text-sm text-muted-foreground">No open windows after fixed commitments.</div>
+        ) : (
+          <ul className="space-y-1 text-sm text-muted-foreground">
+            {planning.openWindows.slice(0, 6).map((w) => (
+              <li key={`${w.start}-${w.end}`} className="flex items-center justify-between gap-2">
+                <span className="font-mono-data">
+                  {w.start}–{w.end}
+                </span>
+                <span className="text-xs">
+                  {w.durationMinutes} min · {w.quality} · energy {w.energyScore}/10
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="text-xs font-semibold text-foreground mt-3 mb-1">
+          Top deep-work windows
+        </div>
+        {planning.deepWorkWindows.length === 0 ? (
+          <div className="text-sm text-muted-foreground">No window long enough for deep work.</div>
+        ) : (
+          <ol className="space-y-0.5 text-sm text-muted-foreground list-decimal list-inside">
+            {planning.deepWorkWindows.map((w) => (
+              <li key={`dw-${w.start}`}>
+                {w.start}–{w.end} · {w.quality} (score {w.deepWorkScore}/10)
+              </li>
+            ))}
+          </ol>
+        )}
+      </div>
+
+      <div className="md:col-span-3 xl:col-span-2 card-surface p-4">
+        <div className="text-xs font-semibold text-foreground mb-2">Realistic capacity</div>
+        <div className="text-sm text-muted-foreground">{planning.capacity.message}</div>
+        <div className="mt-2 text-xs text-muted-foreground">
+          Focus capacity ~{Math.round(planning.capacity.deepWorkCapacityMinutes)} min · recovery
+          reserve {planning.capacity.recoveryReserveMinutes} min ·{" "}
+          {planning.recoveryReserveProtected ? (
+            <span className="text-emerald-700">Recovery reserve protected.</span>
+          ) : (
+            <span className="text-rose-700">Recovery reserve at risk.</span>
+          )}
+        </div>
+        {planning.warnings.length > 0 ? (
+          <ul className="mt-2 space-y-1 text-xs text-rose-700">
+            {planning.warnings.map((warning, i) => (
+              <li key={i} className="flex items-start gap-1.5">
+                <ShieldCheck size={12} className="mt-0.5 flex-shrink-0" />
+                <span>{warning}</span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
       </div>
     </div>
   );
@@ -1058,6 +1113,7 @@ function ScheduleImportPanel({
       </div>
       {notice ? <div className="notice-warning">{notice}</div> : null}
       {preview ? <SchedulePreviewTable rows={preview.rows} /> : null}
+      {preview ? <ImportRealismNotes rows={preview.rows} /> : null}
       {preview && (preview.unscheduled.length > 0 || preview.risks.length > 0 || preview.firstAction) ? (
         <div className="grid gap-3 md:grid-cols-3 text-xs">
           <ImportNoteList title="Unscheduled" items={preview.unscheduled} />
@@ -1076,6 +1132,52 @@ function ScheduleImportPanel({
           </div>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function ImportRealismNotes({
+  rows,
+}: {
+  rows: { start: string; end: string; imported_title: string; block_type: string }[];
+}) {
+  const issues = validateImportRealism(
+    rows.map((row) => ({
+      start_time: row.start,
+      end_time: row.end,
+      title: row.imported_title || "Untitled block",
+      block_type: row.block_type,
+    })),
+  );
+  if (issues.length === 0) return null;
+  const blocking = issues.filter((issue) => issue.severity === "block");
+  const soft = issues.filter((issue) => issue.severity === "warn");
+  return (
+    <div className="mt-3 rounded-lg border border-border bg-card/60 p-3 text-xs">
+      <div className="font-semibold text-foreground mb-1">Schedule realism check</div>
+      {blocking.length > 0 ? (
+        <ul className="space-y-0.5 text-rose-700">
+          {blocking.map((issue, i) => (
+            <li key={`block-${i}`}>⛔ {issue.message}</li>
+          ))}
+        </ul>
+      ) : null}
+      {soft.length > 0 ? (
+        <ul className="mt-1 space-y-0.5 text-amber-700">
+          {soft.map((issue, i) => (
+            <li key={`warn-${i}`}>⚠ {issue.message}</li>
+          ))}
+        </ul>
+      ) : null}
+      {blocking.length === 0 ? (
+        <div className="mt-1 text-muted-foreground">
+          Soft issues only — you can still apply, but review them first.
+        </div>
+      ) : (
+        <div className="mt-1 text-rose-700">
+          Impossible overlaps detected — fix these before applying.
+        </div>
+      )}
     </div>
   );
 }

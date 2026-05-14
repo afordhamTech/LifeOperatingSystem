@@ -28,6 +28,7 @@ import DecisionsDueReviewPanel from "@/components/DecisionsDueReviewPanel";
 import TodayDecisionLoop from "@/components/TodayDecisionLoop";
 import ExecutionTruthPanel from "@/components/ExecutionTruthPanel";
 import { aggregateExecutionStats } from "@/lib/execution-truth";
+import { buildPlanningSnapshot } from "@/lib/planning-engine";
 import { usePushPromptContext } from "@/providers/PromptContext";
 import { buildLifeeePrompt } from "@/lib/prompt-builders";
 import { supabase } from "@/lib/supabase-client";
@@ -462,6 +463,19 @@ export default function Dashboard() {
   const todayTimeline = useMemo(
     () => buildTodayTimeline(todayAnchors, availableTime, { timeBlocks: todayTimeBlocks }),
     [todayAnchors, availableTime, todayTimeBlocks],
+  );
+  const planningSnapshot = useMemo(
+    () =>
+      buildPlanningSnapshot({
+        date: today,
+        anchors: todayAnchors,
+        timeBlocks: todayTimeBlocks,
+        sleepDebtHours: Number.isFinite(sleepDebtHours) ? sleepDebtHours : 0,
+        plannedTaskMinutes: dayPlan.mustDo
+          .concat(dayPlan.shouldDo, dayPlan.maintenance, dayPlan.quickWins)
+          .reduce((sum, task) => sum + (task.estimated_minutes ?? 0), 0),
+      }),
+    [today, todayAnchors, todayTimeBlocks, sleepDebtHours, dayPlan],
   );
   const realityScore = useMemo(
     () =>
@@ -1180,6 +1194,73 @@ export default function Dashboard() {
           <DayPlanCard label="Quick Win" tasks={dayPlan.quickWins} accent="#6a9a74" />
           <DayPlanCard label="Ignore Today" tasks={dayPlan.ignoreToday} accent="#9b938a" muted />
         </div>
+      </div>
+
+      <div className="card-surface p-4 space-y-3 border-l-2 border-[#6b87ae]">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="text-xs uppercase tracking-wider text-[#6b87ae] font-semibold">
+            Reality-constrained planning · realism {planningSnapshot.realism.score.toFixed(1)}/10
+          </div>
+          <span
+            className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${
+              planningSnapshot.recoveryReserveProtected
+                ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-700"
+                : "border-rose-500/25 bg-rose-500/10 text-rose-700"
+            }`}
+          >
+            {planningSnapshot.recoveryReserveProtected
+              ? "Recovery reserve protected"
+              : "Recovery reserve at risk"}
+          </span>
+        </div>
+        <div className="text-sm text-foreground">{planningSnapshot.realism.bottleneck}</div>
+        <div className="text-xs text-muted-foreground">→ {planningSnapshot.realism.correction}</div>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <div className="rounded-md border border-border p-2">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              Realistic open windows
+            </div>
+            {planningSnapshot.openWindows.length === 0 ? (
+              <div className="text-xs text-muted-foreground mt-1">None after fixed commitments.</div>
+            ) : (
+              <ul className="mt-1 space-y-0.5 text-xs text-foreground">
+                {planningSnapshot.openWindows.slice(0, 4).map((w) => (
+                  <li key={`${w.start}-${w.end}`}>
+                    {w.start}–{w.end} · {w.durationMinutes}m · {w.quality}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <div className="rounded-md border border-border p-2">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              Best deep-work windows
+            </div>
+            {planningSnapshot.deepWorkWindows.length === 0 ? (
+              <div className="text-xs text-muted-foreground mt-1">No deep-work-sized window.</div>
+            ) : (
+              <ol className="mt-1 space-y-0.5 text-xs text-foreground list-decimal list-inside">
+                {planningSnapshot.deepWorkWindows.map((w) => (
+                  <li key={`dw-${w.start}`}>
+                    {w.start}–{w.end} · {w.quality}
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
+        </div>
+        <div className="text-xs text-muted-foreground">
+          {planningSnapshot.capacity.message} · Sleep {planningSnapshot.sleepWindow.start}–
+          {planningSnapshot.sleepWindow.end} · Shutdown reserve{" "}
+          {planningSnapshot.shutdownReserve.start}–{planningSnapshot.shutdownReserve.end}
+        </div>
+        {planningSnapshot.warnings.length > 0 ? (
+          <ul className="space-y-0.5 text-xs text-rose-700">
+            {planningSnapshot.warnings.map((warning, i) => (
+              <li key={i}>⚠ {warning}</li>
+            ))}
+          </ul>
+        ) : null}
       </div>
 
       <div className="card-surface p-4 space-y-4">
