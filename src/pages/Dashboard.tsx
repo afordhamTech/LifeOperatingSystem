@@ -43,13 +43,21 @@ import { toDateKey } from "@/lib/date-helpers";
 import { getMcatDailyNextMove, loadMcatFoundationState } from "@/lib/mcat-foundation";
 import { useSupabaseSession } from "@/hooks/useSupabaseSession";
 import { Link } from "react-router";
-import { buildDayPlan, buildTaskSmartViews, loadTasks, saveTasks, type Task } from "@/lib/task-system";
+import {
+  buildDayPlan,
+  buildTaskSmartViews,
+  isDoneStatus,
+  loadTasks,
+  saveTasks,
+  type Task,
+} from "@/lib/task-system";
 import {
   buildDailyPlanPayload,
   createLifeeeId,
   fetchCalendarAnchors,
   fetchDailyPlan,
   fetchDecisionLogs,
+  fetchTimeBlocks,
   fetchUniversalTasks,
   fetchRecentWeeklyReviews,
   fetchWeeklyReview,
@@ -99,7 +107,10 @@ import {
   calculateRealityScore,
   parseTimeToMinutes,
   type CalendarAnchor,
+  type TimeBlock,
   loadAnchors,
+  loadTimeBlocks,
+  saveTimeBlocks,
 } from "@/lib/calendar-system";
 
 type DashboardState = {
@@ -155,6 +166,7 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null);
   const [taskList, setTaskList] = useState<Task[]>(() => loadTasks());
   const [anchorList, setAnchorList] = useState<CalendarAnchor[]>(() => loadAnchors());
+  const [timeBlockList, setTimeBlockList] = useState<TimeBlock[]>(() => loadTimeBlocks());
   const [planSyncStatus, setPlanSyncStatus] = useState<LifeeeSyncStatus>("local");
   const [planSyncError, setPlanSyncError] = useState<string | null>(null);
   const [planNotes, setPlanNotes] = useState<string>("");
@@ -223,6 +235,7 @@ export default function Dashboard() {
         if (!active) return;
         setTaskList(loadTasks());
         setAnchorList(loadAnchors());
+        setTimeBlockList(loadTimeBlocks());
         setRemoteTasksLoaded(false);
         setPlanSyncStatus(hasSupabaseConfig ? "waiting" : "local");
         setIsLoading(false);
@@ -251,6 +264,7 @@ export default function Dashboard() {
         weeklyReviewResult,
         universalTasksResult,
         calendarAnchorsResult,
+        timeBlocksResult,
         dailyPlanResult,
         decisionLogsResult,
       ] =
@@ -311,6 +325,9 @@ export default function Dashboard() {
           fetchCalendarAnchors(userId)
             .then((data) => ({ data, error: null }))
             .catch((caughtError: unknown) => ({ data: [] as CalendarAnchor[], error: caughtError })),
+          fetchTimeBlocks(userId, today, today)
+            .then((data) => ({ data, error: null }))
+            .catch((caughtError: unknown) => ({ data: [] as TimeBlock[], error: caughtError })),
           fetchDailyPlan(userId, today)
             .then((data) => ({ data, error: null }))
             .catch((caughtError: unknown) => ({ data: null, error: caughtError })),
@@ -332,6 +349,7 @@ export default function Dashboard() {
         weeklyReviewResult.error ??
         universalTasksResult.error ??
         calendarAnchorsResult.error ??
+        timeBlocksResult.error ??
         dailyPlanResult.error ??
         decisionLogsResult.error;
 
@@ -351,6 +369,8 @@ export default function Dashboard() {
       });
       setTaskList(universalTasksResult.data);
       setAnchorList(calendarAnchorsResult.data);
+      setTimeBlockList(timeBlocksResult.data);
+      saveTimeBlocks(timeBlocksResult.data);
       setRemoteTasksLoaded(!universalTasksResult.error);
       const dailyPlanRow = dailyPlanResult.data;
       setPlanNotes((dailyPlanRow?.notes as string | null) ?? "");
@@ -422,6 +442,13 @@ export default function Dashboard() {
         .sort((a, b) => parseTimeToMinutes(a.start_time) - parseTimeToMinutes(b.start_time)),
     [anchorList, today],
   );
+  const todayTimeBlocks = useMemo(
+    () =>
+      timeBlockList
+        .filter((block) => block.date === today)
+        .sort((a, b) => parseTimeToMinutes(a.start_time) - parseTimeToMinutes(b.start_time)),
+    [timeBlockList, today],
+  );
   const sleepDebtHours = Number(state.sleepToday?.sleep_debt ?? 0);
   const availableTime = useMemo(
     () =>
@@ -431,8 +458,8 @@ export default function Dashboard() {
     [todayAnchors, sleepDebtHours],
   );
   const todayTimeline = useMemo(
-    () => buildTodayTimeline(todayAnchors, availableTime),
-    [todayAnchors, availableTime],
+    () => buildTodayTimeline(todayAnchors, availableTime, { timeBlocks: todayTimeBlocks }),
+    [todayAnchors, availableTime, todayTimeBlocks],
   );
   const realityScore = useMemo(
     () =>
@@ -515,9 +542,23 @@ export default function Dashboard() {
     const text = buildCalendarPlanningPrompt({
       date: today,
       currentTime: new Date().toLocaleString(),
+      operatingMode,
+      planRealityScore: Number(realityScore.score.toFixed(1)),
       anchors: todayAnchors,
       available: availableTime,
       plan: dayPlan,
+      trustProtectors: taskSmartViews.trustProtectors,
+      inboxCandidates: taskSmartViews.inboxCandidates,
+      ignoredExcludedCount: taskSmartViews.ignoreToday.length,
+      parkingLotExcludedCount: taskSmartViews.parkingLot.length,
+      terminalExcludedCount: taskList.filter(
+        (task) =>
+          isDoneStatus(task.status) ||
+          task.status === "archived" ||
+          task.status === "trashed" ||
+          task.archived_at != null ||
+          task.deleted_at != null,
+      ).length,
       currentEnergy,
       mood: state.dailyLog?.mood ?? "Not supplied",
       sleepReadiness: sleepScore || 6,
@@ -618,6 +659,19 @@ export default function Dashboard() {
       }),
     [anchorList, currentEnergy, decisionLogs, taskList, today],
   );
+  const unscheduledTrustProtectors = useMemo(() => {
+    const scheduledTaskIds = new Set(
+      todayTimeBlocks
+        .map((block) => block.linked_task_id)
+        .filter((id): id is string => Boolean(id)),
+    );
+    return decisionLoop.trustProtectors.filter(
+      (protector) =>
+        protector.source === "task" &&
+        protector.task_id &&
+        !scheduledTaskIds.has(protector.task_id),
+    );
+  }, [decisionLoop.trustProtectors, todayTimeBlocks]);
 
   const outcomeMatches = useMemo(
     () =>
@@ -1118,11 +1172,11 @@ export default function Dashboard() {
             <div className="flex items-center gap-2">
               <CalendarClock size={14} className="text-primary" />
               <div className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">
-                Today timeline · anchors + best windows
+                Today timeline · anchors + imported blocks
               </div>
             </div>
             <div className="text-sm text-foreground mt-1">
-              {todayAnchors.length} fixed anchors · {availableTime.totalOpenMinutes} min open · shutdown {availableTime.bestShutdownTarget}
+              {todayAnchors.length} fixed anchors · {todayTimeBlocks.length} imported blocks · {availableTime.totalOpenMinutes} min open · shutdown {availableTime.bestShutdownTarget}
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -1164,7 +1218,13 @@ export default function Dashboard() {
                           ? "bg-amber-500"
                           : slot.kind === "shutdown"
                             ? "bg-violet-500"
-                            : "bg-primary";
+                            : slot.kind === "break"
+                              ? "bg-teal-500"
+                              : slot.kind === "freeform"
+                                ? "bg-zinc-500"
+                                : slot.kind === "imported-task"
+                                  ? "bg-blue-500"
+                                  : "bg-primary";
                   return (
                     <li key={`${slot.start}-${i}`} className="ml-4 relative">
                       <span
@@ -1191,6 +1251,18 @@ export default function Dashboard() {
                 })}
               </ol>
             )}
+            {unscheduledTrustProtectors.length > 0 ? (
+              <div className="notice-warning mt-4">
+                <div className="font-semibold">Trust protector still unscheduled</div>
+                <ul className="mt-1 space-y-0.5">
+                  {unscheduledTrustProtectors.slice(0, 4).map((protector) => (
+                    <li key={protector.id}>
+                      {protector.task_code ?? "TASK"} · {protector.title} · {protector.reason}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
           </div>
 
           <div className="space-y-3">

@@ -803,8 +803,8 @@ export function buildTaskSmartViews(
   };
 }
 
-function labelEstimate(task: Task) {
-  return task.estimated_minutes == null ? "Estimate missing" : `${task.estimated_minutes} min`;
+function labelEstimatedMinutes(task: Task) {
+  return task.estimated_minutes == null ? "Estimate missing" : String(task.estimated_minutes);
 }
 
 function labelPriority(task: Task) {
@@ -816,22 +816,21 @@ function labelConsequence(task: Task) {
 }
 
 export function formatTaskForPlanningExport(task: Task): string {
-  const due = task.due_date ? `due ${task.due_date}` : "due unset";
-  const energy = task.energy_required == null ? "energy unset" : `energy ${task.energy_required}/10`;
-  const role = task.daily_role ? `role ${task.daily_role}` : "role unset";
-  const counts = [
-    task.carry_forward_count > 0 ? `carry ${task.carry_forward_count}` : null,
-    task.ignored_count > 0 ? `ignored ${task.ignored_count}` : null,
-    task.rescheduled_count > 0 ? `rescheduled ${task.rescheduled_count}` : null,
-  ]
-    .filter(Boolean)
-    .join(", ");
-  const notes = task.notes.trim() ? ` | notes: ${task.notes.trim()}` : "";
-  return `${task.task_code} | ${task.title} | ${task.task_type} | ${labelEstimate(task)} | ${labelPriority(
+  const energy =
+    task.energy_required == null ? "Energy unset" : `${task.energy_required}/10`;
+  const role = task.daily_role ?? "Daily role unset";
+  const notes = task.notes.trim() ? ` | notes ${task.notes.trim()}` : "";
+  return `${task.task_code} | id ${task.id} | title ${task.title} | domain ${
+    task.task_type
+  } | status ${normalizeTaskStatus(task.status)} | daily_role ${role} | due_date ${
+    task.due_date ?? "due unset"
+  } | estimated_minutes ${labelEstimatedMinutes(task)} | priority ${labelPriority(
     task,
-  )} | ${labelConsequence(task)} | ${due} | ${energy} | status ${normalizeTaskStatus(
-    task.status,
-  )} | ${role}${counts ? ` | ${counts}` : ""}${notes}`;
+  )} | consequence_level ${labelConsequence(task)} | energy_required ${energy} | trust_impact ${
+    task.trust_impact
+  }/10 | ignored_count ${task.ignored_count} | carry_forward_count ${
+    task.carry_forward_count
+  } | rescheduled_count ${task.rescheduled_count}${notes}`;
 }
 
 export function validatePlanningExport(input: {

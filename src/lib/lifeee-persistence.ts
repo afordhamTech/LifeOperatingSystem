@@ -1,4 +1,4 @@
-import type { CalendarAnchor } from "@/lib/calendar-system";
+import type { CalendarAnchor, TimeBlock } from "@/lib/calendar-system";
 import type {
   AcademicTaskRow,
   NutritionLogRow,
@@ -94,6 +94,42 @@ export type CalendarAnchorRow = {
   updated_at: string;
 };
 
+export type TimeBlockRow = {
+  id: string;
+  user_id: string;
+  title: string;
+  date: string | null;
+  start_time: string | null;
+  end_time: string | null;
+  block_type: string | null;
+  linked_task_id?: string | null;
+  linked_anchor_id?: string | null;
+  source?: string | null;
+  import_batch_id?: string | null;
+  reason?: string | null;
+  energy_required?: number | null;
+  notes: string | null;
+  status?: string | null;
+  missed_reason?: string | null;
+  completed_at?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ScheduleImportRow = {
+  id: string;
+  user_id: string;
+  date: string;
+  raw_text: string;
+  parsed_json: unknown;
+  applied: boolean;
+  plan_realism_score: number | null;
+  risks: unknown;
+  unscheduled: unknown;
+  created_at: string;
+  updated_at: string;
+};
+
 export type DailyPlanRow = {
   id: string;
   user_id: string;
@@ -108,6 +144,7 @@ export type DailyPlanRow = {
   reality_score: number | null;
   main_bottleneck: string | null;
   shutdown_target: string | null;
+  generated_from?: unknown;
   notes: string | null;
   created_at: string;
   updated_at: string;
@@ -125,6 +162,7 @@ export type DailyPlanPayload = {
   reality_score?: number | null;
   main_bottleneck?: string | null;
   shutdown_target?: string | null;
+  generated_from?: unknown;
   notes?: string | null;
 };
 
@@ -359,6 +397,17 @@ export type TaskEventPayload = {
   old_value?: unknown;
   new_value?: unknown;
   reason?: string | null;
+};
+
+export type ScheduleImportPayload = {
+  id?: string;
+  date: string;
+  raw_text: string;
+  parsed_json: unknown;
+  applied?: boolean;
+  plan_realism_score?: number | null;
+  risks?: unknown;
+  unscheduled?: unknown;
 };
 
 export async function fetchSleepLog(userId: string, date: string) {
@@ -846,6 +895,145 @@ export async function deleteCalendarAnchor(userId: string, id: string) {
   if (error) throw error;
 }
 
+export function timeBlockToRow(userId: string, block: TimeBlock) {
+  return {
+    id: block.id,
+    user_id: userId,
+    title: block.title,
+    date: block.date,
+    start_time: makeLocalDateTime(block.date, block.start_time),
+    end_time: makeLocalDateTime(block.date, block.end_time),
+    block_type: block.block_type,
+    linked_task_id: block.linked_task_id,
+    linked_anchor_id: block.linked_anchor_id,
+    source: block.source,
+    import_batch_id: block.import_batch_id,
+    reason: block.reason,
+    notes: block.notes,
+    status: block.status,
+    missed_reason: block.missed_reason,
+    completed_at: block.completed_at,
+  };
+}
+
+export function rowToTimeBlock(row: TimeBlockRow): TimeBlock {
+  const date = row.date ?? dateKeyFromTimestamp(row.start_time) ?? new Date().toISOString().slice(0, 10);
+  return {
+    id: row.id,
+    title: row.title,
+    date,
+    start_time: timeFromTimestamp(row.start_time, "09:00") ?? "09:00",
+    end_time: timeFromTimestamp(row.end_time, "09:30") ?? "09:30",
+    block_type: row.block_type ?? "focus",
+    linked_task_id: row.linked_task_id ?? null,
+    linked_anchor_id: row.linked_anchor_id ?? null,
+    source: row.source ?? "manual",
+    import_batch_id: row.import_batch_id ?? null,
+    reason: row.reason ?? "",
+    notes: row.notes ?? "",
+    status:
+      row.status === "complete" || row.status === "missed" || row.status === "planned"
+        ? row.status
+        : "planned",
+    missed_reason: row.missed_reason ?? null,
+    completed_at: row.completed_at ?? null,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+export async function fetchTimeBlocks(userId: string, startDate?: string, endDate?: string) {
+  const client = requireSupabase();
+  let query = client
+    .from("time_blocks")
+    .select("*")
+    .eq("user_id", userId)
+    .order("date", { ascending: true })
+    .order("start_time", { ascending: true });
+
+  if (startDate) query = query.gte("date", startDate);
+  if (endDate) query = query.lte("date", endDate);
+
+  const { data, error } = await query;
+  if (error) throw error;
+  return ((data ?? []) as TimeBlockRow[]).map(rowToTimeBlock);
+}
+
+export async function fetchTimeBlocksForDate(userId: string, date: string) {
+  return fetchTimeBlocks(userId, date, date);
+}
+
+export async function upsertTimeBlock(userId: string, block: TimeBlock) {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("time_blocks")
+    .upsert(timeBlockToRow(userId, block), { onConflict: "id" })
+    .select("*")
+    .maybeSingle();
+
+  if (error) throw error;
+  return data ? rowToTimeBlock(data as TimeBlockRow) : block;
+}
+
+export async function deleteTimeBlock(userId: string, id: string) {
+  const client = requireSupabase();
+  const { error } = await client
+    .from("time_blocks")
+    .delete()
+    .eq("id", id)
+    .eq("user_id", userId);
+
+  if (error) throw error;
+}
+
+export async function deleteImportedTimeBlocksForDate(userId: string, date: string) {
+  const client = requireSupabase();
+  const { error } = await client
+    .from("time_blocks")
+    .delete()
+    .eq("user_id", userId)
+    .eq("date", date)
+    .eq("source", "chatgpt_import");
+
+  if (error) throw error;
+}
+
+export async function insertScheduleImport(userId: string, payload: ScheduleImportPayload) {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("schedule_imports")
+    .insert({
+      id: payload.id ?? createLifeeeId(),
+      user_id: userId,
+      date: payload.date,
+      raw_text: payload.raw_text,
+      parsed_json: payload.parsed_json ?? {},
+      applied: payload.applied ?? false,
+      plan_realism_score: payload.plan_realism_score ?? null,
+      risks: payload.risks ?? [],
+      unscheduled: payload.unscheduled ?? [],
+    })
+    .select("*")
+    .maybeSingle();
+
+  if (error) throw error;
+  return data as ScheduleImportRow | null;
+}
+
+export async function markScheduleImportApplied(userId: string, id: string) {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("schedule_imports")
+    .update({ applied: true })
+    .eq("id", id)
+    .eq("user_id", userId)
+    .select("*")
+    .maybeSingle();
+
+  if (error) throw error;
+  return data as ScheduleImportRow | null;
+}
+
 export function buildDailyPlanPayload(input: {
   date: string;
   plan: DayPlan;
@@ -901,7 +1089,10 @@ export async function upsertDailyPlan(userId: string, payload: DailyPlanPayload)
 }
 
 export function createLifeeeId() {
-  return crypto.randomUUID();
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `lifeee_${Math.random().toString(36).slice(2)}_${Date.now()}`;
 }
 
 function numberOrDefault(value: unknown, fallback = 0) {

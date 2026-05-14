@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildPlanningExportValidation,
   buildCalendarPlanningPrompt,
   calculateAvailableTime,
   type CalendarAnchor,
@@ -80,11 +81,13 @@ describe("calendar planning export contract", () => {
     const prompt = buildCalendarPlanningPrompt({
       date: TODAY,
       currentTime: "2026-05-14 08:30",
+      operatingMode: "Protect Must Do",
       anchors,
       available: calculateAvailableTime(anchors),
       plan: buildDayPlan(tasks, 7, TODAY),
       currentEnergy: 7,
       mood: "steady",
+      planRealityScore: 7.4,
       sleepReadiness: 6,
       academicPressure: 8,
       workoutReadiness: 5,
@@ -94,13 +97,74 @@ describe("calendar planning export contract", () => {
     expect(prompt).toContain("Date: 2026-05-14");
     expect(prompt).toContain("Current time: 2026-05-14 08:30");
     expect(prompt).toContain("Shutdown target:");
+    expect(prompt).toContain("Plan reality score: 7.4/10");
+    expect(prompt).toContain("Daily operating mode: Protect Must Do");
     expect(prompt).toContain("Fixed anchors:");
+    expect(prompt).toContain("- 10:00-11:15 | Class | Academic");
     expect(prompt).toContain("Open windows:");
-    expect(prompt).toContain("TASK-0001 | Submit lab report | Academic | 90 min | high | critical | due 2026-05-14");
-    expect(prompt).toContain("TASK-0002 | Dishes reset | Household | Estimate missing | Priority unset | Consequence unset");
+    expect(prompt).toContain("TASK-0001 | id ");
+    expect(prompt).toContain("TASK-0001 |");
+    expect(prompt).toContain("title Submit lab report");
+    expect(prompt).toContain("domain Academic");
+    expect(prompt).toContain("status today");
+    expect(prompt).toContain("daily_role Must Do");
+    expect(prompt).toContain("estimated_minutes 90");
+    expect(prompt).toContain("priority high");
+    expect(prompt).toContain("consequence_level critical");
+    expect(prompt).toContain("energy_required 8/10");
+    expect(prompt).toContain("trust_impact 5/10");
+    expect(prompt).toContain("carry_forward_count 2");
+    expect(prompt).toContain("TASK-0002");
+    expect(prompt).toContain("estimated_minutes Estimate missing");
+    expect(prompt).toContain("priority Priority unset");
+    expect(prompt).toContain("consequence_level Consequence unset");
     expect(prompt).not.toContain("TASK-0003 | Parking lot idea");
     expect(prompt).not.toContain("TASK-0004 | Done task");
-    expect(prompt).toContain("schedule table with time, task ID, task title, and reason");
-    expect(prompt).toContain("plan realism score from 1 to 10");
+    expect(prompt).toContain("SCHEDULE");
+    expect(prompt).toContain("- 09:00-10:30 | TASK-20260514-001 | Finish Pickaxe | deep_work | reason");
+    expect(prompt).toContain("- 10:30-10:45 | BREAK | Break | recovery | reason");
+    expect(prompt).toContain("UNSCHEDULED");
+    expect(prompt).toContain("FIRST_ACTION");
+    expect(prompt).toContain("PLAN_REALISM");
+    expect(prompt).toContain("- score: 1-10");
+    expect(prompt).toContain("preserve task codes exactly");
+  });
+
+  it("builds a validation summary with blocking missing-code checks and non-blocking metadata warnings", () => {
+    const tasks = [
+      {
+        ...task({
+          title: "Missing code task",
+          task_code: "TASK-MISSING",
+          status: "today",
+          daily_role: "Should Do",
+          estimated_minutes: null,
+          priority: null,
+          consequence_level: null,
+        }),
+        task_code: "",
+      },
+    ];
+
+    const validation = buildPlanningExportValidation({
+      tasks,
+      mustDo: [],
+      availableMinutes: 30,
+      ignoredExcludedCount: 1,
+      parkingLotExcludedCount: 2,
+      terminalExcludedCount: 3,
+      openWindowCount: 0,
+    });
+
+    expect(validation.canExport).toBe(false);
+    expect(validation.blockers).toEqual(["1 exported task(s) are missing task codes."]);
+    expect(validation.warnings).toContain("Must Do missing.");
+    expect(validation.warnings).toContain("No open windows detected.");
+    expect(validation.warnings).toContain("1 task(s) marked Estimate missing.");
+    expect(validation.warnings).toContain("1 task(s) marked Priority unset.");
+    expect(validation.warnings).toContain("1 task(s) marked Consequence unset.");
+    expect(validation.warnings).toContain("1 ignored item(s) excluded.");
+    expect(validation.warnings).toContain("2 parking lot item(s) excluded.");
+    expect(validation.warnings).toContain("3 done/archived/trashed item(s) excluded.");
   });
 });

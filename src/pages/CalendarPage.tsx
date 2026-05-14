@@ -20,6 +20,7 @@ import {
   type AnchorCategory,
   type CalendarAnchor,
   type PrivacyLevel,
+  type TimeBlock,
   CATEGORY_COLORS,
   loadAnchors,
   saveAnchors,
@@ -29,18 +30,24 @@ import {
   anchorDuration,
   calculateAvailableTime,
   buildTodayTimeline,
+  buildPlanningExportValidation,
   detectConflicts,
   buildCalendarPlanningPrompt,
   buildWeeklyCalendarReviewPrompt,
   calculateRealityScore,
   listRecurringLoops,
+  loadTimeBlocks,
+  makeTimeBlock,
+  saveTimeBlocks,
 } from "@/lib/calendar-system";
 import {
+  buildTaskSmartViews,
   buildDayPlan,
   isDoneStatus,
   loadTasks,
   makeTask,
   saveTasks,
+  scheduleTask,
   type Task,
   type TaskType,
 } from "@/lib/task-system";
@@ -48,16 +55,31 @@ import { toDateKey } from "@/lib/date-helpers";
 import { useSupabaseSession } from "@/hooks/useSupabaseSession";
 import {
   buildDailyPlanPayload,
+  createLifeeeId,
   deleteCalendarAnchor,
+  deleteImportedTimeBlocksForDate,
+  deleteTimeBlock,
   fetchCalendarAnchors,
+  fetchTimeBlocks,
   fetchUniversalTasks,
   getSyncLabel,
   getSyncTone,
+  insertScheduleImport,
+  markScheduleImportApplied,
   type LifeeeSyncStatus,
   upsertCalendarAnchor,
   upsertDailyPlan,
+  upsertTimeBlock,
   upsertUniversalTask,
 } from "@/lib/lifeee-persistence";
+import {
+  buildScheduleImportPreview,
+  parseScheduleImport,
+  schedulePreviewRowsToApply,
+  type ScheduleImportParsed,
+  type ScheduleImportPreview,
+  type ScheduleImportPreviewRow,
+} from "@/lib/schedule-import";
 
 type View = "today" | "week" | "month" | "agenda";
 
@@ -89,11 +111,16 @@ function taskTypeFromAnchor(category: CalendarAnchor["category"]): TaskType {
   return category;
 }
 
+function makeBlockTimestamp(date: string, time: string) {
+  return new Date(`${date}T${time}:00`).toISOString();
+}
+
 export default function CalendarPage() {
   const { hasSupabaseConfig, isLoading: sessionLoading, userId } = useSupabaseSession();
   const today = useMemo(() => toDateKey(), []);
   const [anchors, setAnchors] = useState<CalendarAnchor[]>(() => loadAnchors());
   const [tasks, setTasks] = useState<Task[]>(() => loadTasks());
+  const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>(() => loadTimeBlocks());
   const remoteLoadedRef = useRef(false);
   const saveSequenceRef = useRef(0);
   const [syncStatus, setSyncStatus] = useState<LifeeeSyncStatus>("local");
@@ -102,6 +129,11 @@ export default function CalendarPage() {
   const [activeDate, setActiveDate] = useState<string>(today);
   const [currentEnergy] = useState<number>(readEnergy());
   const [copied, setCopied] = useState<string | null>(null);
+  const [scheduleImportText, setScheduleImportText] = useState("");
+  const [scheduleParsed, setScheduleParsed] = useState<ScheduleImportParsed | null>(null);
+  const [schedulePreview, setSchedulePreview] = useState<ScheduleImportPreview | null>(null);
+  const [replaceExistingImported, setReplaceExistingImported] = useState(false);
+  const [importNotice, setImportNotice] = useState<string | null>(null);
 
   const [draft, setDraft] = useState<Omit<CalendarAnchor, "id" | "created_at" | "updated_at">>({
     title: "",
@@ -124,6 +156,10 @@ export default function CalendarPage() {
   }, [anchors]);
 
   useEffect(() => {
+    saveTimeBlocks(timeBlocks);
+  }, [timeBlocks]);
+
+  useEffect(() => {
     let active = true;
 
     const loadPersistedCalendar = async () => {
@@ -134,6 +170,7 @@ export default function CalendarPage() {
         if (!active) return;
         setAnchors(loadAnchors());
         setTasks(loadTasks());
+        setTimeBlocks(loadTimeBlocks());
         setSyncStatus(hasSupabaseConfig ? "waiting" : "local");
         setSyncError(null);
         return;
@@ -143,23 +180,33 @@ export default function CalendarPage() {
       setSyncError(null);
 
       try {
-        const [remoteAnchors, remoteTasks] = await Promise.all([
+        const [remoteAnchors, remoteTasks, remoteTimeBlocks] = await Promise.all([
           fetchCalendarAnchors(userId),
           fetchUniversalTasks(userId),
+          fetchTimeBlocks(userId),
         ]);
         const localAnchors = loadAnchors();
+        const localTimeBlocks = loadTimeBlocks();
         const nextAnchors =
           remoteAnchors.length === 0 && localAnchors.length > 0
             ? await Promise.all(
                 localAnchors.map((anchor) => upsertCalendarAnchor(userId, anchor)),
               )
             : remoteAnchors;
+        const nextTimeBlocks =
+          remoteTimeBlocks.length === 0 && localTimeBlocks.length > 0
+            ? await Promise.all(
+                localTimeBlocks.map((block) => upsertTimeBlock(userId, block)),
+              )
+            : remoteTimeBlocks;
 
         if (!active) return;
         remoteLoadedRef.current = true;
         setAnchors(nextAnchors);
         setTasks(remoteTasks);
+        setTimeBlocks(nextTimeBlocks);
         saveAnchors(nextAnchors);
+        saveTimeBlocks(nextTimeBlocks);
         setSyncStatus("saved");
       } catch (error) {
         if (!active) return;
@@ -183,11 +230,50 @@ export default function CalendarPage() {
         .sort((a, b) => parseTimeToMinutes(a.start_time) - parseTimeToMinutes(b.start_time)),
     [anchors, activeDate],
   );
+  const onDayTimeBlocks = useMemo(
+    () =>
+      [...timeBlocks]
+        .filter((block) => block.date === activeDate)
+        .sort((a, b) => parseTimeToMinutes(a.start_time) - parseTimeToMinutes(b.start_time)),
+    [activeDate, timeBlocks],
+  );
 
   const available = useMemo(() => calculateAvailableTime(onDayAnchors), [onDayAnchors]);
   const plan = useMemo(() => buildDayPlan(tasks, currentEnergy, activeDate), [activeDate, tasks, currentEnergy]);
+  const smartViews = useMemo(
+    () => buildTaskSmartViews(tasks, { today: activeDate, currentEnergy }),
+    [activeDate, currentEnergy, tasks],
+  );
+  const terminalExcludedCount = useMemo(
+    () =>
+      tasks.filter(
+        (task) =>
+          isDoneStatus(task.status) ||
+          task.status === "archived" ||
+          task.status === "trashed" ||
+          task.archived_at != null ||
+          task.deleted_at != null,
+      ).length,
+    [tasks],
+  );
+  const planningValidation = useMemo(
+    () =>
+      buildPlanningExportValidation({
+        tasks: smartViews.exportablePlanningSet,
+        mustDo: plan.mustDo,
+        availableMinutes: available.totalOpenMinutes,
+        openWindowCount: available.openBlocks.length,
+        ignoredExcludedCount: smartViews.ignoreToday.length,
+        parkingLotExcludedCount: smartViews.parkingLot.length,
+        terminalExcludedCount,
+      }),
+    [available.openBlocks.length, available.totalOpenMinutes, plan.mustDo, smartViews, terminalExcludedCount],
+  );
   const conflicts = useMemo(() => detectConflicts(onDayAnchors), [onDayAnchors]);
-  const timeline = useMemo(() => buildTodayTimeline(onDayAnchors, available), [onDayAnchors, available]);
+  const timeline = useMemo(
+    () => buildTodayTimeline(onDayAnchors, available, { timeBlocks: onDayTimeBlocks }),
+    [onDayAnchors, available, onDayTimeBlocks],
+  );
   const reality = useMemo(
     () =>
       calculateRealityScore({
@@ -318,15 +404,27 @@ export default function CalendarPage() {
     setTimeout(() => setCopied(null), 2000);
   };
 
-  const copyPlanningPrompt = () =>
-    copy(
+  const copyPlanningPrompt = () => {
+    if (!planningValidation.canExport) {
+      setSyncStatus("error");
+      setSyncError(planningValidation.blockers.join(" "));
+      return;
+    }
+    void copy(
       "planning",
       buildCalendarPlanningPrompt({
         date: activeDate,
         currentTime: new Date().toLocaleString(),
+        operatingMode: "Calendar Planning",
+        planRealityScore: Number(reality.score.toFixed(1)),
         anchors: onDayAnchors,
         available,
         plan,
+        trustProtectors: smartViews.trustProtectors,
+        inboxCandidates: smartViews.inboxCandidates,
+        ignoredExcludedCount: smartViews.ignoreToday.length,
+        parkingLotExcludedCount: smartViews.parkingLot.length,
+        terminalExcludedCount,
         currentEnergy,
         mood: "Not supplied",
         sleepReadiness: 7,
@@ -335,6 +433,7 @@ export default function CalendarPage() {
         mcatNextMove: "(see MCAT page)",
       }),
     );
+  };
 
   const copyWeeklyReviewPrompt = () => {
     const weekStart = (() => {
@@ -370,6 +469,203 @@ export default function CalendarPage() {
         movedTasks: [],
       }),
     );
+  };
+
+  const parseScheduleImportText = () => {
+    const parsed = parseScheduleImport(scheduleImportText);
+    setScheduleParsed(parsed);
+    setSchedulePreview(null);
+    setImportNotice(
+      parsed.unparsed.length > 0
+        ? `${parsed.unparsed.length} line${parsed.unparsed.length === 1 ? "" : "s"} could not be parsed.`
+        : "Schedule parsed. Preview before applying.",
+    );
+  };
+
+  const previewScheduleImport = () => {
+    const parsed = scheduleParsed ?? parseScheduleImport(scheduleImportText);
+    const preview = buildScheduleImportPreview({
+      date: activeDate,
+      parsed,
+      tasks,
+      anchors: onDayAnchors,
+      existingTimeBlocks: replaceExistingImported
+        ? onDayTimeBlocks.filter((block) => block.source !== "chatgpt_import")
+        : onDayTimeBlocks,
+    });
+    setScheduleParsed(parsed);
+    setSchedulePreview(preview);
+    setImportNotice(
+      preview.hasBlockingIssues
+        ? "Preview has warnings. Apply non-conflicting rows only unless you explicitly continue."
+        : "Preview ready.",
+    );
+  };
+
+  const clearScheduleImport = () => {
+    setScheduleImportText("");
+    setScheduleParsed(null);
+    setSchedulePreview(null);
+    setImportNotice(null);
+  };
+
+  const clearAppliedScheduleImport = () => {
+    setScheduleImportText("");
+    setScheduleParsed(null);
+    setSchedulePreview(null);
+  };
+
+  const applyScheduleImport = async (mode: "non-conflicting" | "include-soft-conflicts") => {
+    const parsed = scheduleParsed ?? parseScheduleImport(scheduleImportText);
+    const preview =
+      schedulePreview ??
+      buildScheduleImportPreview({
+        date: activeDate,
+        parsed,
+        tasks,
+        anchors: onDayAnchors,
+        existingTimeBlocks: replaceExistingImported
+          ? onDayTimeBlocks.filter((block) => block.source !== "chatgpt_import")
+          : onDayTimeBlocks,
+      });
+    const rows = schedulePreviewRowsToApply(preview, mode);
+    if (rows.length === 0) {
+      setImportNotice("No applicable schedule rows. Fix invalid lines or task codes first.");
+      return;
+    }
+
+    const importBatchId = createLifeeeId();
+    const blocks = rows.map((row) =>
+      makeTimeBlock({
+        id: createLifeeeId(),
+        title: row.imported_title || row.matched_task_title || row.task_code,
+        date: activeDate,
+        start_time: row.start,
+        end_time: row.end,
+        block_type: row.block_type || "focus",
+        linked_task_id: row.task_id,
+        source: "chatgpt_import",
+        import_batch_id: importBatchId,
+        reason: row.reason,
+        notes: [`task_code: ${row.task_code || "FREEFORM"}`, `raw: ${row.raw}`].join("\n"),
+      }),
+    );
+    const scheduledTasks = rows
+      .filter((row) => row.task_id)
+      .map((row) => {
+        const existing = tasks.find((task) => task.id === row.task_id);
+        if (!existing) return null;
+        return scheduleTask(existing, {
+          scheduledStart: makeBlockTimestamp(activeDate, row.start),
+          scheduledEnd: makeBlockTimestamp(activeDate, row.end),
+          dueDate: activeDate,
+          fixedTime: row.start,
+        });
+      })
+      .filter(Boolean) as Task[];
+
+    const nextTimeBlocks = [
+      ...(replaceExistingImported
+        ? timeBlocks.filter(
+            (block) => !(block.date === activeDate && block.source === "chatgpt_import"),
+          )
+        : timeBlocks),
+      ...blocks,
+    ];
+    const nextTasks = tasks.map((task) => {
+      const scheduled = scheduledTasks.find((item) => item.id === task.id);
+      return scheduled ?? task;
+    });
+
+    setTimeBlocks(nextTimeBlocks);
+    setTasks(nextTasks);
+    saveTimeBlocks(nextTimeBlocks);
+    saveTasks(nextTasks);
+
+    if (!userId || !remoteLoadedRef.current) {
+      setSyncStatus(hasSupabaseConfig ? "waiting" : "local");
+      setImportNotice("Applied as Local draft only. Sign in to persist schedule blocks to Supabase.");
+      clearAppliedScheduleImport();
+      return;
+    }
+
+    setSyncStatus("saving");
+    setSyncError(null);
+    try {
+      if (replaceExistingImported) {
+        await deleteImportedTimeBlocksForDate(userId, activeDate);
+      }
+      await insertScheduleImport(userId, {
+        id: importBatchId,
+        date: activeDate,
+        raw_text: scheduleImportText,
+        parsed_json: parsed,
+        applied: false,
+        plan_realism_score: preview.planRealism.score,
+        risks: preview.risks,
+        unscheduled: preview.unscheduled,
+      });
+      await Promise.all(blocks.map((block) => upsertTimeBlock(userId, block)));
+      await Promise.all(scheduledTasks.map((task) => upsertUniversalTask(userId, task, currentEnergy)));
+      await upsertDailyPlan(userId, {
+        date: activeDate,
+        generated_from: {
+          type: "chatgpt_schedule_import",
+          import_batch_id: importBatchId,
+          applied_at: new Date().toISOString(),
+          plan_realism: preview.planRealism,
+          rows_applied: rows.length,
+        },
+      });
+      await markScheduleImportApplied(userId, importBatchId);
+      setSyncStatus("saved");
+      setImportNotice(`${rows.length} schedule block${rows.length === 1 ? "" : "s"} saved to Supabase.`);
+      clearAppliedScheduleImport();
+    } catch (error) {
+      setSyncStatus("error");
+      setSyncError(error instanceof Error ? error.message : "Unable to apply imported schedule.");
+      setImportNotice("Import failed before Supabase confirmed the write.");
+    }
+  };
+
+  const removeTimeBlock = (id: string) => {
+    setTimeBlocks((prev) => prev.filter((block) => block.id !== id));
+    if (!userId || !remoteLoadedRef.current) {
+      setSyncStatus(hasSupabaseConfig ? "waiting" : "local");
+      return;
+    }
+    setSyncStatus("saving");
+    setSyncError(null);
+    void deleteTimeBlock(userId, id)
+      .then(() => setSyncStatus("saved"))
+      .catch((error: unknown) => {
+        setSyncStatus("error");
+        setSyncError(error instanceof Error ? error.message : "Unable to delete time block.");
+      });
+  };
+
+  const updateTimeBlockStatus = (id: string, status: TimeBlock["status"]) => {
+    const current = timeBlocks.find((block) => block.id === id);
+    if (!current) return;
+    const next: TimeBlock = {
+      ...current,
+      status,
+      completed_at: status === "complete" ? new Date().toISOString() : current.completed_at,
+      updated_at: new Date().toISOString(),
+    };
+    setTimeBlocks((prev) => prev.map((block) => (block.id === id ? next : block)));
+    if (!userId || !remoteLoadedRef.current) {
+      setSyncStatus(hasSupabaseConfig ? "waiting" : "local");
+      return;
+    }
+    setSyncStatus("saving");
+    setSyncError(null);
+    void upsertTimeBlock(userId, next)
+      .then(() => setSyncStatus("saved"))
+      .catch((error: unknown) => {
+        setSyncStatus("error");
+        setSyncError(error instanceof Error ? error.message : "Unable to update time block.");
+      });
   };
 
   const loops = useMemo(() => listRecurringLoops(new Date(activeDate)), [activeDate]);
@@ -488,13 +784,19 @@ export default function CalendarPage() {
 
       <RealitySummary reality={reality} available={available} />
 
+      <PlanningExportValidationPanel validation={planningValidation} />
+
       {view === "today" && (
         <TodayView
           anchors={onDayAnchors}
+          timeBlocks={onDayTimeBlocks}
+          tasks={tasks}
           timeline={timeline}
           conflicts={conflicts}
           onUpdate={updateAnchor}
           onRemove={removeAnchor}
+          onRemoveTimeBlock={removeTimeBlock}
+          onUpdateTimeBlockStatus={updateTimeBlockStatus}
           onGenerateFollowUpTask={generateFollowUpTask}
         />
       )}
@@ -505,11 +807,32 @@ export default function CalendarPage() {
               a.date.localeCompare(b.date) ||
               parseTimeToMinutes(a.start_time) - parseTimeToMinutes(b.start_time),
           )}
+          timeBlocks={[...timeBlocks].sort(
+            (a, b) =>
+              a.date.localeCompare(b.date) ||
+              parseTimeToMinutes(a.start_time) - parseTimeToMinutes(b.start_time),
+          )}
           onRemove={removeAnchor}
+          onRemoveTimeBlock={removeTimeBlock}
         />
       )}
       {view === "week" && <WeekView anchors={anchors} activeDate={activeDate} />}
       {view === "month" && <MonthView anchors={anchors} activeDate={activeDate} />}
+
+      <ScheduleImportPanel
+        value={scheduleImportText}
+        onChange={setScheduleImportText}
+        parsed={scheduleParsed}
+        preview={schedulePreview}
+        notice={importNotice}
+        replaceExistingImported={replaceExistingImported}
+        setReplaceExistingImported={setReplaceExistingImported}
+        onParse={parseScheduleImportText}
+        onPreview={previewScheduleImport}
+        onApplyNonConflicting={() => void applyScheduleImport("non-conflicting")}
+        onApplyWithSoftConflicts={() => void applyScheduleImport("include-soft-conflicts")}
+        onCancel={clearScheduleImport}
+      />
 
       <AddAnchorPanel draft={draft} setDraft={setDraft} onAdd={addAnchor} />
 
@@ -596,19 +919,260 @@ function SmallStat({ label, value, hint }: { label: string; value: string; hint?
   );
 }
 
+function PlanningExportValidationPanel({
+  validation,
+}: {
+  validation: ReturnType<typeof buildPlanningExportValidation>;
+}) {
+  const warnings = [...validation.blockers, ...validation.warnings];
+  return (
+    <div
+      className={`rounded-xl border p-3 text-sm ${
+        validation.canExport
+          ? "border-border bg-card text-foreground"
+          : "border-destructive/30 bg-destructive/10 text-destructive"
+      }`}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="font-semibold">Planning export validation</div>
+        <span className="text-xs text-muted-foreground">
+          {validation.canExport ? "Copy allowed" : "Task code required before copy"}
+        </span>
+      </div>
+      {warnings.length === 0 ? (
+        <div className="mt-1 text-xs text-muted-foreground">No export warnings.</div>
+      ) : (
+        <ul className="mt-2 flex flex-wrap gap-2 text-xs">
+          {warnings.map((warning) => (
+            <li key={warning} className="rounded-full border border-border bg-background px-2 py-1">
+              {warning}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function ScheduleImportPanel({
+  value,
+  onChange,
+  parsed,
+  preview,
+  notice,
+  replaceExistingImported,
+  setReplaceExistingImported,
+  onParse,
+  onPreview,
+  onApplyNonConflicting,
+  onApplyWithSoftConflicts,
+  onCancel,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  parsed: ScheduleImportParsed | null;
+  preview: ScheduleImportPreview | null;
+  notice: string | null;
+  replaceExistingImported: boolean;
+  setReplaceExistingImported: (value: boolean) => void;
+  onParse: () => void;
+  onPreview: () => void;
+  onApplyNonConflicting: () => void;
+  onApplyWithSoftConflicts: () => void;
+  onCancel: () => void;
+}) {
+  const hasConflicts = preview?.rows.some((row) => row.status === "conflict") ?? false;
+  return (
+    <div className="card-surface p-4 space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <div className="text-sm font-semibold text-foreground">Paste ChatGPT Schedule Back</div>
+          <div className="text-xs text-muted-foreground">
+            Paste the parseable SCHEDULE block, preview task-code matches, then apply.
+          </div>
+        </div>
+        {parsed ? (
+          <span className="text-xs text-muted-foreground">
+            {parsed.schedule.length} parsed · {parsed.unparsed.length} unparsed
+          </span>
+        ) : null}
+      </div>
+      <textarea
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        rows={8}
+        className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono-data"
+        placeholder={`SCHEDULE
+- 09:00-10:00 | TASK-20260514-001 | Task title | deep_work | Protecting must do
+- 10:00-10:15 | BREAK | Break | recovery | Prevent overload`}
+      />
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          onClick={onParse}
+          className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm hover:bg-muted/70"
+        >
+          Parse Schedule
+        </button>
+        <button
+          onClick={onPreview}
+          className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm hover:bg-muted/70"
+        >
+          Preview Changes
+        </button>
+        <button
+          onClick={onApplyNonConflicting}
+          disabled={!preview}
+          className="inline-flex items-center gap-2 rounded-lg border border-primary bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-50"
+        >
+          Apply to Calendar
+        </button>
+        {hasConflicts ? (
+          <button
+            onClick={onApplyWithSoftConflicts}
+            className="inline-flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 hover:bg-amber-100"
+          >
+            Apply despite soft conflicts
+          </button>
+        ) : null}
+        <button
+          onClick={onCancel}
+          className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm hover:bg-muted/70"
+        >
+          Cancel
+        </button>
+        <label className="ml-auto inline-flex items-center gap-2 text-xs text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={replaceExistingImported}
+            onChange={(event) => setReplaceExistingImported(event.target.checked)}
+          />
+          Replace existing ChatGPT import blocks for this day
+        </label>
+      </div>
+      {notice ? <div className="notice-warning">{notice}</div> : null}
+      {preview ? <SchedulePreviewTable rows={preview.rows} /> : null}
+      {preview && (preview.unscheduled.length > 0 || preview.risks.length > 0 || preview.firstAction) ? (
+        <div className="grid gap-3 md:grid-cols-3 text-xs">
+          <ImportNoteList title="Unscheduled" items={preview.unscheduled} />
+          <ImportNoteList title="Risks" items={preview.risks} />
+          <div className="rounded-lg border border-border bg-card/60 p-3">
+            <div className="font-semibold text-foreground">First action</div>
+            <div className="mt-1 text-muted-foreground">
+              {preview.firstAction
+                ? `${preview.firstAction.task_code} | ${preview.firstAction.text}`
+                : "none"}
+            </div>
+            <div className="mt-2 text-muted-foreground">
+              Plan realism: {preview.planRealism.score ?? "unset"}
+              {preview.planRealism.reason ? ` · ${preview.planRealism.reason}` : ""}
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ImportNoteList({
+  title,
+  items,
+}: {
+  title: string;
+  items: Array<{ task_code: string; reason: string }>;
+}) {
+  return (
+    <div className="rounded-lg border border-border bg-card/60 p-3">
+      <div className="font-semibold text-foreground">{title}</div>
+      {items.length === 0 ? (
+        <div className="mt-1 text-muted-foreground">none</div>
+      ) : (
+        <ul className="mt-1 space-y-1 text-muted-foreground">
+          {items.map((item) => (
+            <li key={`${item.task_code}-${item.reason}`}>
+              {item.task_code} | {item.reason}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function SchedulePreviewTable({ rows }: { rows: ScheduleImportPreviewRow[] }) {
+  return (
+    <div className="overflow-x-auto rounded-lg border border-border">
+      <table className="min-w-full text-left text-xs">
+        <thead className="bg-muted/70 text-muted-foreground">
+          <tr>
+            <th className="px-2 py-2">Start</th>
+            <th className="px-2 py-2">End</th>
+            <th className="px-2 py-2">Task code</th>
+            <th className="px-2 py-2">Matched task</th>
+            <th className="px-2 py-2">Imported title</th>
+            <th className="px-2 py-2">Block type</th>
+            <th className="px-2 py-2">Reason</th>
+            <th className="px-2 py-2">Status</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border">
+          {rows.map((row, index) => (
+            <tr key={`${row.raw}-${index}`} className="bg-card/60 align-top">
+              <td className="px-2 py-2 font-mono-data">{row.start || "—"}</td>
+              <td className="px-2 py-2 font-mono-data">{row.end || "—"}</td>
+              <td className="px-2 py-2 font-mono-data">{row.task_code || "—"}</td>
+              <td className="px-2 py-2">{row.matched_task_title || "—"}</td>
+              <td className="px-2 py-2">{row.imported_title || row.raw}</td>
+              <td className="px-2 py-2">{row.block_type || "—"}</td>
+              <td className="px-2 py-2">{row.reason || "—"}</td>
+              <td className="px-2 py-2">
+                <span
+                  className={`rounded-full px-2 py-0.5 ${
+                    row.status === "matched" ||
+                    row.status === "freeform block" ||
+                    row.status === "break/recovery block"
+                      ? "bg-emerald-50 text-emerald-700"
+                      : row.status === "conflict"
+                        ? "bg-amber-50 text-amber-800"
+                        : "bg-rose-50 text-rose-700"
+                  }`}
+                >
+                  {row.status}
+                </span>
+                {row.warnings.length > 0 ? (
+                  <div className="mt-1 text-[11px] text-muted-foreground">
+                    {row.warnings.join(" · ")}
+                  </div>
+                ) : null}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function TodayView({
   anchors,
+  timeBlocks,
+  tasks,
   timeline,
   conflicts,
   onUpdate,
   onRemove,
+  onRemoveTimeBlock,
+  onUpdateTimeBlockStatus,
   onGenerateFollowUpTask,
 }: {
   anchors: CalendarAnchor[];
+  timeBlocks: TimeBlock[];
+  tasks: Task[];
   timeline: ReturnType<typeof buildTodayTimeline>;
   conflicts: ReturnType<typeof detectConflicts>;
   onUpdate: (id: string, patch: Partial<CalendarAnchor>) => void;
   onRemove: (id: string) => void;
+  onRemoveTimeBlock: (id: string) => void;
+  onUpdateTimeBlockStatus: (id: string, status: TimeBlock["status"]) => void;
   onGenerateFollowUpTask: (anchor: CalendarAnchor) => void;
 }) {
   return (
@@ -656,6 +1220,15 @@ function TodayView({
             ))}
           </ul>
         )}
+        <div className="mt-5 border-t border-border pt-4">
+          <div className="text-sm font-semibold text-foreground mb-3">Imported time blocks</div>
+          <TimeBlockList
+            blocks={timeBlocks}
+            tasks={tasks}
+            onRemove={onRemoveTimeBlock}
+            onUpdateStatus={onUpdateTimeBlockStatus}
+          />
+        </div>
       </div>
     </div>
   );
@@ -680,7 +1253,13 @@ function Timeline({ timeline }: { timeline: ReturnType<typeof buildTodayTimeline
                 ? "bg-amber-500"
                 : slot.kind === "shutdown"
                   ? "bg-violet-500"
-                  : "bg-primary";
+                  : slot.kind === "break"
+                    ? "bg-teal-500"
+                    : slot.kind === "freeform"
+                      ? "bg-zinc-500"
+                      : slot.kind === "imported-task"
+                        ? "bg-blue-500"
+                        : "bg-primary";
         return (
           <li key={`${slot.start}-${i}`} className="ml-4 relative">
             <span
@@ -706,6 +1285,79 @@ function Timeline({ timeline }: { timeline: ReturnType<typeof buildTodayTimeline
         );
       })}
     </ol>
+  );
+}
+
+function TimeBlockList({
+  blocks,
+  tasks,
+  onRemove,
+  onUpdateStatus,
+}: {
+  blocks: TimeBlock[];
+  tasks: Task[];
+  onRemove: (id: string) => void;
+  onUpdateStatus: (id: string, status: TimeBlock["status"]) => void;
+}) {
+  if (blocks.length === 0) {
+    return <div className="empty-state">No imported schedule blocks for this day.</div>;
+  }
+  return (
+    <ul className="divide-y divide-border">
+      {blocks.map((block) => {
+        const task = block.linked_task_id
+          ? tasks.find((candidate) => candidate.id === block.linked_task_id)
+          : null;
+        return (
+          <li key={block.id} className="py-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-mono-data text-xs text-muted-foreground">
+                    {block.start_time}-{block.end_time}
+                  </span>
+                  <span className="text-sm font-medium text-foreground">{block.title}</span>
+                  <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-blue-700">
+                    {block.source === "chatgpt_import" ? "ChatGPT import" : block.source ?? "manual"}
+                  </span>
+                  <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
+                    {block.status}
+                  </span>
+                </div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  {task ? `${task.task_code} · ${task.title}` : "No linked task"}
+                  {block.reason ? ` · ${block.reason}` : ""}
+                </div>
+              </div>
+              <button
+                onClick={() => onRemove(block.id)}
+                className="text-muted-foreground hover:text-destructive"
+                title="Delete time block only"
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2 text-xs">
+              <button
+                onClick={() => onUpdateStatus(block.id, "complete")}
+                className="rounded-md border border-border bg-card px-2 py-1 hover:bg-muted/70"
+              >
+                Mark complete
+              </button>
+              <button
+                onClick={() => onUpdateStatus(block.id, "missed")}
+                className="rounded-md border border-border bg-card px-2 py-1 hover:bg-muted/70"
+              >
+                Mark missed
+              </button>
+              <span className="inline-flex items-center text-[11px] text-muted-foreground">
+                Missed reason and carry-forward hooks are scaffolded for shutdown.
+              </span>
+            </div>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
@@ -832,20 +1484,29 @@ function AnchorRow({
 
 function AgendaView({
   anchors,
+  timeBlocks,
   onRemove,
+  onRemoveTimeBlock,
 }: {
   anchors: CalendarAnchor[];
+  timeBlocks: TimeBlock[];
   onRemove: (id: string) => void;
+  onRemoveTimeBlock: (id: string) => void;
 }) {
   const grouped = useMemo(() => {
-    const map = new Map<string, CalendarAnchor[]>();
+    const map = new Map<string, { anchors: CalendarAnchor[]; blocks: TimeBlock[] }>();
     for (const a of anchors) {
-      const list = map.get(a.date) ?? [];
-      list.push(a);
-      map.set(a.date, list);
+      const group = map.get(a.date) ?? { anchors: [], blocks: [] };
+      group.anchors.push(a);
+      map.set(a.date, group);
+    }
+    for (const block of timeBlocks) {
+      const group = map.get(block.date) ?? { anchors: [], blocks: [] };
+      group.blocks.push(block);
+      map.set(block.date, group);
     }
     return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-  }, [anchors]);
+  }, [anchors, timeBlocks]);
 
   if (grouped.length === 0) {
     return <div className="empty-state">No anchors on the agenda yet. Add one below.</div>;
@@ -853,7 +1514,7 @@ function AgendaView({
 
   return (
     <div className="space-y-3">
-      {grouped.map(([date, list]) => (
+      {grouped.map(([date, group]) => (
         <div key={date} className="card-surface p-4">
           <div className="flex items-center justify-between mb-2">
             <div className="text-sm font-semibold text-foreground">
@@ -863,10 +1524,12 @@ function AgendaView({
                 day: "numeric",
               })}
             </div>
-            <span className="text-xs text-muted-foreground">{list.length} anchors</span>
+            <span className="text-xs text-muted-foreground">
+              {group.anchors.length} anchors · {group.blocks.length} blocks
+            </span>
           </div>
           <ul className="space-y-2">
-            {list.map((a) => {
+            {group.anchors.map((a) => {
               const palette = CATEGORY_COLORS[a.category];
               return (
                 <li key={a.id} className="flex items-center justify-between gap-3 rounded-lg border border-border bg-card/60 px-3 py-2">
@@ -885,6 +1548,35 @@ function AgendaView({
                     onClick={() => onRemove(a.id)}
                     className="text-muted-foreground hover:text-destructive"
                     title="Delete"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </li>
+              );
+            })}
+            {group.blocks.map((block) => {
+              const code = block.notes.match(/task_code:\s*([A-Z0-9-]+)/i)?.[1];
+              return (
+                <li
+                  key={block.id}
+                  className="flex items-center justify-between gap-3 rounded-lg border border-border bg-blue-50/60 px-3 py-2"
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider rounded-full bg-blue-100 px-2 py-0.5 text-blue-800">
+                      {block.source === "chatgpt_import" ? "ChatGPT import" : block.source ?? "Block"}
+                    </span>
+                    <span className="font-mono-data text-xs text-muted-foreground">
+                      {block.start_time}-{block.end_time}
+                    </span>
+                    {code ? (
+                      <span className="font-mono-data text-xs text-blue-800">{code}</span>
+                    ) : null}
+                    <span className="text-sm text-foreground truncate">{block.title}</span>
+                  </div>
+                  <button
+                    onClick={() => onRemoveTimeBlock(block.id)}
+                    className="text-muted-foreground hover:text-destructive"
+                    title="Delete time block only"
                   >
                     <Trash2 size={14} />
                   </button>
