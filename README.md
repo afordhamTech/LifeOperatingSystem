@@ -1,73 +1,122 @@
-# React + TypeScript + Vite
+# Lifeee
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Lifeee is a React, Vite, and TypeScript life operating system dashboard. It combines a Daily OS, task command center, calendar planning, weekly review, archive, and life-domain pages for sleep, academics, MCAT prep, workout, nutrition, health, career, money, faith, relationships, and substance tracking.
 
-Currently, two official plugins are available:
+The app runs as a Vite SPA with a local Hono/tRPC API, Drizzle ORM schema files, and optional Supabase persistence/auth support.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## Prerequisites
 
-## React Compiler
+- Node.js 20
+- npm
+- A local environment file when using auth, database, or Supabase-backed persistence
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Getting Started
 
-## Expanding the ESLint configuration
+Install dependencies:
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```sh
+npm install
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Create a local environment file from the example:
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```sh
+cp .env.example .env.local
 ```
+
+Use `.env` instead when running backend or Drizzle commands that load variables through `dotenv/config`. Both `.env` and `.env.local` are ignored by git.
+
+Start the local dev server:
+
+```sh
+npm run dev
+```
+
+The Vite dev server is configured for port `3000`.
+
+## Scripts
+
+- `npm run dev` - start the local Vite app and Hono API dev server
+- `npm run build` - build the frontend and bundle the production API server into `dist`
+- `npm run start` - run the production server from `dist/boot.js`
+- `npm run preview` - preview the built Vite frontend
+- `npm run check` - run TypeScript project checks with `tsc -b`
+- `npm run typecheck` - alias for `npm run check`
+- `npm run lint` - run ESLint
+- `npm run test` - run the Vitest suite
+- `npm run format` - format the repo with Prettier
+- `npm run db:generate` - generate Drizzle migrations
+- `npm run db:migrate` - run Drizzle migrations
+- `npm run db:push` - push Drizzle schema changes
+
+## Environment
+
+See `.env.example` for the full list of supported variables.
+
+Common groups:
+
+- Backend app secrets: `APP_ID`, `APP_SECRET`
+- Database: `DATABASE_URL`
+- Browser-exposed Vite variables: `VITE_KIMI_AUTH_URL`, `VITE_APP_ID`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`
+- Backend Kimi auth/platform variables: `KIMI_AUTH_URL`, `KIMI_OPEN_URL`
+- Owner/admin bootstrap: `OWNER_UNION_ID`
+
+Do not commit real credentials or local env files.
+
+## Project Layout
+
+- `src/` - React app, pages, shared components, hooks, providers, and browser-side libraries
+- `src/pages/` - main Lifeee route pages
+- `src/components/` - app-specific components plus shadcn/ui primitives
+- `api/` - Hono boot file, tRPC router, domain routers, middleware, and server helpers
+- `contracts/` - shared constants, types, and errors
+- `db/` - Drizzle schema, relations, migrations output, and seed stub
+- `supabase/` - Supabase local config and migration history
+- `docs/` - product and QA references, including the field map
+
+## Main Routes
+
+Command routes:
+
+- `/` - Daily OS
+- `/tasks` - Task Command
+- `/calendar` - Calendar
+- `/weekly-review` - Weekly Review
+- `/archive` - Archive
+
+Life-domain routes:
+
+- `/sleep`
+- `/academics`
+- `/mcat`
+- `/workout`
+- `/nutrition`
+- `/health`
+- `/career`
+- `/money`
+- `/faith`
+- `/relationships`
+- `/substance`
+
+Auth route:
+
+- `/login`
+
+## Testing Notes
+
+The current Vitest config runs Node-based backend/library tests under `api/**/*.test.ts` and `api/**/*.spec.ts`.
+
+Before changing behavior, run:
+
+```sh
+npm run check
+npm run lint
+npm run test
+```
+
+Frontend route or component tests may require expanding the Vitest config to use a browser-like environment such as jsdom or happy-dom.
+
+## Documentation
+
+- `docs/lifeoperatingsystem-field-map.md` inventories visible routes, fields, controls, status labels, prompts, and persistence targets.
+- `info.md` captures initial setup notes, but it may lag behind the current source tree.
