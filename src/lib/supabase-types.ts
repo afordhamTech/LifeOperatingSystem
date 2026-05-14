@@ -98,6 +98,14 @@ export interface WeeklyReviewRow {
   biggest_leak: string | null;
   next_week_big_3: unknown;
   notes: string | null;
+  completed_blocks_count: number | null;
+  missed_blocks_count: number | null;
+  partial_blocks_count: number | null;
+  skipped_blocks_count: number | null;
+  most_common_missed_reason: string | null;
+  execution_summary: unknown;
+  shutdown_count: number | null;
+  plan_change_count: number | null;
   created_at: string;
   updated_at: string;
 }

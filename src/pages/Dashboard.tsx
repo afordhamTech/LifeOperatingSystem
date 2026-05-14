@@ -26,6 +26,8 @@ import { SyncBadge } from "@/components/SyncBadge";
 import DecisionLogCard from "@/components/DecisionLogCard";
 import DecisionsDueReviewPanel from "@/components/DecisionsDueReviewPanel";
 import TodayDecisionLoop from "@/components/TodayDecisionLoop";
+import ExecutionTruthPanel from "@/components/ExecutionTruthPanel";
+import { aggregateExecutionStats } from "@/lib/execution-truth";
 import { usePushPromptContext } from "@/providers/PromptContext";
 import { buildLifeeePrompt } from "@/lib/prompt-builders";
 import { supabase } from "@/lib/supabase-client";
@@ -770,6 +772,13 @@ export default function Dashboard() {
       weeklyReviewSummary: state.weeklyReview
         ? `Life score ${Number(state.weeklyReview.weekly_life_score ?? 0).toFixed(1)} · win: ${state.weeklyReview.biggest_win ?? "unset"} · leak: ${state.weeklyReview.biggest_leak ?? "unset"}`
         : undefined,
+      executionTruthSummary: (() => {
+        if (todayTimeBlocks.length === 0) return undefined;
+        const exec = aggregateExecutionStats(todayTimeBlocks);
+        return `${exec.total} blocks · ${exec.completed} done · ${exec.partial} partial · ${exec.missed} missed · ${exec.skipped} skipped · ${exec.notStarted} not started${
+          exec.mostCommonMissedReason ? ` · top miss reason: ${exec.mostCommonMissedReason}` : ""
+        }`;
+      })(),
       decisionSummary,
       reviewedDecisionsSummary,
       outcomeFeedbackSummary,
@@ -805,6 +814,7 @@ export default function Dashboard() {
     state.weeklyReview,
     state.workoutToday,
     today,
+    todayTimeBlocks,
     topTask,
   ]);
 
@@ -1042,6 +1052,12 @@ export default function Dashboard() {
         onLogIgnoreDecision={logIgnoreDecision}
         outcomeMatches={outcomeMatches}
         decisions={decisionLogs}
+      />
+
+      <ExecutionTruthPanel
+        today={today}
+        userId={userId}
+        hasSupabaseConfig={hasSupabaseConfig}
       />
 
       <DecisionsDueReviewPanel

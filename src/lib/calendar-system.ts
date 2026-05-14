@@ -109,6 +109,28 @@ export function makeAnchor(
 export const TIME_BLOCK_STATUSES = ["planned", "complete", "missed"] as const;
 export type TimeBlockStatus = (typeof TIME_BLOCK_STATUSES)[number];
 
+// Phase 1C: Execution Truth — what actually happened to a scheduled block.
+export const EXECUTION_STATUSES = [
+  "not_started",
+  "in_progress",
+  "done",
+  "partial",
+  "missed",
+  "skipped",
+  "rescheduled",
+] as const;
+export type ExecutionStatus = (typeof EXECUTION_STATUSES)[number];
+
+export const EXECUTION_STATUS_LABELS: Record<ExecutionStatus, string> = {
+  not_started: "Not Started",
+  in_progress: "In Progress",
+  done: "Done",
+  partial: "Partially Done",
+  missed: "Missed",
+  skipped: "Skipped",
+  rescheduled: "Rescheduled",
+};
+
 export type TimeBlock = {
   id: string;
   title: string;
@@ -125,6 +147,14 @@ export type TimeBlock = {
   status: TimeBlockStatus;
   missed_reason: string | null;
   completed_at: string | null;
+  execution_status: ExecutionStatus;
+  started_at: string | null;
+  missed_at: string | null;
+  skipped_at: string | null;
+  actual_minutes: number | null;
+  execution_notes: string | null;
+  rescheduled_from_block_id: string | null;
+  carry_forward_task_id: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -142,6 +172,11 @@ function normalizeTimeBlock(raw: Partial<TimeBlock>, index = 0): TimeBlock {
   const status = TIME_BLOCK_STATUSES.includes(raw.status as TimeBlockStatus)
     ? (raw.status as TimeBlockStatus)
     : "planned";
+  const executionStatus = EXECUTION_STATUSES.includes(
+    raw.execution_status as ExecutionStatus,
+  )
+    ? (raw.execution_status as ExecutionStatus)
+    : "not_started";
   return {
     id: raw.id ?? createCalendarId(`tb${index}`),
     title: raw.title?.trim() || "Untitled block",
@@ -158,6 +193,14 @@ function normalizeTimeBlock(raw: Partial<TimeBlock>, index = 0): TimeBlock {
     status,
     missed_reason: raw.missed_reason ?? null,
     completed_at: raw.completed_at ?? null,
+    execution_status: executionStatus,
+    started_at: raw.started_at ?? null,
+    missed_at: raw.missed_at ?? null,
+    skipped_at: raw.skipped_at ?? null,
+    actual_minutes: raw.actual_minutes ?? null,
+    execution_notes: raw.execution_notes ?? null,
+    rescheduled_from_block_id: raw.rescheduled_from_block_id ?? null,
+    carry_forward_task_id: raw.carry_forward_task_id ?? null,
     created_at: raw.created_at ?? now,
     updated_at: raw.updated_at ?? now,
   };

@@ -32,6 +32,7 @@ export type PromptBuilderContext = {
   workoutSummary?: string;
   nutritionSummary?: string;
   weeklyReviewSummary?: string;
+  executionTruthSummary?: string;
   faithSummary?: string;
   relationshipSummary?: string;
   careerProofSummary?: string;
@@ -90,6 +91,7 @@ function commonContext(context: PromptBuilderContext) {
     line("Workout", context.workoutSummary),
     line("Nutrition", context.nutritionSummary),
     line("Weekly review", context.weeklyReviewSummary),
+    line("Execution truth", context.executionTruthSummary),
     line("Faith", context.faithSummary),
     line("Relationships", context.relationshipSummary),
     line("Career proof", context.careerProofSummary),
@@ -229,6 +231,14 @@ FIRST_ACTION
 PLAN_REALISM
 - score: 1-10
 - reason: text
+
+The Execution truth line carries what actually happened: locked plan status, completed blocks, missed blocks and reasons, partial tasks, carry-forward items, anti-drift lesson, tomorrow's first move, and repeated drift items.
+
+Using the execution truth:
+- analyze what actually happened versus what was planned
+- identify the real bottleneck (not the surface excuse)
+- suggest tomorrow's single first move
+- do not create an overloaded plan
 
 Synthesize the full Lifeee context. Return a concise operating brief with priorities, risks, recommended next actions, missing data, and any task IDs that need planning attention.`;
     case "weekly-strategy-brief":

@@ -21,6 +21,7 @@ import type {
 import { calculateWeeklyLifeScore } from "@/lib/life-scoring";
 import { getWeekStartDateKey, toDateKey } from "@/lib/date-helpers";
 import { useSupabaseSession } from "@/hooks/useSupabaseSession";
+import WeeklyExecutionStats from "@/components/WeeklyExecutionStats";
 import { calcNutritionStatus } from "@/lib/calculations";
 import { useSyncStatus } from "@/hooks/useSyncStatus";
 import { runSupabasePersistence } from "@/lib/persistence-runner";
@@ -624,6 +625,13 @@ export default function WeeklyReviewPage() {
           <SyncBadge status={syncStatus} />
         </div>
       </div>
+
+      <WeeklyExecutionStats
+        weekStart={weekStart}
+        weekEnd={weekEnd}
+        userId={userId}
+        hasSupabaseConfig={hasSupabaseConfig}
+      />
 
       <div className="flex flex-wrap gap-3">
         <button

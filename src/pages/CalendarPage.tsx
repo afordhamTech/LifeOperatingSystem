@@ -53,6 +53,7 @@ import {
 } from "@/lib/task-system";
 import { toDateKey } from "@/lib/date-helpers";
 import { useSupabaseSession } from "@/hooks/useSupabaseSession";
+import ExecutionTruthPanel from "@/components/ExecutionTruthPanel";
 import {
   buildDailyPlanPayload,
   createLifeeeId,
@@ -751,6 +752,12 @@ export default function CalendarPage() {
           </Link>
         </div>
       </div>
+
+      <ExecutionTruthPanel
+        today={activeDate}
+        userId={userId}
+        hasSupabaseConfig={hasSupabaseConfig}
+      />
 
       <div className="flex flex-wrap items-center gap-2">
         {VIEW_TABS.map((t) => {
