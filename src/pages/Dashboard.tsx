@@ -43,7 +43,7 @@ import { toDateKey } from "@/lib/date-helpers";
 import { getMcatDailyNextMove, loadMcatFoundationState } from "@/lib/mcat-foundation";
 import { useSupabaseSession } from "@/hooks/useSupabaseSession";
 import { Link } from "react-router";
-import { buildDayPlan, loadTasks, type Task } from "@/lib/task-system";
+import { buildDayPlan, buildTaskSmartViews, loadTasks, saveTasks, type Task } from "@/lib/task-system";
 import {
   buildDailyPlanPayload,
   createLifeeeId,
@@ -407,8 +407,12 @@ export default function Dashboard() {
   const statusAverage = (sleepScore + academicScore + workoutScore) / 3;
   const currentEnergy = Number(state.dailyLog?.energy ?? 7);
   const dayPlan = useMemo(
-    () => buildDayPlan(taskList, currentEnergy),
-    [taskList, currentEnergy],
+    () => buildDayPlan(taskList, currentEnergy, today),
+    [taskList, currentEnergy, today],
+  );
+  const taskSmartViews = useMemo(
+    () => buildTaskSmartViews(taskList, { today, currentEnergy }),
+    [currentEnergy, taskList, today],
   );
 
   const todayAnchors = useMemo(
@@ -510,10 +514,12 @@ export default function Dashboard() {
   const copyCalendarPrompt = async () => {
     const text = buildCalendarPlanningPrompt({
       date: today,
+      currentTime: new Date().toLocaleString(),
       anchors: todayAnchors,
       available: availableTime,
       plan: dayPlan,
       currentEnergy,
+      mood: state.dailyLog?.mood ?? "Not supplied",
       sleepReadiness: sleepScore || 6,
       academicPressure: academicScore || 5,
       workoutReadiness: workoutScore || 6,
@@ -543,11 +549,19 @@ export default function Dashboard() {
   );
 
   const handleTaskCreated = (created: Task) => {
-    setTaskList((prev) => [created, ...prev.filter((task) => task.id !== created.id)]);
+    setTaskList((prev) => {
+      const next = [created, ...prev.filter((task) => task.id !== created.id)];
+      saveTasks(next);
+      return next;
+    });
   };
 
   const handleTaskUpserted = (saved: Task) => {
-    setTaskList((prev) => prev.map((task) => (task.id === saved.id ? saved : task)));
+    setTaskList((prev) => {
+      const next = prev.map((task) => (task.id === saved.id ? saved : task));
+      saveTasks(next);
+      return next;
+    });
   };
 
   const handleDecisionSaved = (saved: DecisionLog) => {
@@ -668,9 +682,10 @@ export default function Dashboard() {
 
   const decisionPromptPayload = useMemo(() => {
     const inboxAndToday = [
+      ...taskSmartViews.exportablePlanningSet.slice(0, 12),
       ...decisionLoop.todayCommitted.slice(0, 6),
       ...decisionLoop.inboxCandidates.slice(0, 6),
-    ];
+    ].filter((task, index, all) => all.findIndex((candidate) => candidate.id === task.id) === index);
     return {
       date: today,
       sourcePage: "dashboard",
@@ -719,6 +734,7 @@ export default function Dashboard() {
     decisionLoop.inboxCandidates,
     decisionLoop.todayCommitted,
     decisionLoop.trustProtectors,
+    taskSmartViews.exportablePlanningSet,
     decisionSummary,
     reviewedDecisionsSummary,
     outcomeFeedbackSummary,

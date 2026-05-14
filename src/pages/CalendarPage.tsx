@@ -35,7 +35,15 @@ import {
   calculateRealityScore,
   listRecurringLoops,
 } from "@/lib/calendar-system";
-import { buildDayPlan, loadTasks, makeTask, saveTasks, type Task, type TaskType } from "@/lib/task-system";
+import {
+  buildDayPlan,
+  isDoneStatus,
+  loadTasks,
+  makeTask,
+  saveTasks,
+  type Task,
+  type TaskType,
+} from "@/lib/task-system";
 import { toDateKey } from "@/lib/date-helpers";
 import { useSupabaseSession } from "@/hooks/useSupabaseSession";
 import {
@@ -177,7 +185,7 @@ export default function CalendarPage() {
   );
 
   const available = useMemo(() => calculateAvailableTime(onDayAnchors), [onDayAnchors]);
-  const plan = useMemo(() => buildDayPlan(tasks, currentEnergy), [tasks, currentEnergy]);
+  const plan = useMemo(() => buildDayPlan(tasks, currentEnergy, activeDate), [activeDate, tasks, currentEnergy]);
   const conflicts = useMemo(() => detectConflicts(onDayAnchors), [onDayAnchors]);
   const timeline = useMemo(() => buildTodayTimeline(onDayAnchors, available), [onDayAnchors, available]);
   const reality = useMemo(
@@ -315,10 +323,12 @@ export default function CalendarPage() {
       "planning",
       buildCalendarPlanningPrompt({
         date: activeDate,
+        currentTime: new Date().toLocaleString(),
         anchors: onDayAnchors,
         available,
         plan,
         currentEnergy,
+        mood: "Not supplied",
         sleepReadiness: 7,
         academicPressure: 6,
         workoutReadiness: 6,
@@ -348,8 +358,8 @@ export default function CalendarPage() {
       buildWeeklyCalendarReviewPrompt({
         weekStart,
         anchors: weekAnchors,
-        completedTasks: tasks.filter((t) => t.status === "completed"),
-        missedTasks: tasks.filter((t) => t.due_date && t.due_date < today && t.status !== "completed"),
+        completedTasks: tasks.filter((t) => isDoneStatus(t.status)),
+        missedTasks: tasks.filter((t) => t.due_date && t.due_date < today && !isDoneStatus(t.status)),
         overloadedDays: [],
         bestWorkBlocks: [],
         worstWorkBlocks: [],

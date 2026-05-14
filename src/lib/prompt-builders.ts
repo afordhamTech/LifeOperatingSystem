@@ -191,7 +191,10 @@ Review the proof locker. Identify the strongest artifact, the weakest evidence g
 
 ${shared}
 
-Synthesize the full Lifeee context. Return a concise operating brief with priorities, risks, recommended next actions, and missing data.`;
+Use the Tasks section as structured task rows when task codes are present:
+TASK-CODE | title | domain/task type | estimate | priority | consequence | due | energy | status | daily role | counts | notes.
+
+Synthesize the full Lifeee context. Return a concise operating brief with priorities, risks, recommended next actions, missing data, and any task IDs that need planning attention.`;
     case "weekly-strategy-brief":
       return `${baseHeader("Weekly Strategy Brief", context)}
 

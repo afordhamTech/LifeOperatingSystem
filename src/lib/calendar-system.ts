@@ -4,7 +4,12 @@
 // task_calendar_links, daily_plans) are intentional placeholders for a future
 // Supabase migration — nothing here should be assumed to exist server-side yet.
 
-import type { Task, DayPlan } from "@/lib/task-system";
+import {
+  formatTaskForPlanningExport,
+  validatePlanningExport,
+  type Task,
+  type DayPlan,
+} from "@/lib/task-system";
 
 export const ANCHOR_CATEGORIES = [
   "Academic",
@@ -334,7 +339,7 @@ export function calculateRealityScore(input: RealityInputs): RealityScore {
   const available_time_fit = clamp(fit);
 
   const avgEnergyRequired = plan.mustDo.concat(plan.shouldDo).reduce(
-    (sum, t, _, arr) => sum + t.energy_required / Math.max(1, arr.length),
+    (sum, t, _, arr) => sum + (t.energy_required ?? 5) / Math.max(1, arr.length),
     0,
   ) || 5;
   const energyDiff = avgEnergyRequired - currentEnergy;
@@ -563,10 +568,12 @@ export function buildTodayTimeline(
 
 export type CalendarPromptContext = {
   date: string;
+  currentTime?: string;
   anchors: CalendarAnchor[];
   available: AvailableTime;
   plan: DayPlan;
   currentEnergy: number;
+  mood?: string | number | null;
   sleepReadiness: number;
   academicPressure: number;
   workoutReadiness: number;
@@ -590,11 +597,21 @@ function listBlocks(blocks: WindowSuggestion[]): string {
 
 function listTasks(tasks: Task[]): string {
   if (tasks.length === 0) return "- none";
+  return tasks.map((task) => `- ${formatTaskForPlanningExport(task)}`).join("\n");
+}
+
+function listDoNotSchedule(tasks: Task[]): string {
+  if (tasks.length === 0) return "- none";
   return tasks
-    .map(
-      (t) =>
-        `- ${t.title} · ${t.task_type} · ~${t.estimated_minutes}m · u${t.urgency}/i${t.importance}`,
-    )
+    .map((task) => {
+      const reason =
+        task.status === "ignored_today"
+          ? `Ignore Today until ${task.ignored_until ?? "today"}`
+          : task.daily_role === "Ignore Today"
+            ? "Marked Ignore Today"
+            : "Not selected for today's schedule";
+      return `- ${task.task_code} | ${task.title} | ${reason}`;
+    })
     .join("\n");
 }
 
@@ -605,24 +622,43 @@ export function buildCalendarPlanningPrompt(ctx: CalendarPromptContext): string 
   const recovery = ctx.plan.maintenance.filter(
     (t) => t.task_type === "Health" || t.task_type === "Personal",
   );
+  const exportableTasks = [
+    ...ctx.plan.mustDo,
+    ...ctx.plan.shouldDo,
+    ...ctx.plan.maintenance,
+    ...ctx.plan.quickWins,
+    ...trustTasks,
+  ].filter((task, index, all) => all.findIndex((candidate) => candidate.id === task.id) === index);
+  const validationWarnings = validatePlanningExport({
+    tasks: exportableTasks,
+    mustDo: ctx.plan.mustDo,
+    anchorsCount: ctx.anchors.length,
+  });
 
   return `Here is my Lifeee calendar and task context:
 
 Date: ${ctx.date}
+Current time: ${ctx.currentTime ?? new Date().toLocaleString()}
+Shutdown target: ${ctx.available.bestShutdownTarget}
+Energy: ${ctx.currentEnergy}/10
+Mood: ${ctx.mood ?? "Not supplied"}
 
 Fixed anchors:
 ${listAnchors(ctx.anchors)}
 
-Open time blocks:
+Open windows:
 ${listBlocks(ctx.available.openBlocks)}
 
 Tasks:
 Must Do:
 ${listTasks(ctx.plan.mustDo)}
+
 Should Do:
 ${listTasks(ctx.plan.shouldDo)}
+
 Maintenance:
 ${listTasks(ctx.plan.maintenance)}
+
 Quick Wins:
 ${listTasks(ctx.plan.quickWins)}
 
@@ -631,7 +667,6 @@ ${listTasks(
   [...ctx.plan.mustDo, ...ctx.plan.shouldDo].filter((t) => t.due_date),
 )}
 
-Energy: ${ctx.currentEnergy}/10
 Sleep readiness: ${ctx.sleepReadiness}/10
 Academic pressure: ${ctx.academicPressure}/10
 Workout readiness: ${ctx.workoutReadiness}/10
@@ -644,10 +679,30 @@ ${listTasks(trustTasks)}
 Recovery needs:
 ${listTasks(recovery)}
 
-Build me a realistic day schedule.
-Sort items into anchors, must do, should do, maintenance, quick wins, and ignore today.
-Find the best study block, best workout block, and shutdown time.
-Tell me what is overloaded and what to move.`;
+Inbox candidates only if realistic:
+- none
+
+Do not schedule today:
+${listDoNotSchedule(ctx.plan.ignoreToday)}
+
+Export validation:
+${validationWarnings.length ? validationWarnings.map((warning) => `- ${warning}`).join("\n") : "- ok"}
+
+Planning rules:
+- do not overfill the day
+- protect the Must Do first
+- put highest-energy work in the best energy window
+- include breaks
+- include shutdown
+- if unrealistic, say what to cut
+- if a task is too vague, turn it into a smaller next action
+
+Required ChatGPT output format:
+- schedule table with time, task ID, task title, and reason
+- cut list of tasks not scheduled and why
+- risk warnings
+- first action to take now
+- plan realism score from 1 to 10`;
 }
 
 export type WeeklyReviewContext = {

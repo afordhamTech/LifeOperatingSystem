@@ -10,12 +10,20 @@ import {
   fetchNutritionLogs,
   fetchProofItems,
   fetchSleepLogs,
+  fetchUniversalTasks,
   fetchWorkoutLogs,
   type DecisionLog,
   type LifeeeSyncStatus,
   type ProofItem,
+  upsertUniversalTask,
   upsertDecisionLog,
 } from "@/lib/lifeee-persistence";
+import {
+  isArchivedTask,
+  isTrashedTask,
+  restoreTask,
+  type Task,
+} from "@/lib/task-system";
 import type {
   AcademicTaskRow,
   NutritionLogRow,
@@ -55,6 +63,7 @@ type ArchiveData = {
   workoutLogs: WorkoutLogRow[];
   nutritionLogs: NutritionLogRow[];
   proofItems: ProofItem[];
+  archivedTasks: Task[];
 };
 
 const emptyArchiveData: ArchiveData = {
@@ -63,6 +72,7 @@ const emptyArchiveData: ArchiveData = {
   workoutLogs: [],
   nutritionLogs: [],
   proofItems: [],
+  archivedTasks: [],
 };
 
 function addDays(date: Date, days: number) {
@@ -108,6 +118,7 @@ export default function ArchivePage() {
           workoutLogs,
           nutritionLogs,
           proofItems,
+          universalTasks,
           decisions,
         ] = await Promise.all([
           fetchSleepLogs(userId, archiveStart, today),
@@ -115,6 +126,7 @@ export default function ArchivePage() {
           fetchWorkoutLogs(userId, archiveStart, today),
           fetchNutritionLogs(userId, archiveStart, today),
           fetchProofItems(userId),
+          fetchUniversalTasks(userId),
           fetchDecisionLogs(userId),
         ]);
         if (!active) return;
@@ -124,6 +136,7 @@ export default function ArchivePage() {
           workoutLogs,
           nutritionLogs,
           proofItems,
+          archivedTasks: universalTasks.filter((task) => isArchivedTask(task) || isTrashedTask(task)),
         });
         setDecisionLogs(decisions);
         setSyncStatus("saved");
@@ -188,6 +201,28 @@ export default function ArchivePage() {
     } catch (error) {
       setSyncStatus("error");
       setSyncError(error instanceof Error ? error.message : "Could not delete decision.");
+    }
+  };
+
+  const restoreArchivedTask = async (task: Task) => {
+    if (!hasSupabaseConfig || !userId) {
+      setSyncStatus(hasSupabaseConfig ? "waiting" : "local");
+      return;
+    }
+
+    setSyncStatus("saving");
+    setSyncError(null);
+    try {
+      const restored = restoreTask(task);
+      await upsertUniversalTask(userId, restored, 7);
+      setArchiveData((current) => ({
+        ...current,
+        archivedTasks: current.archivedTasks.filter((item) => item.id !== task.id),
+      }));
+      setSyncStatus("saved");
+    } catch (error) {
+      setSyncStatus("error");
+      setSyncError(error instanceof Error ? error.message : "Could not restore task.");
     }
   };
 
@@ -383,6 +418,43 @@ export default function ArchivePage() {
             </div>
           );
         })}
+      </div>
+
+      <div className="card-surface p-4">
+        <h2 className="text-sm font-semibold text-[#25313c] mb-3">Archived / Trashed Tasks</h2>
+        {archiveData.archivedTasks.length === 0 ? (
+          <div className="text-sm text-[#8c8478] py-4 text-center">
+            No archived or trashed universal tasks.
+          </div>
+        ) : (
+          <ul className="divide-y divide-[#ddd4c6]">
+            {archiveData.archivedTasks.map((task) => (
+              <li key={task.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-mono-data rounded border border-[#ddd4c6] bg-white px-1.5 py-0.5 text-[10px] text-[#6f685f]">
+                      {task.task_code}
+                    </span>
+                    <span className="text-sm font-medium text-[#25313c]">{task.title}</span>
+                    <span className="text-[10px] uppercase tracking-wider text-[#8c8478]">
+                      {isTrashedTask(task) ? "trashed" : "archived"}
+                    </span>
+                  </div>
+                  <div className="mt-1 text-xs text-[#6f685f]">
+                    {task.task_type} · previous {task.previous_status ?? "inbox"}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void restoreArchivedTask(task)}
+                  className="rounded-md border border-[#ddd4c6] bg-white px-3 py-1.5 text-xs text-[#25313c] hover:bg-[#f7f3ec]"
+                >
+                  Restore
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
 
       <div className="space-y-4">

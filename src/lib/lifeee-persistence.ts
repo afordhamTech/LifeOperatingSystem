@@ -12,7 +12,12 @@ import {
   calcProofScore,
   calcSubstanceScore,
 } from "@/lib/calculations";
-import { calcTaskPriority, type DayPlan, type Task } from "@/lib/task-system";
+import {
+  calcTaskPriority,
+  normalizeTask,
+  type DayPlan,
+  type Task,
+} from "@/lib/task-system";
 import { supabase } from "@/lib/supabase-client";
 
 export type LifeeeSyncStatus =
@@ -27,21 +32,41 @@ export type LifeeeSyncStatus =
 export type UniversalTaskRow = {
   id: string;
   user_id: string;
+  task_code?: string | null;
   title: string;
+  description?: string | null;
+  domain?: string | null;
   task_type: string | null;
   due_date: string | null;
+  fixed_time?: string | null;
+  scheduled_start?: string | null;
+  scheduled_end?: string | null;
   estimated_minutes: number | null;
   energy_required: number | null;
+  resistance_level?: number | null;
   urgency: number | null;
   importance: number | null;
   consequence_if_delayed: number | null;
+  consequence_level?: string | null;
   trust_impact: number | null;
   time_efficiency: number | null;
+  priority?: string | null;
   priority_score: number | null;
   status: string | null;
   daily_role: string | null;
   recurring: boolean | null;
   notes: string | null;
+  source?: string | null;
+  previous_status?: string | null;
+  ignored_until?: string | null;
+  ignored_count?: number | null;
+  carry_forward_count?: number | null;
+  rescheduled_count?: number | null;
+  parent_task_id?: string | null;
+  review_date?: string | null;
+  completed_at?: string | null;
+  archived_at?: string | null;
+  deleted_at?: string | null;
   next_physical_action: string | null;
   friction_type: string | null;
   privacy_layer: string | null;
@@ -314,6 +339,28 @@ export type AiPromptExportPayload = {
   source_page?: string | null;
 };
 
+export type TaskEventType =
+  | "created"
+  | "edited"
+  | "status_changed"
+  | "moved_today"
+  | "ignored_today"
+  | "completed"
+  | "archived"
+  | "trashed"
+  | "restored"
+  | "scheduled"
+  | "rescheduled"
+  | "carried_forward";
+
+export type TaskEventPayload = {
+  task_id: string;
+  event_type: TaskEventType;
+  old_value?: unknown;
+  new_value?: unknown;
+  reason?: string | null;
+};
+
 export async function fetchSleepLog(userId: string, date: string) {
   const client = requireSupabase();
   const { data, error } = await client
@@ -575,21 +622,41 @@ export function taskToRow(userId: string, task: Task, currentEnergy: number) {
   return {
     id: task.id,
     user_id: userId,
+    task_code: task.task_code,
     title: task.title,
+    description: task.description,
+    domain: task.task_type,
     task_type: task.task_type,
     due_date: makeLocalDateTime(task.due_date, task.fixed_time),
+    fixed_time: task.fixed_time,
+    scheduled_start: task.scheduled_start,
+    scheduled_end: task.scheduled_end,
     estimated_minutes: task.estimated_minutes,
     energy_required: task.energy_required,
+    resistance_level: task.resistance_level,
     urgency: task.urgency,
     importance: task.importance,
     consequence_if_delayed: task.consequence_if_delayed,
+    consequence_level: task.consequence_level,
     trust_impact: task.trust_impact,
     time_efficiency: task.time_efficiency,
+    priority: task.priority,
     priority_score: calcTaskPriority(task, currentEnergy),
-    status: task.status,
+    status: task.status === "completed" ? "done" : task.status,
     daily_role: task.daily_role,
     recurring: task.recurring,
     notes: task.notes,
+    source: task.source,
+    previous_status: task.previous_status,
+    ignored_until: task.ignored_until,
+    ignored_count: task.ignored_count,
+    carry_forward_count: task.carry_forward_count,
+    rescheduled_count: task.rescheduled_count,
+    parent_task_id: task.parent_task_id,
+    review_date: task.review_date,
+    completed_at: task.completed_at,
+    archived_at: task.archived_at,
+    deleted_at: task.deleted_at,
     linked_anchor_id: task.linked_anchor_id ?? null,
   };
 }
@@ -597,29 +664,48 @@ export function taskToRow(userId: string, task: Task, currentEnergy: number) {
 export function rowToTask(row: UniversalTaskRow): Task {
   const dueDate = dateKeyFromTimestamp(row.due_date);
   const localTime = timeFromTimestamp(row.due_date);
-  const fixedTime = localTime && localTime !== "00:00" ? localTime : null;
+  const fixedTime = row.fixed_time ?? (localTime && localTime !== "00:00" ? localTime : null);
 
-  return {
+  return normalizeTask({
     id: row.id,
+    task_code: row.task_code ?? undefined,
     title: row.title,
+    description: row.description ?? "",
     task_type: (row.task_type ?? "Personal") as Task["task_type"],
     due_date: dueDate,
-    estimated_minutes: row.estimated_minutes ?? 15,
-    energy_required: row.energy_required ?? 5,
+    fixed_time: fixedTime,
+    scheduled_start: row.scheduled_start ?? null,
+    scheduled_end: row.scheduled_end ?? null,
+    estimated_minutes: row.estimated_minutes,
+    energy_required: row.energy_required,
+    resistance_level: row.resistance_level ?? null,
     urgency: row.urgency ?? 5,
     importance: row.importance ?? 5,
     consequence_if_delayed: row.consequence_if_delayed ?? 5,
+    consequence_level: row.consequence_level as Task["consequence_level"],
     trust_impact: row.trust_impact ?? 5,
     time_efficiency: row.time_efficiency ?? 5,
+    priority: row.priority as Task["priority"],
+    priority_score: row.priority_score,
     status: (row.status ?? "inbox") as Task["status"],
     daily_role: (row.daily_role as Task["daily_role"]) ?? null,
     recurring: row.recurring ?? false,
     notes: row.notes ?? "",
+    source: row.source ?? "manual",
+    previous_status: row.previous_status as Task["previous_status"],
+    ignored_until: row.ignored_until ?? null,
+    ignored_count: row.ignored_count ?? 0,
+    carry_forward_count: row.carry_forward_count ?? 0,
+    rescheduled_count: row.rescheduled_count ?? 0,
+    parent_task_id: row.parent_task_id ?? null,
+    review_date: row.review_date ?? null,
+    completed_at: row.completed_at ?? null,
+    archived_at: row.archived_at ?? null,
+    deleted_at: row.deleted_at ?? null,
     linked_anchor_id: row.linked_anchor_id ?? null,
-    fixed_time: fixedTime,
     created_at: row.created_at,
     updated_at: row.updated_at,
-  };
+  });
 }
 
 export async function fetchUniversalTasks(userId: string) {
@@ -655,6 +741,32 @@ export async function deleteUniversalTask(userId: string, id: string) {
     .eq("user_id", userId);
 
   if (error) throw error;
+}
+
+export async function hardDeleteUniversalTask(userId: string, task: Task, confirmed: boolean) {
+  if (!confirmed || task.status !== "trashed") {
+    throw new Error("Hard delete requires confirmation and a trashed task.");
+  }
+  await deleteUniversalTask(userId, task.id);
+}
+
+export async function insertTaskEvent(userId: string, payload: TaskEventPayload) {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("task_events")
+    .insert({
+      task_id: payload.task_id,
+      user_id: userId,
+      event_type: payload.event_type,
+      old_value: payload.old_value ?? null,
+      new_value: payload.new_value ?? null,
+      reason: payload.reason ?? null,
+    })
+    .select("*")
+    .maybeSingle();
+
+  if (error) throw error;
+  return data;
 }
 
 export function anchorToRow(userId: string, anchor: CalendarAnchor) {
@@ -751,6 +863,7 @@ export function buildDailyPlanPayload(input: {
     quick_win_task_id: input.plan.quickWins[0]?.id ?? null,
     ignore_today: input.plan.ignoreToday.map((task) => ({
       id: task.id,
+      task_code: task.task_code,
       title: task.title,
       reason: task.daily_role ?? "Ignore Today",
     })),

@@ -13,7 +13,12 @@ import {
 } from "lucide-react";
 import {
   TASK_TYPES,
+  completeTask,
+  ignoreTaskToday,
   makeTask,
+  moveTaskToThisWeek,
+  moveTaskToToday,
+  updateTask,
   type DailyRole,
   type Task,
   type TaskType,
@@ -178,16 +183,15 @@ export default function TodayDecisionLoop({
   };
 
   const moveTo = async (task: Task, target: "today" | "ignore" | "complete" | "this_week") => {
-    const now = new Date().toISOString();
-    let next: Task = { ...task, updated_at: now };
+    let next: Task = task;
     if (target === "today") {
-      next = { ...next, status: "today", daily_role: dailyRoleForToday(task) };
+      next = updateTask(moveTaskToToday(task), { daily_role: dailyRoleForToday(task) });
     } else if (target === "ignore") {
-      next = { ...next, status: "today", daily_role: "Ignore Today" };
+      next = ignoreTaskToday(task, today);
     } else if (target === "this_week") {
-      next = { ...next, status: "this_week", daily_role: null };
+      next = moveTaskToThisWeek(task);
     } else if (target === "complete") {
-      next = { ...next, status: "completed", daily_role: null };
+      next = completeTask(task);
     }
     await persistTask(next, "update");
   };
@@ -344,6 +348,7 @@ export default function TodayDecisionLoop({
                       </span>
                     </div>
                     <div className="mt-0.5 text-[11px] text-[#6f685f]">
+                      {protector.task_code ? `${protector.task_code} · ` : ""}
                       {protector.reason}
                       {protector.detail ? ` · ${protector.detail}` : ""}
                     </div>
@@ -368,7 +373,9 @@ export default function TodayDecisionLoop({
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="text-sm text-[#25313c] truncate">{task.title}</span>
-                    <span className="text-[10px] text-[#6f685f]">{task.task_type}</span>
+                    <span className="text-[10px] text-[#6f685f]">
+                      {task.task_code} · {task.task_type}
+                    </span>
                   </div>
                   {outcomeMatches?.[task.id] ? (
                     <OutcomeLensTag match={outcomeMatches[task.id]!} />
@@ -422,7 +429,7 @@ export default function TodayDecisionLoop({
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="text-sm text-[#25313c] truncate">{task.title}</span>
                     <span className="text-[10px] text-[#6f685f]">
-                      {task.daily_role ?? "Auto"}
+                      {task.task_code} · {task.daily_role ?? "Auto"}
                     </span>
                   </div>
                   <div className="mt-1 flex flex-wrap gap-1">
@@ -464,7 +471,9 @@ export default function TodayDecisionLoop({
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <span className="text-sm text-[#25313c] truncate">{task.title}</span>
-                      <span className="text-[10px] text-[#9b938a]">{task.task_type}</span>
+                      <span className="text-[10px] text-[#9b938a]">
+                        {task.task_code} · {task.task_type}
+                      </span>
                     </div>
                     <div className="mt-1 flex flex-wrap gap-1">
                       <ActionButton
@@ -570,7 +579,7 @@ export default function TodayDecisionLoop({
 function dailyRoleForToday(task: Task): DailyRole | null {
   if (task.fixed_time) return "Anchor";
   if (task.urgency >= 8 && task.consequence_if_delayed >= 8) return "Must Do";
-  if (task.estimated_minutes <= 15 && task.trust_impact >= 6) return "Quick Win";
+  if ((task.estimated_minutes ?? 999) <= 15 && task.trust_impact >= 6) return "Quick Win";
   return "Should Do";
 }
 

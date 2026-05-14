@@ -5,12 +5,19 @@
 import type { Task } from "@/lib/task-system";
 import type { CalendarAnchor } from "@/lib/calendar-system";
 import type { DecisionLog } from "@/lib/lifeee-persistence";
-import { calcTaskPriority } from "@/lib/task-system";
+import {
+  calcTaskPriority,
+  formatTaskForPlanningExport,
+  isActiveTask,
+  isIgnoredTodayTask,
+} from "@/lib/task-system";
 import { parseTimeToMinutes } from "@/lib/calendar-system";
 import { hasResult } from "@/lib/decision-log-summary";
 
 export type TrustProtector = {
   id: string;
+  task_id?: string;
+  task_code?: string;
   title: string;
   reason: string;
   kind:
@@ -25,7 +32,7 @@ export type TrustProtector = {
 };
 
 function isLiveTask(task: Task) {
-  return task.status !== "completed";
+  return isActiveTask(task) && task.status !== "parking_lot";
 }
 
 function isTodayString(value: string | null, today: string) {
@@ -52,11 +59,13 @@ export function pickTrustProtectors(
     seen.add(key);
     protectors.push({
       id: key,
+      task_id: task.id,
+      task_code: task.task_code,
       title: task.title,
       reason,
       kind,
       source: "task",
-      detail: task.task_type,
+      detail: `${task.task_code} · ${task.task_type}`,
     });
   };
 
@@ -76,6 +85,14 @@ export function pickTrustProtectors(
         "high-consequence",
         `High consequence (c${task.consequence_if_delayed}/t${task.trust_impact})`,
       );
+      continue;
+    }
+    if (task.priority === "high" || task.priority === "critical") {
+      addTask(task, "high-consequence", `High priority (${task.priority})`);
+      continue;
+    }
+    if (task.carry_forward_count >= 2) {
+      addTask(task, "high-consequence", `Carried forward ${task.carry_forward_count} times`);
     }
   }
 
@@ -149,25 +166,26 @@ export function pickTrustProtectors(
 
 export function pickInboxCandidates(tasks: Task[], currentEnergy: number) {
   return tasks
-    .filter((task) => task.status === "inbox" && task.daily_role !== "Ignore Today")
+    .filter((task) => isActiveTask(task) && task.status === "inbox")
     .sort((a, b) => calcTaskPriority(b, currentEnergy) - calcTaskPriority(a, currentEnergy))
     .slice(0, 8);
 }
 
-export function pickIgnoredToday(tasks: Task[]) {
+export function pickIgnoredToday(tasks: Task[], today = new Date().toISOString().slice(0, 10)) {
   return tasks
-    .filter((task) => task.status !== "completed" && task.daily_role === "Ignore Today")
+    .filter((task) => isIgnoredTodayTask(task, today))
     .slice(0, 10);
 }
 
 export function pickTodayCommittedTasks(tasks: Task[], today: string) {
   return tasks
-    .filter((task) => task.status !== "completed")
+    .filter((task) => isActiveTask(task))
     .filter(
       (task) =>
         task.status === "today" ||
-        isTodayString(task.due_date, today) ||
-        (task.fixed_time != null && isTodayString(task.due_date, today)),
+        (task.status === "scheduled" &&
+          (isTodayString(task.scheduled_start?.slice(0, 10) ?? null, today) ||
+            isTodayString(task.due_date, today))),
     );
 }
 
@@ -193,7 +211,7 @@ export function buildDecisionLoopSummary(input: {
       input.decisions ?? [],
     ),
     inboxCandidates: pickInboxCandidates(input.tasks, input.currentEnergy),
-    ignoredToday: pickIgnoredToday(input.tasks),
+    ignoredToday: pickIgnoredToday(input.tasks, input.today),
     todayCommitted: pickTodayCommittedTasks(input.tasks, input.today),
   };
 }
@@ -203,14 +221,7 @@ function joinLines(values: string[]) {
 }
 
 export function summarizeTaskCandidates(tasks: Task[]) {
-  return joinLines(
-    tasks.map(
-      (task) =>
-        `${task.title} · ${task.task_type} · ~${task.estimated_minutes}m · u${task.urgency}/i${task.importance}${
-          task.due_date ? ` · due ${task.due_date}` : ""
-        }`,
-    ),
-  );
+  return joinLines(tasks.map((task) => formatTaskForPlanningExport(task)));
 }
 
 export function summarizeTrustProtectors(protectors: TrustProtector[]) {
@@ -248,7 +259,7 @@ export function summarizeAntiDrift(ctx: AntiDriftContext) {
   if (ctx.userNote) lines.push(`User anti-drift note: ${ctx.userNote}`);
   if (ctx.ignored.length) {
     lines.push("Ignored today:");
-    for (const task of ctx.ignored) lines.push(`  - ${task.title}`);
+    for (const task of ctx.ignored) lines.push(`  - ${task.task_code} ${task.title}`);
   }
   if (ctx.trustProtectors.length) {
     lines.push("Trust protectors:");
