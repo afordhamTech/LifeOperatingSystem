@@ -12,6 +12,7 @@ import {
 } from "@/lib/lifeee-persistence";
 import { Flame } from "lucide-react";
 import { Label } from "@/components/ui/label";
+import { PageDecisionHeader } from "@/components/ui-kit";
 
 const STORAGE_KEY = "lifeee.faith_logs.v1";
 
@@ -241,22 +242,19 @@ Current struggle: ${form.temptation || "—"}
 Prayer focus: ${form.prayerDone ? "Completed" : "Not yet"}
 Action step: ${form.actionStep || "—"}
 Gratitude: ${form.gratitude || "—"}
-Faith score: ${score}%
+Faith practice: ${score}%
 
 Help me turn this into a short Bible study, reflection, prayer, and one action step for today.`;
 
   return (
     <div className="space-y-6">
       <div className="border-b border-[#ddd4c6] pb-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold text-[#25313c]">Faith</h1>
-            <p className="text-sm text-[#6f685f] mt-1">
-              Track spiritual discipline, Bible study, prayer, and alignment with your values.
-            </p>
-          </div>
+        <PageDecisionHeader
+          title="Faith"
+          question="Read, reflect, pray, and obey one concrete step today."
+        >
           <SyncBadge status={syncStatus} />
-        </div>
+        </PageDecisionHeader>
         {syncError && <p className="mt-2 text-xs text-destructive">{syncError}</p>}
         {conflict ? (
           <div className="mt-3 rounded border border-[#c39a4e]/30 bg-[#c39a4e]/10 p-3 text-xs text-[#6f685f]">
@@ -316,6 +314,20 @@ Help me turn this into a short Bible study, reflection, prayer, and one action s
                 className="rounded"
               />
               Prayer completed
+            </label>
+            <label className="flex items-center gap-2 text-sm text-[#6f685f] cursor-pointer">
+              <input
+                type="checkbox"
+                checked={Boolean(form.bibleReading.trim())}
+                onChange={(e) =>
+                  setForm((p) => ({
+                    ...p,
+                    bibleReading: e.target.checked ? p.bibleReading || "Completed" : "",
+                  }))
+                }
+                className="rounded"
+              />
+              Bible reading completed
             </label>
             <label className="flex items-center gap-2 text-sm text-[#6f685f] cursor-pointer">
               <input
@@ -415,7 +427,7 @@ Help me turn this into a short Bible study, reflection, prayer, and one action s
             </div>
           </div>
           <button onClick={handleSave} className="btn-primary w-full mt-3">
-            {syncStatus === "saving" ? "Saving..." : "Save & Score"}
+            {syncStatus === "saving" ? "Saving..." : "Save Faith Practice"}
           </button>
         </div>
 

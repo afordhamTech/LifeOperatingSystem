@@ -301,7 +301,7 @@ Help me decide whether to train, modify training, recover, or seek medical help.
         label="Training decision"
         title={trainingDecision}
         tone={trainingDecision === "Normal" ? "calm" : "warning"}
-        detail={`${decisionReason} Consider medical evaluation if symptoms persist or worsen.`}
+        detail={`${decisionReason} Consider medical evaluation if symptoms persist, worsen, or affect movement.`}
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">

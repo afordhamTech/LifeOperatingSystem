@@ -49,6 +49,7 @@ export default function RelationshipsPage() {
     unresolvedIssue: "",
     followUpNeeded: false,
     notes: "",
+    nextAction: "",
   });
 
   useEffect(() => {
@@ -116,7 +117,9 @@ export default function RelationshipsPage() {
       conversationQuality: form.conversationQuality,
       unresolvedIssue: form.unresolvedIssue,
       followUpNeeded: form.followUpNeeded,
-      notes: form.notes,
+      notes: [form.notes.trim(), form.nextAction.trim() ? `Next action: ${form.nextAction.trim()}` : ""]
+        .filter(Boolean)
+        .join("\n"),
     };
     const optimistic = [entry, ...entries];
     setEntries(optimistic);
@@ -139,25 +142,38 @@ export default function RelationshipsPage() {
       setSyncStatus(hasSupabaseConfig ? "waiting" : "local");
     }
 
-    setForm({ personName: "", conversationQuality: 7, unresolvedIssue: "", followUpNeeded: false, notes: "" });
+    setForm({
+      personName: "",
+      conversationQuality: 7,
+      unresolvedIssue: "",
+      followUpNeeded: false,
+      notes: "",
+      nextAction: "",
+    });
   };
 
   const unresolved = entries.filter((entry) => entry.unresolvedIssue.trim());
+  const needsSpace = entries.filter(
+    (entry) => !entry.followUpNeeded && !entry.unresolvedIssue.trim() && entry.conversationQuality <= 4,
+  );
   const radarTitle = followUps[0]?.personName
     ? `${followUps[0].personName} needs follow-up`
     : unresolved[0]?.personName
       ? `${unresolved[0].personName} has unresolved tension`
-      : "No urgent relationship action";
+      : needsSpace[0]?.personName
+        ? `${needsSpace[0].personName} may need space`
+        : "No urgent relationship action";
 
   const promptText = `Here is my relationship data:
 
 People remembered: ${people.length}
 Follow-ups needed: ${followUps.length}
+Needs space: ${needsSpace.length}
 
 Most recent interactions:
 ${people
   .slice(0, 3)
-  .map((p) => `- ${p.personName}: Quality ${p.conversationQuality}/10, Last contact: ${p.lastContact ?? "unknown"}`)
+  .map((p) => `- ${p.personName}: Quality ${p.conversationQuality}/10, Last contact: ${p.lastContact ?? "unknown"}, Notes: ${p.notes || "—"}`)
   .join("\n")}
 
 Help me understand who needs attention and give me mature next messages or actions.`;
@@ -180,12 +196,14 @@ Help me understand who needs attention and give me mature next messages or actio
           title={radarTitle}
           detail={
             followUps.length > 0
-              ? "Next mature action: follow through on the specific thing already noted."
+              ? `Needs follow-up: ${followUps.length}. Next mature action: follow through on the specific thing already noted.`
               : unresolved.length > 0
-                ? "Next mature action: repair simply before making it a bigger conversation."
-                : "Next mature action: remember one useful detail after your next interaction."
+                ? `Unresolved tension: ${unresolved.length}. Next mature action: repair simply before making it a bigger conversation.`
+                : needsSpace.length > 0
+                  ? `Needs space: ${needsSpace.length}. Next mature action: do one respectful action, then let it breathe.`
+                  : "Next mature action: remember one useful detail after your next interaction."
           }
-          tone={followUps.length || unresolved.length ? "warning" : "calm"}
+          tone={followUps.length || unresolved.length || needsSpace.length ? "warning" : "calm"}
         />
         <div className="rounded-xl border border-border bg-card p-4">
           <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
@@ -194,6 +212,7 @@ Help me understand who needs attention and give me mature next messages or actio
           <ul className="mt-2 space-y-1 text-xs text-[#6f685f]">
             <li>Do one mature action, then leave space.</li>
             <li>Do not double-text from anxiety.</li>
+            <li>Do not interrogate for certainty.</li>
             <li>Do not force a serious talk if simple repair works.</li>
           </ul>
         </div>
@@ -270,6 +289,16 @@ Help me understand who needs attention and give me mature next messages or actio
                 value={form.notes}
                 onChange={(e) => setForm((p) => ({ ...p, notes: e.target.value }))}
                 className="input-dark w-full h-16 resize-none"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-[10px] uppercase text-[#6f685f]">Next action</span>
+              <input
+                type="text"
+                placeholder="One mature follow-up, repair, or space-giving action"
+                value={form.nextAction}
+                onChange={(e) => setForm((p) => ({ ...p, nextAction: e.target.value }))}
+                className="input-dark w-full"
               />
             </label>
             <label className="flex items-center gap-2 text-xs text-[#6f685f] cursor-pointer">

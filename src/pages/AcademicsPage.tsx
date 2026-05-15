@@ -510,7 +510,7 @@ export default function AcademicsPage() {
 
           <div className="card-surface p-4">
             <h3 className="text-sm font-semibold text-[#25313c] mb-3">
-              TASK LIST - Sorted by Priority
+              DEADLINES - Sorted by Grade Risk
             </h3>
             {error ? (
               <div className="mb-3 rounded border border-[#c97a73]/30 bg-[#c97a73]/10 px-3 py-2 text-xs text-[#c97a73]">

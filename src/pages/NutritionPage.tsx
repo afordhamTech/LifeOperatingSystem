@@ -32,6 +32,7 @@ import {
 } from "@/lib/lifeee-persistence";
 import {
   CollapsibleSection,
+  InsightCard,
   NextActionCard,
   PageDecisionHeader,
 } from "@/components/ui-kit";
@@ -158,10 +159,14 @@ export default function NutritionPage() {
   }, [hasSupabaseConfig, sessionLoading, setSyncStatus, today, userId]);
 
   const maintenance = Math.round(form.bodyweight * 15);
-  const targetCalories = form.trainingDay
+  const computedCalorieTarget = form.trainingDay
     ? Math.max(3000, Math.min(3400, maintenance + surplus))
     : maintenance + surplus;
-  const proteinTarget = form.trainingDay ? 165 : Math.round(form.bodyweight * 1.0);
+  // Display-fallback defaults — never silently overwrite stored user values.
+  const targetCalories = computedCalorieTarget < 2200 ? 3200 : computedCalorieTarget;
+  const computedProtein = form.trainingDay ? 165 : Math.round(form.bodyweight * 1.0);
+  const proteinTarget = computedProtein < 130 ? 170 : computedProtein;
+  const waterGlassTarget = 8; // ~4L at 16oz/glass
 
   const currentStatus = calcNutritionStatus(
     form.calories,
@@ -182,16 +187,27 @@ export default function NutritionPage() {
         : "Behind";
   const caloriesRemaining = Math.max(0, targetCalories - form.calories);
   const proteinRemaining = Math.max(0, proteinTarget - form.proteinG);
-  const nextFoodFix =
-    !hasNutritionLogged
-      ? "Log the first meal."
-      : proteinRemaining > 35
-        ? "Whey smoothie + bagel."
-        : caloriesRemaining > 700
-          ? "Rice/chicken meal or dining hall plate."
-          : form.waterOz < 6
-            ? "Water bottle plus electrolytes."
-            : "Protein shake if dinner is delayed.";
+  const waterGlassesRemaining = Math.max(0, waterGlassTarget - form.waterOz);
+  const hour = new Date().getHours();
+  const isEndOfDay = hour >= 20;
+
+  const nextFoodFix = !hasNutritionLogged
+    ? "Start with a whey smoothie + bagel (~40g protein, 600 cal)."
+    : isEndOfDay && caloriesRemaining < 200 && proteinRemaining < 20
+      ? "On target — keep current pace."
+      : isEndOfDay && caloriesRemaining < 200
+        ? "Peanut butter smoothie (~700 cal, 30g protein)."
+        : proteinRemaining > 50
+          ? "Whey smoothie + bagel (~40g protein, 600 cal)."
+          : caloriesRemaining > 1000
+            ? "Rice + chicken meal (~800 cal, 50g protein)."
+            : waterGlassesRemaining > 3
+              ? "Refill water bottle (target ~3.5–4.5L)."
+              : proteinRemaining > 25
+                ? "Protein shake (~25–30g protein)."
+                : caloriesRemaining < 200 && proteinRemaining < 20
+                  ? "On target — keep current pace."
+                  : "Light snack to round out remaining macros.";
 
   const weightTrend = history
     .filter((row) => row.bodyweight != null)
@@ -297,6 +313,35 @@ export default function NutritionPage() {
 
   const waterRemaining = Math.max(0, 8 - form.waterOz);
 
+  type MealTemplate = {
+    name: string;
+    calories: number;
+    proteinG: number;
+    carbsG: number;
+    fatG: number;
+  };
+  const mealTemplates: MealTemplate[] = [
+    { name: "Whey smoothie + bagel", calories: 600, proteinG: 40, carbsG: 80, fatG: 12 },
+    { name: "Rice/chicken meal", calories: 800, proteinG: 50, carbsG: 90, fatG: 18 },
+    { name: "Protein shake", calories: 180, proteinG: 28, carbsG: 8, fatG: 3 },
+    { name: "Dining hall meal", calories: 750, proteinG: 35, carbsG: 85, fatG: 22 },
+    { name: "Peanut butter smoothie", calories: 700, proteinG: 30, carbsG: 70, fatG: 28 },
+  ];
+  const addMealTemplate = (m: MealTemplate) => {
+    setForm((p) => ({
+      ...p,
+      calories: p.calories + m.calories,
+      proteinG: p.proteinG + m.proteinG,
+      carbsG: p.carbsG + m.carbsG,
+      fatG: p.fatG + m.fatG,
+      mealsCount: p.mealsCount + 1,
+      notes: p.notes
+        ? `${p.notes}\n+ ${m.name}`
+        : `+ ${m.name}`,
+    }));
+    setNotice(`${m.name} added — remember to Save Nutrition.`);
+  };
+
   return (
     <div className="space-y-6">
       <PageDecisionHeader
@@ -307,15 +352,65 @@ export default function NutritionPage() {
       </PageDecisionHeader>
 
       <NextActionCard
-        label="Today's Fuel Status"
+        label="Fuel Status"
         title={visibleFuelStatus}
         tone={
           visibleFuelStatus === "On track" || visibleFuelStatus === "Not logged yet"
             ? "calm"
             : "warning"
         }
-        detail={`${caloriesRemaining} calories, ${proteinRemaining}g protein, and ${Math.max(0, 8 - form.waterOz)} water glasses remaining. Next Food Fix: ${nextFoodFix}`}
+        detail={`${caloriesRemaining} calories, ${proteinRemaining}g protein, and ${waterGlassesRemaining} water glasses remaining. Next Food Fix: ${nextFoodFix}`}
       />
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <InsightCard
+          label="Calories remaining"
+          value={hasNutritionLogged ? `${caloriesRemaining}` : "Not logged yet"}
+          interpretation={hasNutritionLogged ? `of ${targetCalories} target` : "Log a meal to begin."}
+        />
+        <InsightCard
+          label="Protein remaining"
+          value={hasNutritionLogged ? `${proteinRemaining}g` : "Not logged yet"}
+          interpretation={hasNutritionLogged ? `of ${proteinTarget}g target` : "Log a meal to begin."}
+        />
+        <InsightCard
+          label="Water remaining"
+          value={hasNutritionLogged ? `${waterGlassesRemaining} glasses` : "Not logged yet"}
+          interpretation={hasNutritionLogged ? `of ${waterGlassTarget} glasses (~4L)` : "Log a meal to begin."}
+        />
+      </div>
+
+      <NextActionCard
+        label="Next Food Fix"
+        title={nextFoodFix}
+        tone={nextFoodFix.startsWith("On target") ? "calm" : "warning"}
+        detail="Tap a meal template below to log it instantly."
+      />
+
+      <div className="card-surface p-4">
+        <h3 className="text-sm font-semibold text-[#25313c] mb-3">
+          QUICK MEAL TEMPLATES
+        </h3>
+        <div className="flex flex-wrap gap-2">
+          {mealTemplates.map((m) => (
+            <button
+              key={m.name}
+              type="button"
+              onClick={() => addMealTemplate(m)}
+              className="rounded border border-[#ddd4c6] bg-[#fdfaf4] px-3 py-2 text-xs text-[#25313c] hover:bg-[#f0ebe2] transition-colors"
+              title={`+${m.calories} cal, +${m.proteinG}g protein`}
+            >
+              + {m.name}
+              <span className="ml-1 text-[10px] text-[#6f685f]">
+                ({m.calories}c / {m.proteinG}p)
+              </span>
+            </button>
+          ))}
+        </div>
+        <div className="mt-2 text-[10px] text-[#6f685f]">
+          Adds macros to today's totals. Save Nutrition to persist.
+        </div>
+      </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="space-y-4">

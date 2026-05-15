@@ -392,7 +392,7 @@ export default function Dashboard() {
 
       setIsLoading(false);
       setPlanSyncStatus("local");
-      setNotice("Dashboard loaded from Supabase.");
+      setNotice("Loaded.");
     };
 
     void load();

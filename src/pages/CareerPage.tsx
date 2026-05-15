@@ -33,6 +33,38 @@ import {
 } from "@/components/ui-kit";
 
 const STORAGE_KEY = "lifeee.proof_items.v1";
+const CHECKLIST_STORAGE_KEY = "lifeee.proof_checklist.v1";
+
+type ProofChecklist = {
+  resumeBullet: boolean;
+  linkedinPost: boolean;
+  githubPolished: boolean;
+  interviewStory: boolean;
+  publicDemo: boolean;
+};
+
+const emptyChecklist: ProofChecklist = {
+  resumeBullet: false,
+  linkedinPost: false,
+  githubPolished: false,
+  interviewStory: false,
+  publicDemo: false,
+};
+
+function readChecklistMap(): Record<string, ProofChecklist> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(CHECKLIST_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as Record<string, ProofChecklist>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeChecklistMap(map: Record<string, ProofChecklist>) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(CHECKLIST_STORAGE_KEY, JSON.stringify(map));
+}
 
 function readLocalProofItems() {
   if (typeof window === "undefined") return [];
@@ -93,6 +125,21 @@ export default function CareerPage() {
 
   const [form, setForm] = useState<ProofForm>(emptyProofForm);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [checklistMap, setChecklistMap] = useState<Record<string, ProofChecklist>>(() => readChecklistMap());
+
+  const getChecklist = (id: string): ProofChecklist => ({
+    ...emptyChecklist,
+    ...(checklistMap[id] ?? {}),
+  });
+
+  const toggleChecklist = (id: string, field: keyof ProofChecklist) => {
+    setChecklistMap((prev) => {
+      const current = prev[id] ?? emptyChecklist;
+      const next = { ...prev, [id]: { ...current, [field]: !current[field] } };
+      writeChecklistMap(next);
+      return next;
+    });
+  };
 
   useEffect(() => {
     let active = true;
@@ -267,6 +314,14 @@ export default function CareerPage() {
       : linkedInUpdates > 0
         ? "Post LinkedIn update about recent work"
         : "Start a new project to build proof";
+  const strongestChecklist = strongestProof ? getChecklist(strongestProof.id) : emptyChecklist;
+  const strongestOutputCount = Object.values(strongestChecklist).filter(Boolean).length;
+  const strongestReadiness =
+    strongestOutputCount >= 4
+      ? "ready to leverage"
+      : strongestOutputCount >= 2
+        ? "partly packaged"
+        : "needs packaging";
 
   const promptText = `Here is my career and proof data:
 
@@ -299,9 +354,10 @@ Tell me what proof is strongest, what I should polish, what I should add to my r
         title={strongestProof?.projectName || "Add one proof item"}
         detail={
           strongestProof
-            ? `Proof strength ${Number(strongestProof.proofScore || 0).toFixed(1)}. Next leverage move: ${nextAction}.`
-            : "Add a shipped artifact, resume story, GitHub artifact, or project result."
+            ? `Proof strength ${Number(strongestProof.proofScore || 0).toFixed(1)} · ${strongestProof.privacyLayer} · ${strongestReadiness}. Next leverage move: ${nextAction}.`
+            : "No proof yet. Next leverage move: add your strongest project, win, or artifact."
         }
+        tone={strongestProof ? "primary" : "calm"}
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -496,6 +552,39 @@ Tell me what proof is strongest, what I should polish, what I should add to my r
                     {needs.length > 0
                       ? `Needs: ${needs.join(", ")}`
                       : "Fully leveraged — add an interview story"}
+                  </div>
+                );
+              })()}
+              {(() => {
+                const cl = getChecklist(project.id);
+                const items: Array<{ key: keyof ProofChecklist; label: string }> = [
+                  { key: "resumeBullet", label: "Resume bullet created" },
+                  { key: "linkedinPost", label: "LinkedIn update posted" },
+                  { key: "githubPolished", label: "GitHub/readme polished" },
+                  { key: "interviewStory", label: "Interview story ready" },
+                  { key: "publicDemo", label: "Public demo / screenshot ready" },
+                ];
+                return (
+                  <div className="mt-2">
+                    <div className="mb-1 text-[10px] uppercase tracking-wider text-[#8c8478]">
+                      Output checklist · local only
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
+                      {items.map(({ key, label }) => (
+                        <label
+                          key={key}
+                          className="inline-flex items-center gap-2 text-[11px] text-[#6f685f] cursor-pointer"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={cl[key]}
+                            onChange={() => toggleChecklist(project.id, key)}
+                            className="h-3 w-3 accent-[#6a9a74]"
+                          />
+                          <span className={cl[key] ? "line-through text-[#8c8478]" : ""}>{label}</span>
+                        </label>
+                      ))}
+                    </div>
                   </div>
                 );
               })()}

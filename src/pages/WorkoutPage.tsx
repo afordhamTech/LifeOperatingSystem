@@ -207,6 +207,28 @@ export default function WorkoutPage() {
         : sleepReadiness < 6
           ? "sleep"
           : "none";
+  const trainingState =
+    form.pain > 4 || readinessScore < 5
+      ? "Recovery"
+      : form.pain >= 3 || form.soreness >= 6
+        ? "Technique"
+        : readinessScore >= 8 && form.energy >= 8
+          ? "High-output"
+          : "Normal";
+  const trainingRecommendation =
+    trainingState === "Recovery"
+      ? "Recovery constrained. Favor mobility, easy conditioning, or a full rest day."
+      : trainingState === "Technique"
+        ? "Technique day. Keep intensity controlled and avoid chasing volume."
+        : trainingState === "High-output"
+          ? "High-output window. Pain is low and energy is high, so hard work is available."
+          : "Normal training day. Pain is low enough and readiness supports normal volume.";
+  const workoutNextAction =
+    trainingState === "Recovery"
+      ? "Choose mobility or recovery and log what you actually did."
+      : trainingState === "Technique"
+        ? "Pick a skill or lighter strength session and stop if pain changes movement."
+        : "Train, then log the session details before leaving the page.";
   const chartData = history.map((row) => ({
     day: new Date(row.date).toLocaleDateString("en-US", { weekday: "short" }),
     readiness: Number(row.training_readiness ?? 0),
@@ -311,9 +333,9 @@ export default function WorkoutPage() {
 
       <NextActionCard
         label="Training state"
-        title={decision.label}
+        title={trainingState}
         tone={form.pain > 4 || readinessScore < 6 ? "warning" : "calm"}
-        detail={`Readiness ${readinessScore.toFixed(1)} / 10. Limiter: ${limiter}. Next action: ${form.pain > 4 ? "modify or avoid painful movements" : "log the session after training"}.`}
+        detail={`${trainingRecommendation} Limiter: ${limiter}. Next action: ${workoutNextAction}`}
       />
 
       <CollapsibleSection title="Why this recommendation">

@@ -83,7 +83,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { CollapsibleSection } from "@/components/ui-kit";
+import { CollapsibleSection, NextActionCard, PageDecisionHeader } from "@/components/ui-kit";
 import { cn } from "@/lib/utils";
 
 const DAILY_GOAL_MINUTES = 60;
@@ -221,6 +221,26 @@ function syncClass(status: McatSyncStatus, userId: string | null) {
   if (status === "error") return "border-destructive/25 bg-destructive/10 text-destructive";
   if (status === "synced") return "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
   return "border-primary/25 bg-primary/10 text-primary";
+}
+
+function topicRecommendationReason(topic: McatTopic | null) {
+  if (!topic) return "Start with one foundation topic so the study queue has real data.";
+  if (topic.title === "Acid base chemistry") {
+    return "Acid-base chemistry supports buffers, titrations, and equilibrium.";
+  }
+  if (topic.priorityLabel === "CARS Always Available") {
+    return "CARS improves through frequent passages and exact miss classification.";
+  }
+  if (topic.flashcardsDue > 0) {
+    return `${topic.flashcardsDue} flashcards are due, so review will pay off quickly.`;
+  }
+  if (!topic.lastReviewed) {
+    return "This topic has not been revisited yet, so it needs a first clean pass.";
+  }
+  if (topic.weakness >= 7) {
+    return "It is still a weak foundation topic and can unlock related passages.";
+  }
+  return `${topic.unit} is useful enough to keep warm without overbuilding analytics.`;
 }
 
 export default function McatFoundationPage() {
@@ -435,6 +455,11 @@ export default function McatFoundationPage() {
     () => getMcatDailyNextMove(state, { academicRisk: 0, sleepReadiness: 8 }),
     [state],
   );
+  const todayMoveTopic = useMemo(
+    () => state.topics.find((topic) => topic.title === todayMove.topic) ?? studyNowTopic,
+    [state.topics, studyNowTopic, todayMove.topic],
+  );
+  const todayMoveReason = topicRecommendationReason(todayMoveTopic);
   const streak = useMemo(() => getStudyStreak(state), [state]);
   const todayMinutes = useMemo(() => getDailyMinutes(state, todayKey), [state]);
   const dailySeries = useMemo(() => getDailyMinutesSeries(state, 14), [state]);
@@ -688,67 +713,99 @@ export default function McatFoundationPage() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <header className="border-b border-border pb-4">
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold text-foreground">MCAT Foundation OS</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Foundation Builder mode for Khan MCAT topics, early coursework, mistake review, CARS reps, and retests.
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
-              {state.stage}
-            </span>
-            <span
-              className={cn(
-                "rounded-full border px-3 py-1 text-xs font-semibold",
-                syncClass(visibleSyncStatus, userId),
-              )}
-              title={visibleSyncStatus === "error" ? syncError ?? undefined : undefined}
-            >
-              {syncLabel(visibleSyncStatus, hasSupabaseConfig, userId)}
-            </span>
-          </div>
-        </div>
-      </header>
+      <PageDecisionHeader title="MCAT" question="What should I study right now?">
+        <span className="rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
+          {state.stage}
+        </span>
+        <span
+          className={cn(
+            "rounded-full border px-3 py-1 text-xs font-semibold",
+            syncClass(visibleSyncStatus, userId),
+          )}
+          title={visibleSyncStatus === "error" ? syncError ?? undefined : undefined}
+        >
+          {syncLabel(visibleSyncStatus, hasSupabaseConfig, userId)}
+        </span>
+      </PageDecisionHeader>
 
-      <section className="grid grid-cols-2 gap-3 md:grid-cols-5">
-        <HeroStat
-          icon={<Flag size={14} />}
-          label="Streak"
-          value={`${streak} day${streak === 1 ? "" : "s"}`}
-          tone={streak >= 3 ? "good" : streak === 0 ? "muted" : "warn"}
-        />
-        <HeroStat
-          icon={<Clock size={14} />}
-          label="Today"
-          value={`${todayMinutes} / ${DAILY_GOAL_MINUTES} min`}
-          tone={goalPct >= 100 ? "good" : goalPct >= 50 ? "warn" : "muted"}
-          progress={goalPct}
-        />
-        <HeroStat
-          icon={<TrendingUp size={14} />}
-          label="Week accuracy"
-          value={summary.questionsAttempted > 0 ? `${summary.accuracy}%` : "—"}
-          sub={
-            summary.accuracyTrend !== 0
-              ? `${summary.accuracyTrend > 0 ? "+" : ""}${summary.accuracyTrend}% wow`
-              : undefined
-          }
-        />
-        <HeroStat
-          icon={<FlaskConical size={14} />}
-          label="CARS this wk"
-          value={`${summary.carsPassageCountThisWeek}`}
-          tone={summary.carsPassageCountThisWeek === 0 ? "warn" : "good"}
-        />
-        <HeroStat
-          icon={<Layers size={14} />}
-          label="Flashcards due"
-          value={`${summary.flashcardsDue}`}
-        />
-      </section>
+      <NextActionCard
+        label="Today's Move"
+        title={todayMove.topic}
+        detail={
+          <span>
+            {todayMove.detail} Why it matters: {todayMoveReason}
+          </span>
+        }
+        action={
+          todayMoveTopic ? (
+            <button
+              className="btn-primary px-3 py-1.5"
+              onClick={() => startSession(todayMoveTopic.id)}
+              disabled={Boolean(activeSession)}
+            >
+              <Play size={14} className="mr-1.5" />
+              Start session
+            </button>
+          ) : null
+        }
+      />
+
+      <ActiveSessionCard
+        activeSession={activeSession}
+        elapsedMs={elapsedMs}
+        activeTopic={activeTopic}
+        topics={state.topics}
+        onStart={startSession}
+        onPause={pauseSession}
+        onResume={resumeSession}
+        onStop={stopSession}
+        onCancel={cancelSession}
+        onChangeTopic={(topicId) =>
+          setActiveSession((current) =>
+            current ? { ...current, topicId } : current,
+          )
+        }
+        defaultTopicId={todayMoveTopic?.id ?? studyNowTopic?.id ?? firstTopicId}
+      />
+
+      <CollapsibleSection title="Metrics" subtitle="Study pace, accuracy, CARS, and cards" defaultOpen={false}>
+        <section className="grid grid-cols-2 gap-3 md:grid-cols-5">
+          <HeroStat
+            icon={<Flag size={14} />}
+            label="Streak"
+            value={`${streak} day${streak === 1 ? "" : "s"}`}
+            tone={streak >= 3 ? "good" : streak === 0 ? "muted" : "warn"}
+          />
+          <HeroStat
+            icon={<Clock size={14} />}
+            label="Today"
+            value={`${todayMinutes} / ${DAILY_GOAL_MINUTES} min`}
+            tone={goalPct >= 100 ? "good" : goalPct >= 50 ? "warn" : "muted"}
+            progress={goalPct}
+          />
+          <HeroStat
+            icon={<TrendingUp size={14} />}
+            label="Week accuracy"
+            value={summary.questionsAttempted > 0 ? `${summary.accuracy}%` : "—"}
+            sub={
+              summary.accuracyTrend !== 0
+                ? `${summary.accuracyTrend > 0 ? "+" : ""}${summary.accuracyTrend}% wow`
+                : undefined
+            }
+          />
+          <HeroStat
+            icon={<FlaskConical size={14} />}
+            label="CARS this wk"
+            value={`${summary.carsPassageCountThisWeek}`}
+            tone={summary.carsPassageCountThisWeek === 0 ? "warn" : "good"}
+          />
+          <HeroStat
+            icon={<Layers size={14} />}
+            label="Flashcards due"
+            value={`${summary.flashcardsDue}`}
+          />
+        </section>
+      </CollapsibleSection>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="grid w-full grid-cols-5 lg:w-auto lg:inline-flex">
@@ -760,83 +817,37 @@ export default function McatFoundationPage() {
         </TabsList>
 
         <TabsContent value="today" className="mt-4 space-y-4">
-          <ActiveSessionCard
-            activeSession={activeSession}
-            elapsedMs={elapsedMs}
-            activeTopic={activeTopic}
-            topics={state.topics}
-            onStart={startSession}
-            onPause={pauseSession}
-            onResume={resumeSession}
-            onStop={stopSession}
-            onCancel={cancelSession}
-            onChangeTopic={(topicId) =>
-              setActiveSession((current) =>
-                current ? { ...current, topicId } : current,
-              )
-            }
-            defaultTopicId={studyNowTopic?.id ?? firstTopicId}
-          />
-
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.1fr_0.9fr]">
             <div className="card-surface p-4">
               <div className="mb-3 flex items-center gap-2">
                 <Target size={16} className="text-primary" />
-                <h2 className="text-sm font-semibold text-foreground">Today's Move</h2>
+                <h2 className="text-sm font-semibold text-foreground">Review Queue</h2>
               </div>
-              <div className="rounded-xl border border-primary/20 bg-primary/5 p-4">
-                <div className="text-base font-semibold text-foreground">{todayMove.title}</div>
-                <p className="mt-1 text-sm text-muted-foreground">{todayMove.detail}</p>
-                <div className="mt-3 flex flex-wrap items-center gap-2">
-                  <span className="rounded-full border border-border bg-card px-2.5 py-1 text-xs text-muted-foreground">
-                    Topic: {todayMove.topic}
-                  </span>
-                  {(() => {
-                    const moveTopic =
-                      state.topics.find((t) => t.title === todayMove.topic) ?? studyNowTopic;
-                    if (!moveTopic) return null;
-                    return (
-                      <button
-                        className="btn-primary px-3 py-1.5"
-                        onClick={() => startSession(moveTopic.id)}
-                        disabled={Boolean(activeSession)}
-                      >
-                        <Play size={14} className="mr-1.5" />
-                        Start session
-                      </button>
-                    );
-                  })()}
-                </div>
-              </div>
-
-              <div className="mt-4">
-                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  Review Queue
-                </h3>
-                <div className="space-y-2">
-                  {studyQueue.slice(0, 4).map(({ topic, studyDecision }) => (
-                    <button
-                      key={topic.id}
-                      onClick={() => setTopicDetailId(topic.id)}
-                      className="flex w-full items-center justify-between gap-3 rounded-lg border border-border bg-card p-3 text-left transition-colors hover:bg-muted/60"
-                    >
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-semibold text-foreground">{topic.title}</div>
-                        <div className="mt-0.5 truncate text-xs text-muted-foreground">{topic.unit}</div>
+              <div className="space-y-2">
+                {studyQueue.slice(0, 4).map(({ topic, studyDecision }) => (
+                  <button
+                    key={topic.id}
+                    onClick={() => setTopicDetailId(topic.id)}
+                    className="flex w-full items-center justify-between gap-3 rounded-lg border border-border bg-card p-3 text-left transition-colors hover:bg-muted/60"
+                  >
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-semibold text-foreground">{topic.title}</div>
+                      <div className="mt-0.5 truncate text-xs text-muted-foreground">
+                        {topicRecommendationReason(topic)}
                       </div>
-                      <div className="flex items-center gap-2">
-                        <span className={cn("rounded-full border px-2 py-0.5 text-[10px]", priorityClass(topic.priorityLabel))}>
-                          {topic.priorityLabel}
-                        </span>
-                        <span className="text-xs text-muted-foreground">
-                          {studyDecision >= 7
-                            ? "High leverage — weak and high-yield"
-                            : "Worth a pass — keeps it warm"}
-                        </span>
-                      </div>
-                    </button>
-                  ))}
-                </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={cn("rounded-full border px-2 py-0.5 text-[10px]", priorityClass(topic.priorityLabel))}>
+                        {topic.priorityLabel}
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        {studyDecision >= 7
+                          ? "High leverage"
+                          : "Keep warm"}
+                      </span>
+                    </div>
+                  </button>
+                ))}
               </div>
             </div>
 
@@ -1283,17 +1294,9 @@ function ActiveSessionCard({
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
             {activeSession.isRunning ? "In session" : "Paused"}
           </div>
-          <select
-            className="input-dark mt-1 w-full max-w-md text-sm font-semibold"
-            value={activeSession.topicId}
-            onChange={(e) => onChangeTopic(e.target.value)}
-          >
-            {topics.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.title}
-              </option>
-            ))}
-          </select>
+          <div className="mt-1 text-base font-semibold text-foreground">
+            {activeTopic?.title ?? "Unknown topic"}
+          </div>
           {activeTopic ? (
             <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
               <span className={cn("rounded-full border px-2 py-0.5", priorityClass(activeTopic.priorityLabel))}>
@@ -1302,6 +1305,23 @@ function ActiveSessionCard({
               <span>{activeTopic.unit}</span>
             </div>
           ) : null}
+          <CollapsibleSection title="Browse all topics" className="mt-3">
+            <label htmlFor="mcat-active-topic-picker" className="mb-1 block text-[10px] uppercase tracking-wider text-muted-foreground">
+              Topic
+            </label>
+            <select
+              id="mcat-active-topic-picker"
+              className="input-dark w-full max-w-md text-sm"
+              value={activeSession.topicId}
+              onChange={(e) => onChangeTopic(e.target.value)}
+            >
+              {topics.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.title}
+                </option>
+              ))}
+            </select>
+          </CollapsibleSection>
         </div>
         <div className="flex flex-col items-end gap-2">
           <div className="font-mono-data text-3xl font-semibold tabular-nums text-foreground">

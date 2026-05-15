@@ -323,6 +323,19 @@ Turn this into a deeper explanation, 5 talking points, and 3 questions I could u
         />
       </div>
 
+      <div className="card-surface p-4">
+        <h3 className="text-sm font-semibold text-[#25313c] mb-3">IDEA CARD</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+          <IdeaField label="Topic" value={form.topicStudied || "Choose one topic."} />
+          <IdeaField label="Core idea" value={form.newConcept || "Write the idea in one sentence."} />
+          <IdeaField label="Why it matters" value={form.notesTaken || "Connect it to a decision, problem, or person."} />
+          <IdeaField label="Example" value="Add one concrete example in Notes taken." />
+          <IdeaField label="My opinion" value="State whether you agree, doubt it, or need more evidence." />
+          <IdeaField label="Question" value={form.questionOfDay || "What would change your mind?"} />
+          <IdeaField label="Connection to another field" value="Link it to health, money, school, faith, or work." />
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 card-surface p-4">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -483,6 +496,15 @@ function FactorBar({ label, value, max, icon }: { label: string; value: number; 
         <div className="h-full bg-[#c39a4e] rounded-full" style={{ width: `${(value / max) * 100}%` }} />
       </div>
       <span className="font-mono-data text-[10px] text-[#6f685f] w-6">{value}%</span>
+    </div>
+  );
+}
+
+function IdeaField({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-[#e3d8c9] bg-[#fdfaf4] p-3">
+      <div className="text-[10px] uppercase tracking-wider text-[#6f685f]">{label}</div>
+      <div className="mt-1 text-sm text-[#25313c]">{value}</div>
     </div>
   );
 }
