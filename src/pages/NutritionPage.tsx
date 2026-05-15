@@ -175,10 +175,10 @@ export default function NutritionPage() {
     form.calories > 0 || form.proteinG > 0 || form.waterOz > 0 || form.mealsCount > 0;
   const visibleFuelStatus = !hasNutritionLogged
     ? "Not logged yet"
-    : currentStatus.status === "green"
-      ? "On track"
-      : currentStatus.status === "yellow"
-        ? "Behind"
+    : form.calories > targetCalories + 250
+      ? "Over target"
+      : currentStatus.status === "green"
+        ? "On track"
         : "Behind";
   const caloriesRemaining = Math.max(0, targetCalories - form.calories);
   const proteinRemaining = Math.max(0, proteinTarget - form.proteinG);
@@ -309,7 +309,11 @@ export default function NutritionPage() {
       <NextActionCard
         label="Today's Fuel Status"
         title={visibleFuelStatus}
-        tone={visibleFuelStatus === "On track" ? "calm" : "warning"}
+        tone={
+          visibleFuelStatus === "On track" || visibleFuelStatus === "Not logged yet"
+            ? "calm"
+            : "warning"
+        }
         detail={`${caloriesRemaining} calories, ${proteinRemaining}g protein, and ${Math.max(0, 8 - form.waterOz)} water glasses remaining. Next Food Fix: ${nextFoodFix}`}
       />
 
@@ -567,7 +571,7 @@ export default function NutritionPage() {
         <div className="space-y-4">
           <div className="card-surface p-4">
             <h3 className="text-sm font-semibold text-[#25313c] mb-3">
-              NUTRITION STATUS
+              FUEL STATUS
             </h3>
             <div className="grid grid-cols-2 gap-3 text-xs">
               <StatusChip label="Calories" ok={currentStatus.caloriesHit} />

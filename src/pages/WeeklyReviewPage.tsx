@@ -59,6 +59,7 @@ import {
   PageDecisionHeader,
   PrimaryActionBar,
 } from "@/components/ui-kit";
+import { useUIMode } from "@/providers/UIModeContext";
 
 type WeeklyReviewForm = {
   academicsScore: number;
@@ -174,6 +175,7 @@ export default function WeeklyReviewPage() {
   const today = useMemo(() => toDateKey(new Date()), []);
   const weekStart = useMemo(() => getWeekStartDateKey(new Date()), []);
   const { hasSupabaseConfig, isLoading: sessionLoading, userId } = useSupabaseSession();
+  const { isAdvanced } = useUIMode();
   const [form, setForm] = useState<WeeklyReviewForm>(defaultForm);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -720,10 +722,12 @@ export default function WeeklyReviewPage() {
           hasSupabaseConfig={hasSupabaseConfig}
         />
 
+        {(isAdvanced || patternDigest.topRecurringDecisionTitles.length > 0) ? (
         <CollapsibleSection
           title="Decision pattern digest"
           subtitle="Most common missed reason & recurring decisions"
         >
+          <AdvancedOnly>
           <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-4 text-xs text-[#6f685f]">
             <Stat label="Reviewed total" value={patternDigest.totalsReviewed} />
             <Stat
@@ -733,13 +737,11 @@ export default function WeeklyReviewPage() {
                 patternDigest.weeklyDelta > 0 ? "+" : ""
               }${patternDigest.weeklyDelta}`}
             />
-            <AdvancedOnly>
-              <Stat
-                label="Sentiment"
-                value={`${patternDigest.positiveCount}/${patternDigest.negativeCount}/${patternDigest.neutralCount}`}
-                hint="positive / negative / neutral"
-              />
-            </AdvancedOnly>
+            <Stat
+              label="Sentiment"
+              value={`${patternDigest.positiveCount}/${patternDigest.negativeCount}/${patternDigest.neutralCount}`}
+              hint="positive / negative / neutral"
+            />
             <Stat
               label="Open overdue reviews"
               value={patternDigest.openOverdueReviewCount}
@@ -750,6 +752,7 @@ export default function WeeklyReviewPage() {
               }
             />
           </div>
+          </AdvancedOnly>
           {patternDigest.topRecurringDecisionTitles.length === 0 ? (
             <EmptyStateCard
               className="mt-3"
@@ -788,7 +791,9 @@ export default function WeeklyReviewPage() {
             </ul>
           )}
         </CollapsibleSection>
+        ) : null}
 
+        {(isAdvanced || reviewedThisWeek.length > 0) ? (
         <CollapsibleSection
           title="Decisions reviewed this week"
           subtitle={`${reviewedThisWeek.length} closed`}
@@ -831,6 +836,7 @@ export default function WeeklyReviewPage() {
             </ul>
           )}
         </CollapsibleSection>
+        ) : null}
       </section>
 
       {/* ---------------- STEP 3 — What changes? ---------------- */}
@@ -1039,6 +1045,54 @@ export default function WeeklyReviewPage() {
             </div>
           </div>
         </div>
+
+        <div className="card-surface p-4">
+          <h3 className="text-sm font-semibold text-[#25313c] mb-3">
+            Score sliders
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <ScoreSlider
+              label="Academics"
+              value={form.academicsScore}
+              onChange={(value) => setForm((p) => ({ ...p, academicsScore: value }))}
+            />
+            <ScoreSlider
+              label="Sleep"
+              value={form.sleepScore}
+              onChange={(value) => setForm((p) => ({ ...p, sleepScore: value }))}
+            />
+            <ScoreSlider
+              label="Training"
+              value={form.trainingScore}
+              onChange={(value) => setForm((p) => ({ ...p, trainingScore: value }))}
+            />
+            <ScoreSlider
+              label="Nutrition"
+              value={form.nutritionScore}
+              onChange={(value) => setForm((p) => ({ ...p, nutritionScore: value }))}
+            />
+            <ScoreSlider
+              label="Career Proof"
+              value={form.careerProofScore}
+              onChange={(value) =>
+                setForm((p) => ({ ...p, careerProofScore: value }))
+              }
+            />
+            <ScoreSlider
+              label="Faith Substance"
+              value={form.faithSubstanceScore}
+              onChange={(value) =>
+                setForm((p) => ({ ...p, faithSubstanceScore: value }))
+              }
+            />
+            <ScoreSlider
+              label="Money Admin"
+              value={form.moneyAdminScore}
+              onChange={(value) => setForm((p) => ({ ...p, moneyAdminScore: value }))}
+            />
+          </div>
+        </div>
+
         <PrimaryActionBar>
           <button
             onClick={handleUseSnapshot}
@@ -1276,64 +1330,6 @@ export default function WeeklyReviewPage() {
         />
       </div>
 
-      <div className="card-surface p-4">
-        <h3 className="text-sm font-semibold text-[#25313c] mb-3">
-          SCORE SLIDERS
-        </h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <ScoreSlider
-            label="Academics"
-            value={form.academicsScore}
-            onChange={(value) => setForm((p) => ({ ...p, academicsScore: value }))}
-          />
-          <ScoreSlider
-            label="Sleep"
-            value={form.sleepScore}
-            onChange={(value) => setForm((p) => ({ ...p, sleepScore: value }))}
-          />
-          <ScoreSlider
-            label="Training"
-            value={form.trainingScore}
-            onChange={(value) => setForm((p) => ({ ...p, trainingScore: value }))}
-          />
-          <ScoreSlider
-            label="Nutrition"
-            value={form.nutritionScore}
-            onChange={(value) => setForm((p) => ({ ...p, nutritionScore: value }))}
-          />
-          <ScoreSlider
-            label="Career Proof"
-            value={form.careerProofScore}
-            onChange={(value) =>
-              setForm((p) => ({ ...p, careerProofScore: value }))
-            }
-          />
-          <ScoreSlider
-            label="Faith Substance"
-            value={form.faithSubstanceScore}
-            onChange={(value) =>
-              setForm((p) => ({ ...p, faithSubstanceScore: value }))
-            }
-          />
-          <ScoreSlider
-            label="Money Admin"
-            value={form.moneyAdminScore}
-            onChange={(value) => setForm((p) => ({ ...p, moneyAdminScore: value }))}
-          />
-        </div>
-      </div>
-
-      <div className="card-surface p-4">
-        <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-[#6f685f]">
-          Notes
-        </label>
-        <textarea
-          className="input-dark h-28 w-full resize-none"
-          placeholder="Patterns, lessons, and what matters next"
-          value={form.notes}
-          onChange={(e) => setForm((p) => ({ ...p, notes: e.target.value }))}
-        />
-      </div>
       </AdvancedDetails>
 
       {hasSupabaseConfig && !userId ? (

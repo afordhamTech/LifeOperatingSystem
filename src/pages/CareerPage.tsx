@@ -26,6 +26,7 @@ import {
   X,
 } from "lucide-react";
 import {
+  AdvancedDetails,
   CollapsibleSection,
   NextActionCard,
   PageDecisionHeader,
@@ -320,24 +321,36 @@ Tell me what proof is strongest, what I should polish, what I should add to my r
             ) : null}
           </div>
           <div className="space-y-3">
-            <input
-              type="text"
-              placeholder="Project name"
-              value={form.projectName}
-              onChange={(e) => setForm((p) => ({ ...p, projectName: e.target.value }))}
-              className="input-dark w-full"
-            />
-            <select
-              value={form.artifactType}
-              onChange={(e) => setForm((p) => ({ ...p, artifactType: e.target.value }))}
-              className="input-dark w-full"
-            >
-              <option value="code">Code</option>
-              <option value="design">Design</option>
-              <option value="writing">Writing</option>
-              <option value="video">Video</option>
-              <option value="other">Other</option>
-            </select>
+            <div>
+              <label htmlFor="proof-name" className="text-[10px] uppercase text-[#6f685f] block mb-1">
+                Proof title
+              </label>
+              <input
+                id="proof-name"
+                type="text"
+                placeholder="What you built or shipped"
+                value={form.projectName}
+                onChange={(e) => setForm((p) => ({ ...p, projectName: e.target.value }))}
+                className="input-dark w-full"
+              />
+            </div>
+            <div>
+              <label htmlFor="proof-type" className="text-[10px] uppercase text-[#6f685f] block mb-1">
+                Artifact type
+              </label>
+              <select
+                id="proof-type"
+                value={form.artifactType}
+                onChange={(e) => setForm((p) => ({ ...p, artifactType: e.target.value }))}
+                className="input-dark w-full"
+              >
+                <option value="code">Code</option>
+                <option value="design">Design</option>
+                <option value="writing">Writing</option>
+                <option value="video">Video</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <label className="text-[10px] uppercase text-[#6f685f]">
                 Hours worked
@@ -363,30 +376,40 @@ Tell me what proof is strongest, what I should polish, what I should add to my r
                 </select>
               </label>
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              {(["visibility", "difficulty", "relevance", "completion"] as const).map((field) => (
-                <div key={field}>
-                  <label className="text-[10px] uppercase text-[#6f685f] block mb-1">
-                    {field === "visibility"
+            <AdvancedDetails title="Score this proof">
+              <div className="grid grid-cols-2 gap-3">
+                {(["visibility", "difficulty", "relevance", "completion"] as const).map((field) => {
+                  const fieldId = `proof-${field}`;
+                  const fieldLabel =
+                    field === "visibility"
                       ? "Showability"
                       : field === "relevance"
                         ? "Direction fit"
-                        : field}
-                  </label>
-                  <input
-                    type="range"
-                    min={1}
-                    max={10}
-                    value={form[field]}
-                    onChange={(e) =>
-                      setForm((p) => ({ ...p, [field]: Number(e.target.value) }))
-                    }
-                    className="slider-dark"
-                  />
-                  <span className="text-[10px] text-[#6f685f]">{form[field]}/10</span>
-                </div>
-              ))}
-            </div>
+                        : field === "difficulty"
+                          ? "Difficulty"
+                          : "Completion";
+                  return (
+                    <div key={field}>
+                      <label htmlFor={fieldId} className="text-[10px] uppercase text-[#6f685f] block mb-1">
+                        {fieldLabel}
+                      </label>
+                      <input
+                        id={fieldId}
+                        type="range"
+                        min={1}
+                        max={10}
+                        value={form[field]}
+                        onChange={(e) =>
+                          setForm((p) => ({ ...p, [field]: Number(e.target.value) }))
+                        }
+                        className="slider-dark"
+                      />
+                      <span className="text-[10px] text-[#6f685f]">{form[field]}/10</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </AdvancedDetails>
             <button onClick={() => void handleSave()} className="btn-primary flex items-center gap-2">
               {editingId ? <CheckCircle2 size={14} /> : <Plus size={14} />}
               {editingId ? "Save Changes" : "Add Proof"}
@@ -402,11 +425,11 @@ Tell me what proof is strongest, what I should polish, what I should add to my r
             </div>
             <div className="card-surface p-3 text-center">
               <div className="text-xl font-bold text-[#c39a4e]">{bulletsToUpdate}</div>
-              <div className="text-[10px] text-[#6f685f]">Resume Bullets</div>
+              <div className="text-[10px] text-[#6f685f]">Resume bullets to add</div>
             </div>
             <div className="card-surface p-3 text-center">
               <div className="text-xl font-bold text-[#6b87ae]">{linkedInUpdates}</div>
-              <div className="text-[10px] text-[#6f685f]">LinkedIn Updates</div>
+              <div className="text-[10px] text-[#6f685f]">LinkedIn updates to post</div>
             </div>
             <div className="card-surface p-3 text-center">
               <div className="text-xl font-bold text-[#9a7bbd]">{proofScore.toFixed(1)}</div>
@@ -462,6 +485,20 @@ Tell me what proof is strongest, what I should polish, what I should add to my r
               <div className="mt-2 text-xs text-[#6f685f]">
                 {Number(project.hoursWorked ?? 0)} hours worked
               </div>
+              {(() => {
+                const needs = [
+                  !project.resumeBulletAdded ? "resume bullet" : null,
+                  !project.linkedinUpdated ? "LinkedIn update" : null,
+                  !project.githubUpdated ? "GitHub artifact" : null,
+                ].filter(Boolean) as string[];
+                return (
+                  <div className="mt-1 text-xs text-[#6f685f]">
+                    {needs.length > 0
+                      ? `Needs: ${needs.join(", ")}`
+                      : "Fully leveraged — add an interview story"}
+                  </div>
+                );
+              })()}
               <div className="grid grid-cols-4 gap-2 mt-2">
                 {[
                   { label: "Showability", value: project.visibility ?? 0 },

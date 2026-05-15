@@ -124,6 +124,7 @@ import {
   NextActionCard,
   PageDecisionHeader,
   PrimaryActionBar,
+  SimpleOnly,
 } from "@/components/ui-kit";
 
 type DashboardState = {
@@ -1113,9 +1114,15 @@ export default function Dashboard() {
           Open Tasks →
         </Link>
         <span className="text-xs text-muted-foreground">
-          {todayAnchors.length} anchors · {todayTimeBlocks.length} blocks ·{" "}
-          {availableTime.totalOpenMinutes} min open · shutdown{" "}
-          {availableTime.bestShutdownTarget}
+          <AdvancedOnly>
+            {todayAnchors.length} anchors · {todayTimeBlocks.length} blocks ·{" "}
+            {availableTime.totalOpenMinutes} min open · shutdown{" "}
+            {availableTime.bestShutdownTarget}
+          </AdvancedOnly>
+          <SimpleOnly>
+            {todayTimeBlocks.length} planned blocks · shutdown{" "}
+            {availableTime.bestShutdownTarget}
+          </SimpleOnly>
         </span>
       </PrimaryActionBar>
 
@@ -1226,146 +1233,6 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
-
-      {error ? (
-        <div className="rounded border border-[#c97a73]/30 bg-[#c97a73]/10 px-3 py-2 text-xs text-[#c97a73]">
-          {error}
-        </div>
-      ) : null}
-      {notice ? (
-        <div className="rounded border border-[#ddd4c6] bg-[#fdfaf4] px-3 py-2 text-xs text-[#6f685f]">
-          {notice}
-        </div>
-      ) : null}
-      {hasSupabaseConfig && !userId ? (
-        <div className="rounded border border-[#6b87ae]/30 bg-[#6b87ae]/10 px-3 py-2 text-xs text-[#6b87ae]">
-          Supabase is configured, but there is no session yet. The dashboard is
-          still usable in draft mode.
-        </div>
-      ) : null}
-      {!hasSupabaseConfig ? (
-        <div className="rounded border border-[#c39a4e]/30 bg-[#c39a4e]/10 px-3 py-2 text-xs text-[#c39a4e]">
-          Supabase env vars are missing. The dashboard still works locally.
-        </div>
-      ) : null}
-
-      {weeklyBottleneckDiagnosis.bottleneckKind !== "insufficient-evidence" ? (
-        <div className="rounded-lg border border-[#ddd4c6] bg-[#fdfaf4] px-3 py-2 text-xs text-[#25313c] flex flex-wrap items-center gap-2">
-          <span className="text-[10px] uppercase tracking-wider text-[#c39a4e] font-semibold">
-            Current bottleneck
-          </span>
-          <span className="font-medium">{weeklyBottleneckDiagnosis.bottleneckLabel}</span>
-          <span
-            className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${
-              weeklyBottleneckDiagnosis.confidence === "high"
-                ? "border-rose-200 bg-rose-100 text-rose-700"
-                : weeklyBottleneckDiagnosis.confidence === "medium"
-                  ? "border-amber-200 bg-amber-100 text-amber-700"
-                  : "border-stone-200 bg-stone-100 text-stone-700"
-            }`}
-          >
-            {weeklyBottleneckDiagnosis.confidence}
-          </span>
-          <span className="text-[#6f685f]">· {weeklyBottleneckDiagnosis.suggestedFix}</span>
-        </div>
-      ) : null}
-
-      {activeOneMove ? (
-        <div className="rounded-lg border border-[#6b87ae]/30 bg-[#6b87ae]/10 px-3 py-2 text-xs text-[#25313c] flex flex-wrap items-center gap-2">
-          <span className="text-[10px] uppercase tracking-wider text-[#6b87ae] font-semibold">
-            This week's one move
-          </span>
-          <span className="font-medium">{activeOneMove}</span>
-          {activeOneMoveVerdict.outcome ? (
-            <span
-              className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${
-                activeOneMoveVerdict.outcome === "worked"
-                  ? "border-emerald-200 bg-emerald-100 text-emerald-700"
-                  : activeOneMoveVerdict.outcome === "partial"
-                    ? "border-amber-200 bg-amber-100 text-amber-700"
-                    : activeOneMoveVerdict.outcome === "missed"
-                      ? "border-rose-200 bg-rose-100 text-rose-700"
-                      : "border-stone-200 bg-stone-100 text-stone-700"
-              }`}
-              title={activeOneMoveVerdict.note || undefined}
-            >
-              Last verdict: {activeOneMoveVerdict.outcome}
-            </span>
-          ) : null}
-          {feedbackHistory && feedbackHistory.currentStreak > 0 ? (
-            <span className="rounded-full border border-[#6b87ae]/30 bg-white px-2 py-0.5 text-[10px] font-medium text-[#25313c]">
-              Verdict streak: {feedbackHistory.currentStreak}
-            </span>
-          ) : null}
-          <button
-            type="button"
-            onClick={() => void copyWeeklyBrief()}
-            disabled={briefStatus === "copied" || briefStatus === "saved"}
-            className="ml-auto inline-flex items-center gap-1 rounded-md border border-[#ddd4c6] bg-white px-2 py-0.5 text-[10px] font-medium text-[#25313c] hover:bg-[#f7f3ec] disabled:opacity-70"
-            title="Copies a Weekly Strategy Brief prompt to clipboard"
-          >
-            <Copy size={10} />
-            {briefStatus === "saved"
-              ? "Copied + saved"
-              : briefStatus === "copied"
-                ? "Copied"
-                : briefStatus === "error"
-                  ? "Retry copy"
-                  : "Copy weekly brief"}
-          </button>
-          {briefError ? (
-            <span className="text-[10px] text-destructive">{briefError}</span>
-          ) : null}
-        </div>
-      ) : null}
-
-      <TodayDecisionLoop
-        today={today}
-        tasks={taskList}
-        anchors={anchorList}
-        currentEnergy={currentEnergy}
-        userId={userId}
-        hasSupabaseConfig={hasSupabaseConfig}
-        sessionLoading={isLoading}
-        remoteLoaded={remoteTasksLoaded}
-        onTaskCreated={handleTaskCreated}
-        onTaskUpserted={handleTaskUpserted}
-        planNotes={planNotes}
-        onPlanNotesChange={setPlanNotes}
-        planNotesSyncStatus={planSyncStatus}
-        planNotesError={planSyncError}
-        onLogIgnoreDecision={logIgnoreDecision}
-        outcomeMatches={outcomeMatches}
-        decisions={decisionLogs}
-      />
-
-      <ExecutionTruthPanel
-        today={today}
-        userId={userId}
-        hasSupabaseConfig={hasSupabaseConfig}
-      />
-
-      <DecisionsDueReviewPanel
-        today={today}
-        weekStart={weekStart}
-        weekEnd={weekEnd}
-        decisions={decisionLogs}
-        userId={userId}
-        hasSupabaseConfig={hasSupabaseConfig}
-        sessionLoading={isLoading}
-        remoteLoaded={remoteTasksLoaded}
-        onDecisionReviewed={handleDecisionSaved}
-      />
-
-      <DecisionLogCard
-        today={today}
-        decisions={decisionLogs}
-        userId={userId}
-        hasSupabaseConfig={hasSupabaseConfig}
-        sessionLoading={isLoading}
-        remoteLoaded={remoteTasksLoaded}
-        onDecisionSaved={handleDecisionSaved}
-      />
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div className="card-surface p-4 border-l-2 border-[#6b87ae]">
@@ -1625,7 +1492,8 @@ export default function Dashboard() {
                 <ul className="mt-1 space-y-0.5">
                   {unscheduledTrustProtectors.slice(0, 4).map((protector) => (
                     <li key={protector.id}>
-                      {protector.task_code ?? "TASK"} · {protector.title} · {protector.reason}
+                      <AdvancedOnly>{protector.task_code ?? "TASK"} · </AdvancedOnly>
+                      {protector.title} · {protector.reason}
                     </li>
                   ))}
                 </ul>

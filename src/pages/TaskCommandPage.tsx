@@ -720,7 +720,7 @@ function ReviewMode({
         {...handlers}
       />
       <ModeSection
-        title="Needs Attention / Drift"
+        title="Needs Attention"
         subtitle="At risk of slipping without action"
         tasks={driftRisk}
         empty={
@@ -746,9 +746,11 @@ function ReviewMode({
         }
         {...handlers}
       />
-      <CollapsibleSection title="Recurring" subtitle={`${recurring.length}`}>
-        <TaskList tasks={recurring} {...handlers} />
-      </CollapsibleSection>
+      <AdvancedOnly>
+        <CollapsibleSection title="Recurring" subtitle={`${recurring.length}`}>
+          <TaskList tasks={recurring} {...handlers} />
+        </CollapsibleSection>
+      </AdvancedOnly>
       <CollapsibleSection title="Done" subtitle={`${done.length}`}>
         <TaskList tasks={done} {...handlers} />
       </CollapsibleSection>
@@ -778,6 +780,9 @@ function ModeSection({
   empty?: React.ReactNode;
   muted?: boolean;
 }) {
+  const { isSimple } = useUIMode();
+  // In Simple mode, an empty smart view is just noise — render nothing.
+  if (isSimple && tasks.length === 0) return null;
   return (
     <section className={muted ? "opacity-80" : ""}>
       <div className="mb-2 flex items-baseline gap-2">

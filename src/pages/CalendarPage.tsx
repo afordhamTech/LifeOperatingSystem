@@ -920,17 +920,20 @@ export default function CalendarPage() {
 
       {workflowMode === "execute" ? (
         <div className="space-y-4">
-          <ExecutionTruthPanel
-            today={activeDate}
-            userId={userId}
-            hasSupabaseConfig={hasSupabaseConfig}
-          />
+          <AdvancedOnly>
+            <ExecutionTruthPanel
+              today={activeDate}
+              userId={userId}
+              hasSupabaseConfig={hasSupabaseConfig}
+            />
+          </AdvancedOnly>
           <TodayView
             anchors={onDayAnchors}
             timeBlocks={onDayTimeBlocks}
             tasks={tasks}
             timeline={timeline}
             conflicts={conflicts}
+            importedBlocksAdvancedOnly
             onUpdate={updateAnchor}
             onRemove={removeAnchor}
             onRemoveTimeBlock={removeTimeBlock}
@@ -1489,6 +1492,7 @@ function TodayView({
   tasks,
   timeline,
   conflicts,
+  importedBlocksAdvancedOnly = false,
   onUpdate,
   onRemove,
   onRemoveTimeBlock,
@@ -1501,6 +1505,7 @@ function TodayView({
   tasks: Task[];
   timeline: ReturnType<typeof buildTodayTimeline>;
   conflicts: ReturnType<typeof detectConflicts>;
+  importedBlocksAdvancedOnly?: boolean;
   onUpdate: (id: string, patch: Partial<CalendarAnchor>) => void;
   onRemove: (id: string) => void;
   onRemoveTimeBlock: (id: string) => void;
@@ -1511,6 +1516,18 @@ function TodayView({
   ) => void;
   onGenerateFollowUpTask: (anchor: CalendarAnchor) => void;
 }) {
+  const importedBlocksSection = (
+    <div className="mt-5 border-t border-border pt-4">
+      <div className="text-sm font-semibold text-foreground mb-3">Imported time blocks</div>
+      <TimeBlockList
+        blocks={timeBlocks}
+        tasks={tasks}
+        onRemove={onRemoveTimeBlock}
+        onUpdateStatus={onUpdateTimeBlockStatus}
+        onUpdateExecutionStatus={onUpdateTimeBlockExecutionStatus}
+      />
+    </div>
+  );
   return (
     <div className="grid gap-4 lg:grid-cols-[1.2fr_1fr]">
       <div className="card-surface p-4">
@@ -1556,16 +1573,11 @@ function TodayView({
             ))}
           </ul>
         )}
-        <div className="mt-5 border-t border-border pt-4">
-          <div className="text-sm font-semibold text-foreground mb-3">Imported time blocks</div>
-          <TimeBlockList
-            blocks={timeBlocks}
-            tasks={tasks}
-            onRemove={onRemoveTimeBlock}
-            onUpdateStatus={onUpdateTimeBlockStatus}
-            onUpdateExecutionStatus={onUpdateTimeBlockExecutionStatus}
-          />
-        </div>
+        {importedBlocksAdvancedOnly ? (
+          <AdvancedOnly>{importedBlocksSection}</AdvancedOnly>
+        ) : (
+          importedBlocksSection
+        )}
       </div>
     </div>
   );
@@ -1667,19 +1679,23 @@ function TimeBlockList({
                     {block.start_time}-{block.end_time}
                   </span>
                   <span className="text-sm font-medium text-foreground">{block.title}</span>
-                  <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-blue-700">
-                    {block.source === "chatgpt_import" ? "ChatGPT import" : block.source ?? "manual"}
-                  </span>
+                  <AdvancedOnly>
+                    <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-blue-700">
+                      {block.source === "chatgpt_import" ? "ChatGPT import" : block.source ?? "manual"}
+                    </span>
+                  </AdvancedOnly>
                   <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
                     {block.execution_status === "not_started"
                       ? block.status
                       : block.execution_status}
                   </span>
                 </div>
-                <div className="mt-1 text-xs text-muted-foreground">
-                  {task ? `${task.task_code} · ${task.title}` : "No linked task"}
-                  {block.reason ? ` · ${block.reason}` : ""}
-                </div>
+                <AdvancedOnly>
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    {task ? `${task.task_code} · ${task.title}` : "No linked task"}
+                    {block.reason ? ` · ${block.reason}` : ""}
+                  </div>
+                </AdvancedOnly>
               </div>
               <div className="flex flex-shrink-0 items-center gap-2">
                 <button
@@ -1699,6 +1715,13 @@ function TimeBlockList({
                     More
                   </summary>
                   <div className="absolute right-0 z-10 mt-1 min-w-40 rounded-md border border-border bg-popover p-1 text-xs shadow-md">
+                    <button
+                      type="button"
+                      onClick={() => onUpdateExecutionStatus(block.id, "done")}
+                      className="block w-full rounded px-2 py-1.5 text-left hover:bg-muted"
+                    >
+                      Done
+                    </button>
                     <button
                       type="button"
                       onClick={() => onUpdateExecutionStatus(block.id, "partial")}

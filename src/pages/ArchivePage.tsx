@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { EmptyState } from "@/components/EmptyState";
 import { getStatusColor } from "@/components/StatusRing";
 import { SyncBadge } from "@/components/SyncBadge";
+import { EmptyStateCard, SegmentedModeTabs } from "@/components/ui-kit";
 import { useSupabaseSession } from "@/hooks/useSupabaseSession";
 import {
   deleteDecisionLog,
@@ -90,6 +91,7 @@ export default function ArchivePage() {
   const [decisionDraft, setDecisionDraft] = useState<DecisionDraft>(emptyDecisionDraft);
   const [syncStatus, setSyncStatus] = useState<LifeeeSyncStatus>("waiting");
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [tab, setTab] = useState<"patterns" | "evidence" | "archive">("patterns");
 
   useEffect(() => {
     let active = true;
@@ -299,6 +301,18 @@ export default function ArchivePage() {
         {syncError ? <p className="mt-2 text-xs text-destructive">{syncError}</p> : null}
       </div>
 
+      <SegmentedModeTabs
+        value={tab}
+        onChange={setTab}
+        options={[
+          { value: "patterns", label: "Patterns" },
+          { value: "evidence", label: "Evidence" },
+          { value: "archive", label: "Archive" },
+        ]}
+      />
+
+      {tab === "patterns" ? (
+      <div className="space-y-6">
       <div className="card-surface p-4">
         <div className="mb-3 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
@@ -335,7 +349,7 @@ export default function ArchivePage() {
             />
             <div className="grid grid-cols-2 gap-2">
               <label className="text-[10px] uppercase text-[#6f685f]">
-                Review date
+                Review date — when to revisit
                 <input
                   type="date"
                   value={decisionDraft.review_date}
@@ -354,14 +368,17 @@ export default function ArchivePage() {
                 Add Decision
               </button>
             </div>
-            <textarea
-              value={decisionDraft.notes}
-              onChange={(event) =>
-                setDecisionDraft((draft) => ({ ...draft, notes: event.target.value }))
-              }
-              placeholder="Expected outcome, actual outcome later, and lesson"
-              className="input-dark min-h-[80px] w-full"
-            />
+            <label className="block text-[10px] uppercase text-[#6f685f]">
+              Expected outcome · Actual outcome · Lesson
+              <textarea
+                value={decisionDraft.notes}
+                onChange={(event) =>
+                  setDecisionDraft((draft) => ({ ...draft, notes: event.target.value }))
+                }
+                placeholder="Expected outcome now; come back to add the actual outcome and the lesson"
+                className="input-dark mt-1 min-h-[80px] w-full"
+              />
+            </label>
           </div>
 
           <div>
@@ -380,10 +397,13 @@ export default function ArchivePage() {
                   <li key={row.id} className="py-3">
                     <div className="flex items-start justify-between gap-3">
                       <div>
+                        <div className="text-[10px] uppercase tracking-wider text-[#9b938a]">
+                          Decision made
+                        </div>
                         <div className="text-sm font-medium text-[#25313c]">{row.decision}</div>
                         <div className="mt-1 text-xs text-[#6f685f]">
                           {row.decision_date ?? "No date"}
-                          {row.review_date ? ` - review ${row.review_date}` : ""}
+                          {row.review_date ? ` · Review date ${row.review_date}` : ""}
                         </div>
                       </div>
                       <button
@@ -395,9 +415,21 @@ export default function ArchivePage() {
                       </button>
                     </div>
                     {row.reason_chosen ? (
-                      <div className="mt-2 text-xs text-[#25313c]">{row.reason_chosen}</div>
+                      <div className="mt-2 text-xs text-[#25313c]">
+                        <span className="text-[10px] uppercase tracking-wider text-[#9b938a]">
+                          Why I chose it:{" "}
+                        </span>
+                        {row.reason_chosen}
+                      </div>
                     ) : null}
-                    {row.notes ? <div className="mt-1 text-xs text-[#6f685f]">{row.notes}</div> : null}
+                    {row.notes ? (
+                      <div className="mt-1 text-xs text-[#6f685f]">
+                        <span className="text-[10px] uppercase tracking-wider text-[#9b938a]">
+                          Expected outcome · Actual outcome · Lesson:{" "}
+                        </span>
+                        {row.notes}
+                      </div>
+                    ) : null}
                   </li>
                 ))}
               </ul>
@@ -405,7 +437,11 @@ export default function ArchivePage() {
           </div>
         </div>
       </div>
+      </div>
+      ) : null}
 
+      {tab === "evidence" ? (
+      <div className="space-y-6">
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         {sections.map((section) => {
           const Icon = section.icon;
@@ -417,43 +453,6 @@ export default function ArchivePage() {
             </div>
           );
         })}
-      </div>
-
-      <div className="card-surface p-4">
-        <h2 className="text-sm font-semibold text-[#25313c] mb-3">Archived / Trashed Tasks</h2>
-        {archiveData.archivedTasks.length === 0 ? (
-          <div className="text-sm text-[#8c8478] py-4 text-center">
-            No archived or trashed universal tasks.
-          </div>
-        ) : (
-          <ul className="divide-y divide-[#ddd4c6]">
-            {archiveData.archivedTasks.map((task) => (
-              <li key={task.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
-                <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-mono-data rounded border border-[#ddd4c6] bg-white px-1.5 py-0.5 text-[10px] text-[#6f685f]">
-                      {task.task_code}
-                    </span>
-                    <span className="text-sm font-medium text-[#25313c]">{task.title}</span>
-                    <span className="text-[10px] uppercase tracking-wider text-[#8c8478]">
-                      {isTrashedTask(task) ? "trashed" : "archived"}
-                    </span>
-                  </div>
-                  <div className="mt-1 text-xs text-[#6f685f]">
-                    {task.task_type} · previous {task.previous_status ?? "inbox"}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => void restoreArchivedTask(task)}
-                  className="rounded-md border border-[#ddd4c6] bg-white px-3 py-1.5 text-xs text-[#25313c] hover:bg-[#f7f3ec]"
-                >
-                  Restore
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
       </div>
 
       <div className="space-y-4">
@@ -499,6 +498,55 @@ export default function ArchivePage() {
           </div>
         ))}
       </div>
+      </div>
+      ) : null}
+
+      {tab === "archive" ? (
+      <div className="space-y-6">
+      <div className="card-surface p-4">
+        <h2 className="text-sm font-semibold text-[#25313c] mb-3">Archived / Trashed Tasks</h2>
+        {archiveData.archivedTasks.length === 0 ? (
+          <div className="text-sm text-[#8c8478] py-4 text-center">
+            No archived or trashed universal tasks.
+          </div>
+        ) : (
+          <ul className="divide-y divide-[#ddd4c6]">
+            {archiveData.archivedTasks.map((task) => (
+              <li key={task.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-mono-data rounded border border-[#ddd4c6] bg-white px-1.5 py-0.5 text-[10px] text-[#6f685f]">
+                      {task.task_code}
+                    </span>
+                    <span className="text-sm font-medium text-[#25313c]">{task.title}</span>
+                    <span className="text-[10px] uppercase tracking-wider text-[#8c8478]">
+                      {isTrashedTask(task) ? "trashed" : "archived"}
+                    </span>
+                  </div>
+                  <div className="mt-1 text-xs text-[#6f685f]">
+                    {task.task_type} · previous {task.previous_status ?? "inbox"}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void restoreArchivedTask(task)}
+                  className="rounded-md border border-[#ddd4c6] bg-white px-3 py-1.5 text-xs text-[#25313c] hover:bg-[#f7f3ec]"
+                >
+                  Restore
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <EmptyStateCard
+        missing="Old logs archive is not wired yet."
+        nextAction="Archived daily logs and snapshots will collect here over time."
+        why="Keeps long-term records out of the active modules without losing them."
+      />
+      </div>
+      ) : null}
     </div>
   );
 }

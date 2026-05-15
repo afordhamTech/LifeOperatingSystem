@@ -83,6 +83,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { CollapsibleSection } from "@/components/ui-kit";
 import { cn } from "@/lib/utils";
 
 const DAILY_GOAL_MINUTES = 60;
@@ -828,7 +829,9 @@ export default function McatFoundationPage() {
                           {topic.priorityLabel}
                         </span>
                         <span className="text-xs text-muted-foreground">
-                          {studyDecision >= 7 ? "Highest leverage now" : "Useful next"}
+                          {studyDecision >= 7
+                            ? "High leverage — weak and high-yield"
+                            : "Worth a pass — keeps it warm"}
                         </span>
                       </div>
                     </button>
@@ -930,8 +933,8 @@ export default function McatFoundationPage() {
                     >
                       <div className="truncate text-sm font-semibold text-foreground">{topic.title}</div>
                       <div className="mt-0.5 truncate text-xs text-muted-foreground">
-                        {retestPriority >= 7 ? "Needs reinforcement" : "Keep warm"} · last reviewed{" "}
-                        {topic.lastReviewed ?? "never"}
+                        {retestPriority >= 7 ? "Needs reinforcement" : "Keep warm"} ·{" "}
+                        {topic.lastReviewed ? `last revisited ${topic.lastReviewed}` : "never revisited"}
                       </div>
                     </button>
                     <button
@@ -1345,6 +1348,7 @@ function IdleStartCard({
   onStart: (topicId: string) => void;
 }) {
   const [pickerTopicId, setPickerTopicId] = useState(defaultTopicId);
+  const defaultTopic = topics.find((t) => t.id === defaultTopicId) ?? null;
   return (
     <div className="card-elevated p-5">
       <div className="flex flex-wrap items-center gap-4">
@@ -1354,33 +1358,42 @@ function IdleStartCard({
         <div className="min-w-0 flex-1">
           <h2 className="text-base font-semibold text-foreground">Start a focused session</h2>
           <p className="mt-0.5 text-sm text-muted-foreground">
-            Pick a topic, start the timer, and log it when you're done.
+            {defaultTopic
+              ? `Recommended: ${defaultTopic.title}. Start the timer and log it when you're done.`
+              : "Pick a topic, start the timer, and log it when you're done."}
           </p>
         </div>
-        <div className="flex w-full items-center gap-2 sm:w-auto">
-          <select
-            className="input-dark min-w-0 flex-1 sm:w-72"
-            value={pickerTopicId}
-            onChange={(e) => setPickerTopicId(e.target.value)}
-          >
-            {topics
-              .filter((t) => t.priorityLabel !== "Delay Until Coursework")
-              .map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.title}
-                </option>
-              ))}
-          </select>
-          <button
-            className="btn-primary whitespace-nowrap"
-            onClick={() => onStart(pickerTopicId)}
-            disabled={!pickerTopicId}
-          >
-            <Play size={15} className="mr-1.5" />
-            Start
-          </button>
-        </div>
+        <button
+          className="btn-primary whitespace-nowrap"
+          onClick={() => onStart(pickerTopicId)}
+          disabled={!pickerTopicId}
+        >
+          <Play size={15} className="mr-1.5" />
+          Start session
+        </button>
       </div>
+      <CollapsibleSection title="Browse all topics" className="mt-3">
+        <label htmlFor="mcat-topic-picker" className="mb-1 block text-[10px] uppercase tracking-wider text-muted-foreground">
+          Topic
+        </label>
+        <select
+          id="mcat-topic-picker"
+          className="input-dark w-full"
+          value={pickerTopicId}
+          onChange={(e) => setPickerTopicId(e.target.value)}
+        >
+          {topics
+            .filter((t) => t.priorityLabel !== "Delay Until Coursework")
+            .map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.title}
+              </option>
+            ))}
+        </select>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Changing this updates what "Start session" launches.
+        </p>
+      </CollapsibleSection>
     </div>
   );
 }

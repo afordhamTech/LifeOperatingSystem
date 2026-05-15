@@ -3,8 +3,16 @@
 // and the Shutdown Ritual. Supabase is the source of truth when signed in.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { MoreHorizontal } from "lucide-react";
 import { SyncBadge } from "@/components/SyncBadge";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { useUIMode } from "@/providers/UIModeContext";
 import {
   EXECUTION_STATUS_LABELS,
   type ExecutionStatus,
@@ -57,6 +65,7 @@ function nextDay(date: string): string {
 }
 
 export default function ExecutionTruthPanel({ today, userId, hasSupabaseConfig }: Props) {
+  const { isAdvanced } = useUIMode();
   const [plan, setPlan] = useState<DailyPlanRow | null>(null);
   const [blocks, setBlocks] = useState<TimeBlock[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -390,11 +399,19 @@ export default function ExecutionTruthPanel({ today, userId, hasSupabaseConfig }
 
       {/* Execution summary */}
       <div className="text-[11px] text-[#6f685f]">
-        {stats.total} blocks · {stats.completed} done · {stats.partial} partial ·{" "}
-        {stats.missed} missed · {stats.skipped} skipped · {stats.notStarted} not started
-        {stats.mostCommonMissedReason
-          ? ` · top miss reason: ${stats.mostCommonMissedReason}`
-          : ""}
+        {isAdvanced ? (
+          <>
+            {stats.total} blocks · {stats.completed} done · {stats.partial} partial ·{" "}
+            {stats.missed} missed · {stats.skipped} skipped · {stats.notStarted} not started
+            {stats.mostCommonMissedReason
+              ? ` · top miss reason: ${stats.mostCommonMissedReason}`
+              : ""}
+          </>
+        ) : (
+          <>
+            {stats.total} planned blocks · {stats.completed} complete
+          </>
+        )}
       </div>
 
       {/* Time blocks */}
@@ -420,7 +437,7 @@ export default function ExecutionTruthPanel({ today, userId, hasSupabaseConfig }
                 <div className="flex items-center justify-between gap-2 flex-wrap">
                   <span className="text-xs font-medium text-[#25313c]">
                     {block.start_time}–{block.end_time} · {block.title}
-                    {linked?.task_code ? ` · ${linked.task_code}` : ""}
+                    {isAdvanced && linked?.task_code ? ` · ${linked.task_code}` : ""}
                   </span>
                   <span
                     className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${EXECUTION_STATUS_TONE[block.execution_status]}`}
@@ -433,62 +450,117 @@ export default function ExecutionTruthPanel({ today, userId, hasSupabaseConfig }
                     Reason: {block.missed_reason}
                   </p>
                 ) : null}
-                <div className="flex flex-wrap gap-1.5">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-7 text-[11px]"
-                    disabled={!loggedIn}
-                    onClick={() => setBlockStatus(block, "in_progress")}
-                  >
-                    Start
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-7 text-[11px]"
-                    disabled={!loggedIn}
-                    onClick={() => setBlockStatus(block, "done")}
-                  >
-                    Done
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-7 text-[11px]"
-                    disabled={!loggedIn}
-                    onClick={() => setBlockStatus(block, "partial")}
-                  >
-                    Partial
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-7 text-[11px]"
-                    disabled={!loggedIn}
-                    onClick={() => setBlockStatus(block, "missed")}
-                  >
-                    Missed
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-7 text-[11px]"
-                    disabled={!loggedIn}
-                    onClick={() => setBlockStatus(block, "skipped")}
-                  >
-                    Skip
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-7 text-[11px]"
-                    disabled={!loggedIn}
-                    onClick={() => setBlockStatus(block, "rescheduled")}
-                  >
-                    Reschedule
-                  </Button>
-                </div>
+                {isAdvanced ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-[11px]"
+                      disabled={!loggedIn}
+                      onClick={() => setBlockStatus(block, "in_progress")}
+                    >
+                      Start
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-[11px]"
+                      disabled={!loggedIn}
+                      onClick={() => setBlockStatus(block, "done")}
+                    >
+                      Done
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-[11px]"
+                      disabled={!loggedIn}
+                      onClick={() => setBlockStatus(block, "partial")}
+                    >
+                      Partial
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-[11px]"
+                      disabled={!loggedIn}
+                      onClick={() => setBlockStatus(block, "missed")}
+                    >
+                      Missed
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-[11px]"
+                      disabled={!loggedIn}
+                      onClick={() => setBlockStatus(block, "skipped")}
+                    >
+                      Skip
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-[11px]"
+                      disabled={!loggedIn}
+                      onClick={() => setBlockStatus(block, "rescheduled")}
+                    >
+                      Reschedule
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1.5">
+                    {block.execution_status === "in_progress" ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-[11px]"
+                        disabled={!loggedIn}
+                        onClick={() => setBlockStatus(block, "done")}
+                      >
+                        Complete
+                      </Button>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-[11px]"
+                        disabled={!loggedIn}
+                        onClick={() => setBlockStatus(block, "in_progress")}
+                      >
+                        Start
+                      </Button>
+                    )}
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 px-2 text-[11px]"
+                          disabled={!loggedIn}
+                        >
+                          <MoreHorizontal size={14} />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => setBlockStatus(block, "done")}>
+                          Done
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => setBlockStatus(block, "partial")}>
+                          Partial
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => setBlockStatus(block, "missed")}>
+                          Missed
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => setBlockStatus(block, "skipped")}>
+                          Skip
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => setBlockStatus(block, "rescheduled")}>
+                          Reschedule
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                )}
                 {antiDrift ? (
                   <p className="text-[10px] text-amber-700 font-medium">
                     {ANTI_DRIFT_WARNING}

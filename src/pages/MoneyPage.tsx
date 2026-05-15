@@ -296,21 +296,33 @@ Calculate my cash flow, savings rate, biggest leak, and give me a simple money s
               </div>
             )}
           </div>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              placeholder="Name"
-              value={subName}
-              onChange={(e) => setSubName(e.target.value)}
-              className="input-dark flex-1"
-            />
-            <input
-              type="number"
-              placeholder="$/mo"
-              value={subCost}
-              onChange={(e) => setSubCost(Number(e.target.value))}
-              className="input-dark w-20"
-            />
+          <div className="flex items-end gap-2">
+            <div className="flex-1">
+              <label htmlFor="leak-name" className="text-[10px] uppercase text-[#6f685f] block mb-1">
+                Recurring leak name
+              </label>
+              <input
+                id="leak-name"
+                type="text"
+                placeholder="Streaming, app, membership"
+                value={subName}
+                onChange={(e) => setSubName(e.target.value)}
+                className="input-dark w-full"
+              />
+            </div>
+            <div className="w-24">
+              <label htmlFor="leak-cost" className="text-[10px] uppercase text-[#6f685f] block mb-1">
+                Cost / month
+              </label>
+              <input
+                id="leak-cost"
+                type="number"
+                placeholder="$/mo"
+                value={subCost}
+                onChange={(e) => setSubCost(Number(e.target.value))}
+                className="input-dark w-full"
+              />
+            </div>
             <button onClick={() => void addSubscription()} className="btn-secondary">
               <Plus size={14} />
             </button>

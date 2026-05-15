@@ -90,6 +90,82 @@ export default function HealthPage() {
   const [syncError, setSyncError] = useState<string | null>(null);
   const remoteLoadedRef = useRef(false);
 
+  // Structured red-flag + movement-specific inputs (UI only — folded into painTrigger live).
+  const [checkedFlags, setCheckedFlags] = useState<Set<string>>(new Set());
+  const [movementPain, setMovementPain] = useState<Record<string, boolean>>({});
+  const [afterWarmup, setAfterWarmup] = useState<"" | "better" | "same" | "worse">("");
+  const [freeNote, setFreeNote] = useState("");
+
+  const buildPainTrigger = (
+    flags: Set<string>,
+    movement: Record<string, boolean>,
+    warmup: "" | "better" | "same" | "worse",
+    note: string,
+  ) => {
+    const parts: string[] = [];
+    const painfulMoves = Object.entries(movement)
+      .filter(([, v]) => v)
+      .map(([k]) => k);
+    if (painfulMoves.length) parts.push(`Pain with: ${painfulMoves.join(", ")}`);
+    if (warmup) parts.push(`After warmup: ${warmup}`);
+    if (flags.size) parts.push(`Red flags: ${Array.from(flags).join(", ")}`);
+    if (note.trim()) parts.push(note.trim());
+    return parts.join(" | ");
+  };
+
+  const toggleFlag = (flag: string) => {
+    setCheckedFlags((prev) => {
+      const next = new Set(prev);
+      if (next.has(flag)) next.delete(flag);
+      else next.add(flag);
+      setForm((p) => ({
+        ...p,
+        painTrigger: buildPainTrigger(next, movementPain, afterWarmup, freeNote),
+      }));
+      return next;
+    });
+  };
+
+  const toggleMovement = (move: string) => {
+    setMovementPain((prev) => {
+      const next = { ...prev, [move]: !prev[move] };
+      setForm((p) => ({
+        ...p,
+        painTrigger: buildPainTrigger(checkedFlags, next, afterWarmup, freeNote),
+      }));
+      return next;
+    });
+  };
+
+  const changeWarmup = (warmup: "" | "better" | "same" | "worse") => {
+    setAfterWarmup(warmup);
+    setForm((p) => ({
+      ...p,
+      painTrigger: buildPainTrigger(checkedFlags, movementPain, warmup, freeNote),
+    }));
+  };
+
+  const changeFreeNote = (note: string) => {
+    setFreeNote(note);
+    setForm((p) => ({
+      ...p,
+      painTrigger: buildPainTrigger(checkedFlags, movementPain, afterWarmup, note),
+    }));
+  };
+
+  const RED_FLAGS = [
+    "swelling",
+    "limping",
+    "sharp pain",
+    "pain at rest",
+    "numbness/tingling",
+    "loss of range of motion",
+    "pain worsening",
+    "pain over 7 days",
+    "pain changes movement",
+  ];
+  const MOVEMENTS = ["jumping", "running", "lifting", "cutting", "walking"];
+
   useEffect(() => {
     let active = true;
     void (async () => {
@@ -147,18 +223,30 @@ export default function HealthPage() {
   const riskScore = calcInjuryRisk(form.painScore, form.painTrend);
   const recommendations = getHealthRecommendations(form);
   const redFlags = getRedFlags(form);
+  const seriousFlags = [
+    "numbness/tingling",
+    "pain at rest",
+    "pain over 7 days",
+    "pain worsening",
+  ].filter((f) => checkedFlags.has(f));
   const trainingDecision =
-    form.doctorVisitNeeded || form.painScore >= 8
+    form.doctorVisitNeeded || form.painScore >= 8 || seriousFlags.length > 0
       ? "Consider medical evaluation"
-      : form.painScore >= 6 || form.painTrend === "increasing" || form.painType === "sharp"
-        ? "Modify training"
-        : form.painScore >= 3
-          ? "Train carefully"
-          : "Normal training";
+      : form.painScore >= 6 || checkedFlags.size > 0 || afterWarmup === "worse"
+        ? "Recovery"
+        : form.painScore >= 3 ||
+            form.painTrend === "increasing" ||
+            form.painType === "sharp"
+          ? "Modify"
+          : "Normal";
   const decisionReason =
-    form.painScore > 0
-      ? `Based on ${form.painArea || "reported pain"}, ${form.painType} pain, and a ${form.painTrend} trend.`
-      : "No pain signals logged today.";
+    seriousFlags.length > 0
+      ? `Red flag${seriousFlags.length > 1 ? "s" : ""}: ${seriousFlags.join(", ")}.`
+      : checkedFlags.size > 0
+        ? `Red flag noted: ${Array.from(checkedFlags).join(", ")}.`
+        : form.painScore > 0
+          ? `Based on ${form.painArea || "reported pain"}, ${form.painType} pain, and a ${form.painTrend} trend.`
+          : "No pain signals logged today.";
 
   const handleSave = async () => {
     const entry = { ...form, date: today };
@@ -212,7 +300,7 @@ Help me decide whether to train, modify training, recover, or seek medical help.
       <NextActionCard
         label="Training decision"
         title={trainingDecision}
-        tone={trainingDecision === "Normal training" ? "calm" : "warning"}
+        tone={trainingDecision === "Normal" ? "calm" : "warning"}
         detail={`${decisionReason} Consider medical evaluation if symptoms persist or worsen.`}
       />
 
@@ -272,11 +360,72 @@ Help me decide whether to train, modify training, recover, or seek medical help.
               </select>
             </div>
             <div>
-              <label className="text-[10px] uppercase text-[#6f685f] block mb-1">Movement-specific pain</label>
+              <label className="text-[10px] uppercase text-[#6f685f] block mb-2">
+                Red flags
+              </label>
+              <div className="grid grid-cols-1 gap-1.5">
+                {RED_FLAGS.map((flag) => (
+                  <label
+                    key={flag}
+                    className="flex items-center gap-2 text-xs text-[#6f685f] capitalize"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checkedFlags.has(flag)}
+                      onChange={() => toggleFlag(flag)}
+                      className="rounded"
+                    />
+                    {flag}
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label className="text-[10px] uppercase text-[#6f685f] block mb-2">
+                Pain with movement
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {MOVEMENTS.map((move) => (
+                  <button
+                    key={move}
+                    type="button"
+                    onClick={() => toggleMovement(move)}
+                    className={`rounded-full px-2.5 py-1 text-[11px] capitalize transition-colors ${
+                      movementPain[move]
+                        ? "bg-[#c97a73]/15 text-[#c97a73]"
+                        : "bg-[#f0ebe2] text-[#6f685f]"
+                    }`}
+                  >
+                    {move}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label className="text-[10px] uppercase text-[#6f685f] block mb-1">
+                After warmup
+              </label>
+              <select
+                value={afterWarmup}
+                onChange={(e) =>
+                  changeWarmup(e.target.value as "" | "better" | "same" | "worse")
+                }
+                className="input-dark w-full"
+              >
+                <option value="">Not noted</option>
+                <option value="better">Better after warmup</option>
+                <option value="same">Same after warmup</option>
+                <option value="worse">Worse after warmup</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-[10px] uppercase text-[#6f685f] block mb-1">
+                Other movement notes
+              </label>
               <textarea
-                value={form.painTrigger}
-                onChange={(e) => setForm((p) => ({ ...p, painTrigger: e.target.value }))}
-                placeholder="Jumping, running, lifting, cutting, walking, after warmup better/same/worse"
+                value={freeNote}
+                onChange={(e) => changeFreeNote(e.target.value)}
+                placeholder="Anything else worth noting"
                 className="input-dark w-full h-16 resize-none"
               />
             </div>
