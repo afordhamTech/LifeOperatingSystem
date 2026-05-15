@@ -966,7 +966,7 @@ export default function Dashboard() {
           />
         ) : (
           <EmptyStateCard
-            missing="No scheduled block right now"
+            missing="Now: no scheduled block right now"
             nextAction="Plan your day with the AI calendar prompt below."
             why="A scheduled NOW keeps the day on rails."
           />
