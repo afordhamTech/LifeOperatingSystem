@@ -1019,8 +1019,8 @@ function TaskRow({
             <option value="scheduled">Scheduled</option>
             <option value="waiting">Waiting</option>
             <option value="done">Done</option>
-            <option value="ignored_today">Ignored Today</option>
-            <option value="parking_lot">Parking Lot</option>
+            <option value="ignored_today">Hidden for Today</option>
+            <option value="parking_lot">Backlog</option>
             <option value="archived">Archived</option>
             <option value="trashed">Trash</option>
           </select>

@@ -1463,7 +1463,7 @@ export default function Dashboard() {
           <DayPlanCard label="Should Do 2" tasks={dayPlan.shouldDo.slice(1, 2)} accent="#c39a4e" />
           <DayPlanCard label="Maintenance" tasks={dayPlan.maintenance} accent="#6f685f" />
           <DayPlanCard label="Quick Win" tasks={dayPlan.quickWins} accent="#6a9a74" />
-          <DayPlanCard label="Ignore Today" tasks={dayPlan.ignoreToday} accent="#9b938a" muted />
+          <DayPlanCard label="Hidden for Today" tasks={dayPlan.ignoreToday} accent="#9b938a" muted />
         </div>
       </div>
 
