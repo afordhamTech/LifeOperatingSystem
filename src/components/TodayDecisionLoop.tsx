@@ -13,7 +13,12 @@ import {
 } from "lucide-react";
 import {
   TASK_TYPES,
+  completeTask,
+  ignoreTaskToday,
   makeTask,
+  moveTaskToThisWeek,
+  moveTaskToToday,
+  updateTask,
   type DailyRole,
   type Task,
   type TaskType,
@@ -31,6 +36,7 @@ import {
   upsertUniversalTask,
 } from "@/lib/lifeee-persistence";
 import type { OutcomeMatch } from "@/lib/decision-outcome-feedback";
+import { useUIMode } from "@/providers/UIModeContext";
 
 export type TodayDecisionLoopProps = {
   today: string;
@@ -88,6 +94,7 @@ export default function TodayDecisionLoop({
   outcomeMatches,
   decisions,
 }: TodayDecisionLoopProps) {
+  const { isAdvanced } = useUIMode();
   const summary = useMemo(
     () =>
       buildDecisionLoopSummary({
@@ -178,16 +185,15 @@ export default function TodayDecisionLoop({
   };
 
   const moveTo = async (task: Task, target: "today" | "ignore" | "complete" | "this_week") => {
-    const now = new Date().toISOString();
-    let next: Task = { ...task, updated_at: now };
+    let next: Task = task;
     if (target === "today") {
-      next = { ...next, status: "today", daily_role: dailyRoleForToday(task) };
+      next = updateTask(moveTaskToToday(task), { daily_role: dailyRoleForToday(task) });
     } else if (target === "ignore") {
-      next = { ...next, status: "today", daily_role: "Ignore Today" };
+      next = ignoreTaskToday(task, today);
     } else if (target === "this_week") {
-      next = { ...next, status: "this_week", daily_role: null };
+      next = moveTaskToThisWeek(task);
     } else if (target === "complete") {
-      next = { ...next, status: "completed", daily_role: null };
+      next = completeTask(task);
     }
     await persistTask(next, "update");
   };
@@ -237,12 +243,13 @@ export default function TodayDecisionLoop({
           <div className="flex items-center gap-2">
             <Sparkles size={14} className="text-[#6b87ae]" />
             <h2 className="text-sm font-semibold text-[#25313c] uppercase tracking-wider">
-              Today Decision Loop
+              {isAdvanced ? "Today Decision Loop" : "Today's Focus"}
             </h2>
           </div>
           <p className="mt-1 max-w-xl text-xs text-[#6f685f]">
-            Capture into universal_tasks, decide what counts today, mark what to ignore,
-            and surface trust protectors. All edits persist to Supabase.
+            {isAdvanced
+              ? "Capture into universal_tasks, decide what counts today, mark what to ignore, and surface trust protectors. All edits persist to Supabase."
+              : "Capture the next thing, choose what counts today, and hide anything you are intentionally not doing."}
           </p>
         </div>
         <div className="flex flex-col items-end gap-1">
@@ -279,7 +286,9 @@ export default function TodayDecisionLoop({
                 void captureNow();
               }
             }}
-            placeholder="What just came up? (saved to universal_tasks)"
+            placeholder={
+              isAdvanced ? "What just came up? (saved to universal_tasks)" : "What just came up?"
+            }
             className="flex-1 min-w-[200px] rounded-md border border-[#ddd4c6] bg-white px-3 py-2 text-sm"
           />
           <select
@@ -344,6 +353,7 @@ export default function TodayDecisionLoop({
                       </span>
                     </div>
                     <div className="mt-0.5 text-[11px] text-[#6f685f]">
+                      {isAdvanced && protector.task_code ? `${protector.task_code} · ` : ""}
                       {protector.reason}
                       {protector.detail ? ` · ${protector.detail}` : ""}
                     </div>
@@ -368,7 +378,10 @@ export default function TodayDecisionLoop({
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="text-sm text-[#25313c] truncate">{task.title}</span>
-                    <span className="text-[10px] text-[#6f685f]">{task.task_type}</span>
+                    <span className="text-[10px] text-[#6f685f]">
+                      {isAdvanced ? `${task.task_code} · ` : ""}
+                      {task.task_type}
+                    </span>
                   </div>
                   {outcomeMatches?.[task.id] ? (
                     <OutcomeLensTag match={outcomeMatches[task.id]!} />
@@ -387,7 +400,7 @@ export default function TodayDecisionLoop({
                       pending={pendingId === task.id}
                     />
                     <ActionButton
-                      label="Ignore Today"
+                      label={isAdvanced ? "Ignore Today" : "Hide for Today"}
                       icon={<EyeOff size={10} />}
                       onClick={() => void moveTo(task, "ignore")}
                       pending={pendingId === task.id}
@@ -422,6 +435,7 @@ export default function TodayDecisionLoop({
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="text-sm text-[#25313c] truncate">{task.title}</span>
                     <span className="text-[10px] text-[#6f685f]">
+                      {isAdvanced ? `${task.task_code} · ` : ""}
                       {task.daily_role ?? "Auto"}
                     </span>
                   </div>
@@ -434,7 +448,7 @@ export default function TodayDecisionLoop({
                       variant="success"
                     />
                     <ActionButton
-                      label="Ignore Today"
+                      label={isAdvanced ? "Ignore Today" : "Hide for Today"}
                       icon={<EyeOff size={10} />}
                       onClick={() => void moveTo(task, "ignore")}
                       pending={pendingId === task.id}
@@ -449,8 +463,12 @@ export default function TodayDecisionLoop({
 
         <DecisionListPanel
           icon={<EyeOff size={12} className="text-[#9b938a]" />}
-          title="Ignore today (intentional)"
-          emptyHint="Mark items as Ignore Today to clear noise without losing them."
+          title={isAdvanced ? "Ignore today (intentional)" : "Hidden for today"}
+          emptyHint={
+            isAdvanced
+              ? "Mark items as Ignore Today to clear noise without losing them."
+              : "Hide items for today to clear noise without losing them."
+          }
         >
           {summary.ignoredToday.length === 0 ? null : (
             <ul className="space-y-1.5">
@@ -464,7 +482,10 @@ export default function TodayDecisionLoop({
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <span className="text-sm text-[#25313c] truncate">{task.title}</span>
-                      <span className="text-[10px] text-[#9b938a]">{task.task_type}</span>
+                      <span className="text-[10px] text-[#9b938a]">
+                        {isAdvanced ? `${task.task_code} · ` : ""}
+                        {task.task_type}
+                      </span>
                     </div>
                     <div className="mt-1 flex flex-wrap gap-1">
                       <ActionButton
@@ -539,7 +560,7 @@ export default function TodayDecisionLoop({
           <div className="flex items-center gap-2">
             <AlertTriangle size={12} className="text-[#c39a4e]" />
             <div className="text-[11px] uppercase tracking-wider text-[#6f685f] font-semibold">
-              Anti-Drift note (saves to daily_plans.notes)
+              {isAdvanced ? "Anti-Drift note (saves to daily_plans.notes)" : "Risk note"}
             </div>
           </div>
           <span
@@ -570,7 +591,7 @@ export default function TodayDecisionLoop({
 function dailyRoleForToday(task: Task): DailyRole | null {
   if (task.fixed_time) return "Anchor";
   if (task.urgency >= 8 && task.consequence_if_delayed >= 8) return "Must Do";
-  if (task.estimated_minutes <= 15 && task.trust_impact >= 6) return "Quick Win";
+  if ((task.estimated_minutes ?? 999) <= 15 && task.trust_impact >= 6) return "Quick Win";
   return "Should Do";
 }
 

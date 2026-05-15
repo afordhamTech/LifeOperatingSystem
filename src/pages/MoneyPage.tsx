@@ -13,6 +13,7 @@ import {
   upsertMoneyLog,
 } from "@/lib/lifeee-persistence";
 import { Wallet, TrendingUp, TrendingDown, Plus } from "lucide-react";
+import { NextActionCard, PageDecisionHeader } from "@/components/ui-kit";
 
 const STORAGE_KEY = "lifeee.money_logs.v1";
 
@@ -184,6 +185,11 @@ export default function MoneyPage() {
   const totalDebt = monthLogs.reduce((sum, row) => sum + row.debt, 0);
   const netFlow = totalIncome - totalSpending;
   const savingsRate = totalIncome > 0 ? Math.round((totalSavings / totalIncome) * 10000) / 100 : 0;
+  const minimumBuffer = 100;
+  const safeToSpend = Math.max(
+    0,
+    form.income + totalIncome - form.upcomingExpenses - form.savings - minimumBuffer,
+  );
 
   const promptText = `Here is my money data:
 
@@ -193,26 +199,28 @@ Savings: $${totalSavings}
 Net cash flow: $${netFlow}
 Savings rate: ${savingsRate}%
 Debt: $${totalDebt}
-Subscriptions: ${form.subscriptionItems.length} active, $${form.subscriptions}/mo
+Recurring leaks: ${form.subscriptionItems.length} active, $${form.subscriptions}/mo
 
-Calculate my cash flow, savings rate, biggest leak, and give me a simple financial plan for this week.`;
+Calculate my cash flow, savings rate, biggest leak, and give me a simple money strategy for this week.`;
 
   return (
     <div className="space-y-6">
-      <div className="border-b border-[#ddd4c6] pb-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold text-[#25313c]">Money</h1>
-            <p className="text-sm text-[#6f685f] mt-1">
-              Track income, spending, debt, savings, and whether your financial behavior matches your goals.
-            </p>
-          </div>
-          <span className={`rounded-full border px-2.5 py-1 text-[11px] ${getSyncTone(syncStatus)}`}>
-            {getSyncLabel(syncStatus)}
-          </span>
-        </div>
-        {syncError && <p className="mt-2 text-xs text-destructive">{syncError}</p>}
-      </div>
+      <PageDecisionHeader
+        title="Money"
+        question="Am I financially safe this week?"
+      >
+        <span className={`rounded-full border px-2.5 py-1 text-[11px] ${getSyncTone(syncStatus)}`}>
+          {getSyncLabel(syncStatus)}
+        </span>
+      </PageDecisionHeader>
+      {syncError && <p className="text-xs text-destructive">{syncError}</p>}
+
+      <NextActionCard
+        label="Safe to spend this week"
+        title={`$${safeToSpend}`}
+        tone={safeToSpend > 100 ? "calm" : "warning"}
+        detail={`Expected income and current month logs minus upcoming required expenses, savings commitment, and a $${minimumBuffer} buffer. Next: cut the biggest recurring leak before adding new spending.`}
+      />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div className="card-surface p-4 text-center">
@@ -223,7 +231,7 @@ Calculate my cash flow, savings rate, biggest leak, and give me a simple financi
         <div className="card-surface p-4 text-center">
           <TrendingDown size={18} className="text-[#c97a73] mx-auto mb-2" />
           <div className="text-xl font-bold text-[#25313c]">${totalSpending}</div>
-          <div className="text-[10px] text-[#6f685f]">Spending</div>
+          <div className="text-[10px] text-[#6f685f]">Money Out</div>
         </div>
         <div className="card-surface p-4 text-center">
           <TrendingUp size={18} className="text-[#6a9a74] mx-auto mb-2" />
@@ -234,21 +242,21 @@ Calculate my cash flow, savings rate, biggest leak, and give me a simple financi
           <div className="text-xl font-bold" style={{ color: netFlow >= 0 ? "#6a9a74" : "#c97a73" }}>
             ${netFlow}
           </div>
-          <div className="text-[10px] text-[#6f685f]">Net Flow</div>
+          <div className="text-[10px] text-[#6f685f]">Cash Flow</div>
           <div className="text-[10px] text-[#6f685f]">{savingsRate}% saved</div>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="card-surface p-4">
-          <h3 className="text-sm font-semibold text-[#25313c] mb-3">LOG TRANSACTIONS</h3>
+          <h3 className="text-sm font-semibold text-[#25313c] mb-3">MONEY STRATEGY</h3>
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-[10px] uppercase text-[#6f685f] block mb-1">Income</label>
               <input type="number" value={form.income} onChange={(e) => setForm((p) => ({ ...p, income: Number(e.target.value) }))} className="input-dark w-full" />
             </div>
             <div>
-              <label className="text-[10px] uppercase text-[#6f685f] block mb-1">Spending</label>
+              <label className="text-[10px] uppercase text-[#6f685f] block mb-1">Money Out</label>
               <input type="number" value={form.spending} onChange={(e) => setForm((p) => ({ ...p, spending: Number(e.target.value) }))} className="input-dark w-full" />
             </div>
             <div>
@@ -259,6 +267,14 @@ Calculate my cash flow, savings rate, biggest leak, and give me a simple financi
               <label className="text-[10px] uppercase text-[#6f685f] block mb-1">Debt</label>
               <input type="number" value={form.debt} onChange={(e) => setForm((p) => ({ ...p, debt: Number(e.target.value) }))} className="input-dark w-full" />
             </div>
+            <div>
+              <label className="text-[10px] uppercase text-[#6f685f] block mb-1">Upcoming required expenses</label>
+              <input type="number" value={form.upcomingExpenses} onChange={(e) => setForm((p) => ({ ...p, upcomingExpenses: Number(e.target.value) }))} className="input-dark w-full" />
+            </div>
+            <div>
+              <label className="text-[10px] uppercase text-[#6f685f] block mb-1">Biggest leak</label>
+              <input type="text" value={form.biggestLeak} onChange={(e) => setForm((p) => ({ ...p, biggestLeak: e.target.value }))} className="input-dark w-full" />
+            </div>
           </div>
           <button onClick={() => void handleSave()} className="btn-primary w-full mt-3">
             {syncStatus === "saving" ? "Saving..." : "Save Log"}
@@ -266,7 +282,7 @@ Calculate my cash flow, savings rate, biggest leak, and give me a simple financi
         </div>
 
         <div className="card-surface p-4">
-          <h3 className="text-sm font-semibold text-[#25313c] mb-3">SUBSCRIPTIONS</h3>
+          <h3 className="text-sm font-semibold text-[#25313c] mb-3">RECURRING LEAKS</h3>
           <div className="space-y-2 mb-3">
             {form.subscriptionItems.map((sub) => (
               <div key={sub.id} className="flex items-center justify-between text-xs">
@@ -280,21 +296,33 @@ Calculate my cash flow, savings rate, biggest leak, and give me a simple financi
               </div>
             )}
           </div>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              placeholder="Name"
-              value={subName}
-              onChange={(e) => setSubName(e.target.value)}
-              className="input-dark flex-1"
-            />
-            <input
-              type="number"
-              placeholder="$/mo"
-              value={subCost}
-              onChange={(e) => setSubCost(Number(e.target.value))}
-              className="input-dark w-20"
-            />
+          <div className="flex items-end gap-2">
+            <div className="flex-1">
+              <label htmlFor="leak-name" className="text-[10px] uppercase text-[#6f685f] block mb-1">
+                Recurring leak name
+              </label>
+              <input
+                id="leak-name"
+                type="text"
+                placeholder="Streaming, app, membership"
+                value={subName}
+                onChange={(e) => setSubName(e.target.value)}
+                className="input-dark w-full"
+              />
+            </div>
+            <div className="w-24">
+              <label htmlFor="leak-cost" className="text-[10px] uppercase text-[#6f685f] block mb-1">
+                Cost / month
+              </label>
+              <input
+                id="leak-cost"
+                type="number"
+                placeholder="$/mo"
+                value={subCost}
+                onChange={(e) => setSubCost(Number(e.target.value))}
+                className="input-dark w-full"
+              />
+            </div>
             <button onClick={() => void addSubscription()} className="btn-secondary">
               <Plus size={14} />
             </button>
@@ -302,7 +330,7 @@ Calculate my cash flow, savings rate, biggest leak, and give me a simple financi
         </div>
       </div>
 
-      <ChatGPTPrompt title="Financial Plan" promptText={promptText} />
+      <ChatGPTPrompt title="Money Strategy" promptText={promptText} />
     </div>
   );
 }

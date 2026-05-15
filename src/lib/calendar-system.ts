@@ -1,10 +1,13 @@
-// Lifeee Calendar — fixed anchors + flexible tasks + energy limits + reality.
-// Stored in localStorage so the app stays usable without auth.
-// Backend table names (calendar_anchors, time_blocks, recurring_loops,
-// task_calendar_links, daily_plans) are intentional placeholders for a future
-// Supabase migration — nothing here should be assumed to exist server-side yet.
+// Lifeee Calendar — fixed anchors + imported time blocks + energy limits + reality.
+// Supabase is the source of truth when signed in. localStorage remains a
+// logged-out draft/cache so Calendar and Daily OS stay usable offline.
 
-import type { Task, DayPlan } from "@/lib/task-system";
+import {
+  formatTaskForPlanningExport,
+  validatePlanningExport,
+  type Task,
+  type DayPlan,
+} from "@/lib/task-system";
 
 export const ANCHOR_CATEGORIES = [
   "Academic",
@@ -48,12 +51,13 @@ export type CalendarAnchor = {
   updated_at: string;
 };
 
-const STORAGE_KEY = "lifeee.calendar.anchors.v1";
+const ANCHOR_STORAGE_KEY = "lifeee.calendar.anchors.v1";
+const TIME_BLOCK_STORAGE_KEY = "lifeee.calendar.time_blocks.v1";
 
 function readAll(): CalendarAnchor[] {
   if (typeof window === "undefined") return [];
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw = window.localStorage.getItem(ANCHOR_STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? (parsed as CalendarAnchor[]) : [];
@@ -64,7 +68,7 @@ function readAll(): CalendarAnchor[] {
 
 function writeAll(anchors: CalendarAnchor[]) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(anchors));
+  window.localStorage.setItem(ANCHOR_STORAGE_KEY, JSON.stringify(anchors));
 }
 
 export function loadAnchors(): CalendarAnchor[] {
@@ -100,6 +104,158 @@ export function makeAnchor(
     created_at: now,
     updated_at: now,
   };
+}
+
+export const TIME_BLOCK_STATUSES = ["planned", "complete", "missed"] as const;
+export type TimeBlockStatus = (typeof TIME_BLOCK_STATUSES)[number];
+
+// Phase 1C: Execution Truth — what actually happened to a scheduled block.
+export const EXECUTION_STATUSES = [
+  "not_started",
+  "in_progress",
+  "done",
+  "partial",
+  "missed",
+  "skipped",
+  "rescheduled",
+] as const;
+export type ExecutionStatus = (typeof EXECUTION_STATUSES)[number];
+
+export const EXECUTION_STATUS_LABELS: Record<ExecutionStatus, string> = {
+  not_started: "Not Started",
+  in_progress: "In Progress",
+  done: "Done",
+  partial: "Partially Done",
+  missed: "Missed",
+  skipped: "Skipped",
+  rescheduled: "Rescheduled",
+};
+
+export type TimeBlock = {
+  id: string;
+  title: string;
+  date: string;
+  start_time: string;
+  end_time: string;
+  block_type: string;
+  linked_task_id: string | null;
+  linked_anchor_id: string | null;
+  source: string | null;
+  import_batch_id: string | null;
+  reason: string;
+  notes: string;
+  status: TimeBlockStatus;
+  missed_reason: string | null;
+  completed_at: string | null;
+  execution_status: ExecutionStatus;
+  started_at: string | null;
+  missed_at: string | null;
+  skipped_at: string | null;
+  actual_minutes: number | null;
+  execution_notes: string | null;
+  rescheduled_from_block_id: string | null;
+  carry_forward_task_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+function createCalendarId(prefix: string) {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `${prefix}_${Math.random().toString(36).slice(2)}_${Date.now()}`;
+}
+
+function normalizeTimeBlock(raw: Partial<TimeBlock>, index = 0): TimeBlock {
+  const now = new Date().toISOString();
+  const start = raw.start_time ?? "09:00";
+  const status = TIME_BLOCK_STATUSES.includes(raw.status as TimeBlockStatus)
+    ? (raw.status as TimeBlockStatus)
+    : "planned";
+  const executionStatus = EXECUTION_STATUSES.includes(
+    raw.execution_status as ExecutionStatus,
+  )
+    ? (raw.execution_status as ExecutionStatus)
+    : "not_started";
+  return {
+    id: raw.id ?? createCalendarId(`tb${index}`),
+    title: raw.title?.trim() || "Untitled block",
+    date: raw.date ?? new Date().toISOString().slice(0, 10),
+    start_time: start,
+    end_time: raw.end_time ?? addMinutesToTime(start, 30),
+    block_type: raw.block_type?.trim() || "focus",
+    linked_task_id: raw.linked_task_id ?? null,
+    linked_anchor_id: raw.linked_anchor_id ?? null,
+    source: raw.source ?? "manual",
+    import_batch_id: raw.import_batch_id ?? null,
+    reason: raw.reason ?? "",
+    notes: raw.notes ?? "",
+    status,
+    missed_reason: raw.missed_reason ?? null,
+    completed_at: raw.completed_at ?? null,
+    execution_status: executionStatus,
+    started_at: raw.started_at ?? null,
+    missed_at: raw.missed_at ?? null,
+    skipped_at: raw.skipped_at ?? null,
+    actual_minutes: raw.actual_minutes ?? null,
+    execution_notes: raw.execution_notes ?? null,
+    rescheduled_from_block_id: raw.rescheduled_from_block_id ?? null,
+    carry_forward_task_id: raw.carry_forward_task_id ?? null,
+    created_at: raw.created_at ?? now,
+    updated_at: raw.updated_at ?? now,
+  };
+}
+
+function readTimeBlockDrafts(): TimeBlock[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(TIME_BLOCK_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed)
+      ? parsed.map((item, index) => normalizeTimeBlock(item, index))
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeTimeBlockDrafts(blocks: TimeBlock[]) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(
+    TIME_BLOCK_STORAGE_KEY,
+    JSON.stringify(blocks.map((block, index) => normalizeTimeBlock(block, index))),
+  );
+}
+
+export function loadTimeBlocks(): TimeBlock[] {
+  return readTimeBlockDrafts();
+}
+
+export function saveTimeBlocks(blocks: TimeBlock[]) {
+  writeTimeBlockDrafts(blocks);
+}
+
+export function makeTimeBlock(
+  partial: Partial<TimeBlock> & {
+    title: string;
+    date: string;
+    start_time: string;
+    end_time: string;
+    block_type: string;
+  },
+): TimeBlock {
+  return normalizeTimeBlock({
+    ...partial,
+    id: partial.id ?? createCalendarId("tb"),
+    title: partial.title,
+    date: partial.date,
+    start_time: partial.start_time,
+    end_time: partial.end_time,
+    block_type: partial.block_type,
+    created_at: partial.created_at ?? new Date().toISOString(),
+    updated_at: partial.updated_at ?? new Date().toISOString(),
+  });
 }
 
 // ─── Time utilities ─────────────────────────────────────────────────────────
@@ -334,7 +490,7 @@ export function calculateRealityScore(input: RealityInputs): RealityScore {
   const available_time_fit = clamp(fit);
 
   const avgEnergyRequired = plan.mustDo.concat(plan.shouldDo).reduce(
-    (sum, t, _, arr) => sum + t.energy_required / Math.max(1, arr.length),
+    (sum, t, _, arr) => sum + (t.energy_required ?? 5) / Math.max(1, arr.length),
     0,
   ) || 5;
   const energyDiff = avgEnergyRequired - currentEnergy;
@@ -478,15 +634,32 @@ export type TimelineSlot = {
   end: string;
   label: string;
   detail?: string;
-  kind: "anchor" | "deep-work" | "workout" | "maintenance" | "shutdown" | "open";
+  kind:
+    | "anchor"
+    | "imported-task"
+    | "break"
+    | "freeform"
+    | "deep-work"
+    | "workout"
+    | "maintenance"
+    | "shutdown"
+    | "open";
   category?: AnchorCategory;
+  blockType?: string;
+  source?: string | null;
+  linkedTaskId?: string | null;
+  blockId?: string;
   durationMinutes: number;
+};
+
+export type TodayTimelineOptions = AvailableTimeOptions & {
+  timeBlocks?: TimeBlock[];
 };
 
 export function buildTodayTimeline(
   anchors: CalendarAnchor[],
   available: AvailableTime,
-  options: AvailableTimeOptions = {},
+  options: TodayTimelineOptions = {},
 ): TimelineSlot[] {
   const opts = mergeOpts(options);
   const slots: TimelineSlot[] = [];
@@ -500,6 +673,39 @@ export function buildTodayTimeline(
       kind: "anchor",
       category: a.category,
       durationMinutes: anchorDuration(a),
+    });
+  }
+
+  for (const block of options.timeBlocks ?? []) {
+    const blockType = block.block_type.toLowerCase();
+    const taskless = !block.linked_task_id;
+    const kind =
+      blockType.includes("break") || blockType.includes("recovery")
+        ? "break"
+        : taskless
+          ? "freeform"
+          : "imported-task";
+    const taskCodeMatch = block.notes.match(/task_code:\s*([A-Z0-9-]+)/i);
+    slots.push({
+      start: block.start_time,
+      end: block.end_time,
+      label: block.title,
+      detail: [
+        taskCodeMatch ? taskCodeMatch[1] : null,
+        block.source === "chatgpt_import" ? "ChatGPT import" : block.source,
+        block.reason,
+      ]
+        .filter(Boolean)
+        .join(" · ") || undefined,
+      kind,
+      blockType: block.block_type,
+      source: block.source,
+      linkedTaskId: block.linked_task_id,
+      blockId: block.id,
+      durationMinutes: Math.max(
+        0,
+        parseTimeToMinutes(block.end_time) - parseTimeToMinutes(block.start_time),
+      ),
     });
   }
 
@@ -563,10 +769,19 @@ export function buildTodayTimeline(
 
 export type CalendarPromptContext = {
   date: string;
+  currentTime?: string;
+  operatingMode?: string | null;
+  planRealityScore?: number | null;
   anchors: CalendarAnchor[];
   available: AvailableTime;
   plan: DayPlan;
+  trustProtectors?: Task[];
+  inboxCandidates?: Task[];
+  ignoredExcludedCount?: number;
+  parkingLotExcludedCount?: number;
+  terminalExcludedCount?: number;
   currentEnergy: number;
+  mood?: string | number | null;
   sleepReadiness: number;
   academicPressure: number;
   workoutReadiness: number;
@@ -578,51 +793,185 @@ function listAnchors(anchors: CalendarAnchor[]): string {
   return anchors
     .map(
       (a) =>
-        `- ${a.start_time}–${a.end_time} ${a.title} (${a.category}${a.location ? `, ${a.location}` : ""})`,
+        `- ${a.start_time}-${a.end_time} | ${a.title} | ${a.category}${
+          a.location ? ` | location ${a.location}` : ""
+        }${a.prep ? ` | prep ${a.prep}` : ""}${
+          a.follow_up ? ` | follow-up ${a.follow_up}` : ""
+        }`,
     )
     .join("\n");
 }
 
-function listBlocks(blocks: WindowSuggestion[]): string {
-  if (blocks.length === 0) return "- none";
-  return blocks.map((b) => `- ${b.start}–${b.end} (${b.durationMinutes} min)`).join("\n");
+function recommendedUse(block: WindowSuggestion, available: AvailableTime) {
+  if (
+    available.bestDeepWork &&
+    block.start === available.bestDeepWork.start &&
+    block.end === available.bestDeepWork.end
+  ) {
+    return "deep_work";
+  }
+  if (
+    available.bestWorkout &&
+    block.start === available.bestWorkout.start &&
+    block.end === available.bestWorkout.end
+  ) {
+    return "workout";
+  }
+  if (block.durationMinutes <= 30) return "quick_win_or_recovery";
+  return "flex";
+}
+
+function listBlocks(available: AvailableTime): string {
+  if (available.openBlocks.length === 0) return "- none";
+  return available.openBlocks
+    .map(
+      (b) =>
+        `- ${b.start}-${b.end} | ${b.durationMinutes} min | recommended_use ${recommendedUse(
+          b,
+          available,
+        )}`,
+    )
+    .join("\n");
 }
 
 function listTasks(tasks: Task[]): string {
   if (tasks.length === 0) return "- none";
+  return tasks.map((task) => `- ${formatTaskForPlanningExport(task)}`).join("\n");
+}
+
+function listDoNotSchedule(tasks: Task[]): string {
+  if (tasks.length === 0) return "- none";
   return tasks
-    .map(
-      (t) =>
-        `- ${t.title} · ${t.task_type} · ~${t.estimated_minutes}m · u${t.urgency}/i${t.importance}`,
-    )
+    .map((task) => {
+      const reason =
+        task.status === "ignored_today"
+          ? `Ignore Today until ${task.ignored_until ?? "today"}`
+          : task.daily_role === "Ignore Today"
+            ? "Marked Ignore Today"
+            : "Not selected for today's schedule";
+      return `- ${task.task_code} | ${task.title} | ${reason}`;
+    })
     .join("\n");
 }
 
+export type PlanningExportValidation = {
+  canExport: boolean;
+  blockers: string[];
+  warnings: string[];
+};
+
+export function buildPlanningExportValidation(input: {
+  tasks: Task[];
+  mustDo: Task[];
+  availableMinutes: number;
+  openWindowCount: number;
+  ignoredExcludedCount?: number;
+  parkingLotExcludedCount?: number;
+  terminalExcludedCount?: number;
+}): PlanningExportValidation {
+  const blockers: string[] = [];
+  const warnings: string[] = [];
+  const missingCodes = input.tasks.filter((task) => !task.task_code?.trim());
+  if (missingCodes.length > 0) {
+    blockers.push(`${missingCodes.length} exported task(s) are missing task codes.`);
+  }
+  if (input.mustDo.length === 0) warnings.push("Must Do missing.");
+  if (input.openWindowCount === 0) warnings.push("No open windows detected.");
+  const estimatedMinutes = input.tasks.reduce(
+    (sum, task) => sum + (task.estimated_minutes ?? 0),
+    0,
+  );
+  if (input.availableMinutes > 0 && estimatedMinutes > input.availableMinutes) {
+    warnings.push(
+      `Estimated work (${estimatedMinutes} min) exceeds open time (${input.availableMinutes} min).`,
+    );
+  }
+  const missingEstimate = input.tasks.filter((task) => task.estimated_minutes == null);
+  if (missingEstimate.length > 0) {
+    warnings.push(`${missingEstimate.length} task(s) marked Estimate missing.`);
+  }
+  const missingPriority = input.tasks.filter((task) => task.priority == null);
+  if (missingPriority.length > 0) {
+    warnings.push(`${missingPriority.length} task(s) marked Priority unset.`);
+  }
+  const missingConsequence = input.tasks.filter((task) => task.consequence_level == null);
+  if (missingConsequence.length > 0) {
+    warnings.push(`${missingConsequence.length} task(s) marked Consequence unset.`);
+  }
+  if ((input.ignoredExcludedCount ?? 0) > 0) {
+    warnings.push(`${input.ignoredExcludedCount} ignored item(s) excluded.`);
+  }
+  if ((input.parkingLotExcludedCount ?? 0) > 0) {
+    warnings.push(`${input.parkingLotExcludedCount} parking lot item(s) excluded.`);
+  }
+  if ((input.terminalExcludedCount ?? 0) > 0) {
+    warnings.push(`${input.terminalExcludedCount} done/archived/trashed item(s) excluded.`);
+  }
+  return { canExport: blockers.length === 0, blockers, warnings };
+}
+
 export function buildCalendarPlanningPrompt(ctx: CalendarPromptContext): string {
-  const trustTasks = ctx.plan.quickWins
+  const trustTasks = (ctx.trustProtectors?.length ? ctx.trustProtectors : ctx.plan.quickWins
     .concat(ctx.plan.maintenance)
-    .filter((t) => t.trust_impact >= 6);
+    .filter((t) => t.trust_impact >= 6));
   const recovery = ctx.plan.maintenance.filter(
     (t) => t.task_type === "Health" || t.task_type === "Personal",
   );
+  const exportableTasks = [
+    ...ctx.plan.mustDo,
+    ...ctx.plan.shouldDo,
+    ...ctx.plan.maintenance,
+    ...ctx.plan.quickWins,
+    ...trustTasks,
+  ].filter((task, index, all) => all.findIndex((candidate) => candidate.id === task.id) === index);
+  const baseValidationWarnings = validatePlanningExport({
+    tasks: exportableTasks,
+    mustDo: ctx.plan.mustDo,
+    anchorsCount: ctx.anchors.length,
+  });
+  const validation = buildPlanningExportValidation({
+    tasks: exportableTasks,
+    mustDo: ctx.plan.mustDo,
+    availableMinutes: ctx.available.totalOpenMinutes,
+    openWindowCount: ctx.available.openBlocks.length,
+    ignoredExcludedCount: ctx.ignoredExcludedCount,
+    parkingLotExcludedCount: ctx.parkingLotExcludedCount,
+    terminalExcludedCount: ctx.terminalExcludedCount,
+  });
+  const validationLines = [
+    ...validation.blockers,
+    ...validation.warnings,
+    ...baseValidationWarnings.filter(
+      (warning) => !validation.blockers.includes(warning) && !validation.warnings.includes(warning),
+    ),
+  ];
 
   return `Here is my Lifeee calendar and task context:
 
 Date: ${ctx.date}
+Current time: ${ctx.currentTime ?? new Date().toLocaleString()}
+Shutdown target: ${ctx.available.bestShutdownTarget}
+Energy: ${ctx.currentEnergy}/10
+Mood: ${ctx.mood ?? "Not supplied"}
+Plan reality score: ${ctx.planRealityScore == null ? "Not supplied" : `${ctx.planRealityScore}/10`}
+Daily operating mode: ${ctx.operatingMode ?? "Not supplied"}
 
 Fixed anchors:
 ${listAnchors(ctx.anchors)}
 
-Open time blocks:
-${listBlocks(ctx.available.openBlocks)}
+Open windows:
+${listBlocks(ctx.available)}
 
 Tasks:
 Must Do:
 ${listTasks(ctx.plan.mustDo)}
+
 Should Do:
 ${listTasks(ctx.plan.shouldDo)}
+
 Maintenance:
 ${listTasks(ctx.plan.maintenance)}
+
 Quick Wins:
 ${listTasks(ctx.plan.quickWins)}
 
@@ -631,7 +980,6 @@ ${listTasks(
   [...ctx.plan.mustDo, ...ctx.plan.shouldDo].filter((t) => t.due_date),
 )}
 
-Energy: ${ctx.currentEnergy}/10
 Sleep readiness: ${ctx.sleepReadiness}/10
 Academic pressure: ${ctx.academicPressure}/10
 Workout readiness: ${ctx.workoutReadiness}/10
@@ -641,13 +989,53 @@ MCAT next move: ${ctx.mcatNextMove}
 Trust tasks:
 ${listTasks(trustTasks)}
 
+Trust Protectors:
+${listTasks(trustTasks)}
+
 Recovery needs:
 ${listTasks(recovery)}
 
-Build me a realistic day schedule.
-Sort items into anchors, must do, should do, maintenance, quick wins, and ignore today.
-Find the best study block, best workout block, and shutdown time.
-Tell me what is overloaded and what to move.`;
+Inbox candidates only if realistic:
+${listTasks(ctx.inboxCandidates ?? [])}
+
+Ignore Today / Do Not Schedule:
+${listDoNotSchedule(ctx.plan.ignoreToday)}
+
+Parking Lot excluded by default.
+Done/Archived/Trashed excluded always unless explicitly requested.
+
+Export validation:
+${validationLines.length ? validationLines.map((warning) => `- ${warning}`).join("\n") : "- ok"}
+
+Planning rules:
+- do not overfill the day
+- protect the Must Do first
+- put highest-energy work in the best energy window
+- include breaks
+- include shutdown
+- cut tasks if unrealistic
+- if a task is too vague, turn it into a smaller next action
+- preserve task codes exactly
+
+Required ChatGPT output format:
+Return a parseable schedule block with this exact shape:
+
+SCHEDULE
+- 09:00-10:30 | TASK-20260514-001 | Finish Pickaxe | deep_work | reason
+- 10:30-10:45 | BREAK | Break | recovery | reason
+
+UNSCHEDULED
+- TASK-20260514-002 | reason
+
+RISKS
+- TASK-20260514-003 | risk reason
+
+FIRST_ACTION
+- task_code or FREEFORM | first action text
+
+PLAN_REALISM
+- score: 1-10
+- reason: text`;
 }
 
 export type WeeklyReviewContext = {

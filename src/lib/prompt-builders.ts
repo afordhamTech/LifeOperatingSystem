@@ -32,6 +32,8 @@ export type PromptBuilderContext = {
   workoutSummary?: string;
   nutritionSummary?: string;
   weeklyReviewSummary?: string;
+  executionTruthSummary?: string;
+  planningSummary?: string;
   faithSummary?: string;
   relationshipSummary?: string;
   careerProofSummary?: string;
@@ -90,6 +92,8 @@ function commonContext(context: PromptBuilderContext) {
     line("Workout", context.workoutSummary),
     line("Nutrition", context.nutritionSummary),
     line("Weekly review", context.weeklyReviewSummary),
+    line("Execution truth", context.executionTruthSummary),
+    line("Reality-constrained planning", context.planningSummary),
     line("Faith", context.faithSummary),
     line("Relationships", context.relationshipSummary),
     line("Career proof", context.careerProofSummary),
@@ -131,7 +135,27 @@ Sort the task list into Must Do, Should Do, Maintenance, Waiting, Quick Win, and
 
 ${shared}
 
-Use the anchors and open blocks to place the hard work, recovery, workout, and shutdown target. Flag overload honestly.`;
+Use the anchors and open blocks to place the hard work, recovery, workout, and shutdown target. Flag overload honestly.
+
+The "Reality-constrained planning" section lists the only realistic open windows, the protected sleep and shutdown reserves, the best deep-work windows, and the realistic capacity. Do NOT schedule work outside those open windows. Do NOT exceed the realistic capacity. Respect the protected sleep and shutdown reserves.
+
+Return this parseable schedule block:
+SCHEDULE
+- 09:00-10:30 | TASK-20260514-001 | Task title | deep_work | reason
+- 10:30-10:45 | BREAK | Break | recovery | reason
+
+UNSCHEDULED
+- TASK-20260514-002 | reason
+
+RISKS
+- TASK-20260514-003 | risk reason
+
+FIRST_ACTION
+- task_code or FREEFORM | first action text
+
+PLAN_REALISM
+- score: 1-10
+- reason: text`;
     case "sleep-recovery":
       return `${baseHeader("Sleep Recovery", context)}
 
@@ -191,7 +215,38 @@ Review the proof locker. Identify the strongest artifact, the weakest evidence g
 
 ${shared}
 
-Synthesize the full Lifeee context. Return a concise operating brief with priorities, risks, recommended next actions, and missing data.`;
+Use the Tasks section as structured task rows when task codes are present:
+TASK-CODE | id | title | domain/task type | lifecycle status | daily role | due date | estimated minutes | priority | consequence | energy | trust impact | ignored/carry/rescheduled counts | notes.
+
+For schedule planning, preserve task codes exactly and return this parseable block when a schedule is requested:
+SCHEDULE
+- 09:00-10:30 | TASK-20260514-001 | Task title | deep_work | reason
+- 10:30-10:45 | BREAK | Break | recovery | reason
+
+UNSCHEDULED
+- TASK-20260514-002 | reason
+
+RISKS
+- TASK-20260514-003 | risk reason
+
+FIRST_ACTION
+- task_code or FREEFORM | first action text
+
+PLAN_REALISM
+- score: 1-10
+- reason: text
+
+The Execution truth line carries what actually happened: locked plan status, completed blocks, missed blocks and reasons, partial tasks, carry-forward items, anti-drift lesson, tomorrow's first move, and repeated drift items.
+
+Using the execution truth:
+- analyze what actually happened versus what was planned
+- identify the real bottleneck (not the surface excuse)
+- suggest tomorrow's single first move
+- do not create an overloaded plan
+
+The "Reality-constrained planning" line lists the only realistic open windows, protected sleep/shutdown reserves, best deep-work windows, and realistic capacity. Do not propose work outside those windows or beyond that capacity.
+
+Synthesize the full Lifeee context. Return a concise operating brief with priorities, risks, recommended next actions, missing data, and any task IDs that need planning attention.`;
     case "weekly-strategy-brief":
       return `${baseHeader("Weekly Strategy Brief", context)}
 

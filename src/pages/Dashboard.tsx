@@ -26,6 +26,9 @@ import { SyncBadge } from "@/components/SyncBadge";
 import DecisionLogCard from "@/components/DecisionLogCard";
 import DecisionsDueReviewPanel from "@/components/DecisionsDueReviewPanel";
 import TodayDecisionLoop from "@/components/TodayDecisionLoop";
+import ExecutionTruthPanel from "@/components/ExecutionTruthPanel";
+import { aggregateExecutionStats } from "@/lib/execution-truth";
+import { buildPlanningSnapshot } from "@/lib/planning-engine";
 import { usePushPromptContext } from "@/providers/PromptContext";
 import { buildLifeeePrompt } from "@/lib/prompt-builders";
 import { supabase } from "@/lib/supabase-client";
@@ -43,13 +46,21 @@ import { toDateKey } from "@/lib/date-helpers";
 import { getMcatDailyNextMove, loadMcatFoundationState } from "@/lib/mcat-foundation";
 import { useSupabaseSession } from "@/hooks/useSupabaseSession";
 import { Link } from "react-router";
-import { buildDayPlan, loadTasks, type Task } from "@/lib/task-system";
+import {
+  buildDayPlan,
+  buildTaskSmartViews,
+  isDoneStatus,
+  loadTasks,
+  saveTasks,
+  type Task,
+} from "@/lib/task-system";
 import {
   buildDailyPlanPayload,
   createLifeeeId,
   fetchCalendarAnchors,
   fetchDailyPlan,
   fetchDecisionLogs,
+  fetchTimeBlocks,
   fetchUniversalTasks,
   fetchRecentWeeklyReviews,
   fetchWeeklyReview,
@@ -99,8 +110,22 @@ import {
   calculateRealityScore,
   parseTimeToMinutes,
   type CalendarAnchor,
+  type TimeBlock,
   loadAnchors,
+  loadTimeBlocks,
+  saveTimeBlocks,
 } from "@/lib/calendar-system";
+import {
+  AdvancedOnly,
+  AIActionButton,
+  CollapsibleSection,
+  EmptyStateCard,
+  InsightCard,
+  NextActionCard,
+  PageDecisionHeader,
+  PrimaryActionBar,
+  SimpleOnly,
+} from "@/components/ui-kit";
 
 type DashboardState = {
   dailyLog: DailyLogRow | null;
@@ -155,6 +180,7 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null);
   const [taskList, setTaskList] = useState<Task[]>(() => loadTasks());
   const [anchorList, setAnchorList] = useState<CalendarAnchor[]>(() => loadAnchors());
+  const [timeBlockList, setTimeBlockList] = useState<TimeBlock[]>(() => loadTimeBlocks());
   const [planSyncStatus, setPlanSyncStatus] = useState<LifeeeSyncStatus>("local");
   const [planSyncError, setPlanSyncError] = useState<string | null>(null);
   const [planNotes, setPlanNotes] = useState<string>("");
@@ -223,6 +249,7 @@ export default function Dashboard() {
         if (!active) return;
         setTaskList(loadTasks());
         setAnchorList(loadAnchors());
+        setTimeBlockList(loadTimeBlocks());
         setRemoteTasksLoaded(false);
         setPlanSyncStatus(hasSupabaseConfig ? "waiting" : "local");
         setIsLoading(false);
@@ -251,6 +278,7 @@ export default function Dashboard() {
         weeklyReviewResult,
         universalTasksResult,
         calendarAnchorsResult,
+        timeBlocksResult,
         dailyPlanResult,
         decisionLogsResult,
       ] =
@@ -311,6 +339,9 @@ export default function Dashboard() {
           fetchCalendarAnchors(userId)
             .then((data) => ({ data, error: null }))
             .catch((caughtError: unknown) => ({ data: [] as CalendarAnchor[], error: caughtError })),
+          fetchTimeBlocks(userId, today, today)
+            .then((data) => ({ data, error: null }))
+            .catch((caughtError: unknown) => ({ data: [] as TimeBlock[], error: caughtError })),
           fetchDailyPlan(userId, today)
             .then((data) => ({ data, error: null }))
             .catch((caughtError: unknown) => ({ data: null, error: caughtError })),
@@ -332,6 +363,7 @@ export default function Dashboard() {
         weeklyReviewResult.error ??
         universalTasksResult.error ??
         calendarAnchorsResult.error ??
+        timeBlocksResult.error ??
         dailyPlanResult.error ??
         decisionLogsResult.error;
 
@@ -351,6 +383,8 @@ export default function Dashboard() {
       });
       setTaskList(universalTasksResult.data);
       setAnchorList(calendarAnchorsResult.data);
+      setTimeBlockList(timeBlocksResult.data);
+      saveTimeBlocks(timeBlocksResult.data);
       setRemoteTasksLoaded(!universalTasksResult.error);
       const dailyPlanRow = dailyPlanResult.data;
       setPlanNotes((dailyPlanRow?.notes as string | null) ?? "");
@@ -407,8 +441,12 @@ export default function Dashboard() {
   const statusAverage = (sleepScore + academicScore + workoutScore) / 3;
   const currentEnergy = Number(state.dailyLog?.energy ?? 7);
   const dayPlan = useMemo(
-    () => buildDayPlan(taskList, currentEnergy),
-    [taskList, currentEnergy],
+    () => buildDayPlan(taskList, currentEnergy, today),
+    [taskList, currentEnergy, today],
+  );
+  const taskSmartViews = useMemo(
+    () => buildTaskSmartViews(taskList, { today, currentEnergy }),
+    [currentEnergy, taskList, today],
   );
 
   const todayAnchors = useMemo(
@@ -417,6 +455,13 @@ export default function Dashboard() {
         .filter((a) => a.date === today)
         .sort((a, b) => parseTimeToMinutes(a.start_time) - parseTimeToMinutes(b.start_time)),
     [anchorList, today],
+  );
+  const todayTimeBlocks = useMemo(
+    () =>
+      timeBlockList
+        .filter((block) => block.date === today)
+        .sort((a, b) => parseTimeToMinutes(a.start_time) - parseTimeToMinutes(b.start_time)),
+    [timeBlockList, today],
   );
   const sleepDebtHours = Number(state.sleepToday?.sleep_debt ?? 0);
   const availableTime = useMemo(
@@ -427,8 +472,21 @@ export default function Dashboard() {
     [todayAnchors, sleepDebtHours],
   );
   const todayTimeline = useMemo(
-    () => buildTodayTimeline(todayAnchors, availableTime),
-    [todayAnchors, availableTime],
+    () => buildTodayTimeline(todayAnchors, availableTime, { timeBlocks: todayTimeBlocks }),
+    [todayAnchors, availableTime, todayTimeBlocks],
+  );
+  const planningSnapshot = useMemo(
+    () =>
+      buildPlanningSnapshot({
+        date: today,
+        anchors: todayAnchors,
+        timeBlocks: todayTimeBlocks,
+        sleepDebtHours: Number.isFinite(sleepDebtHours) ? sleepDebtHours : 0,
+        plannedTaskMinutes: dayPlan.mustDo
+          .concat(dayPlan.shouldDo, dayPlan.maintenance, dayPlan.quickWins)
+          .reduce((sum, task) => sum + (task.estimated_minutes ?? 0), 0),
+      }),
+    [today, todayAnchors, todayTimeBlocks, sleepDebtHours, dayPlan],
   );
   const realityScore = useMemo(
     () =>
@@ -510,10 +568,26 @@ export default function Dashboard() {
   const copyCalendarPrompt = async () => {
     const text = buildCalendarPlanningPrompt({
       date: today,
+      currentTime: new Date().toLocaleString(),
+      operatingMode,
+      planRealityScore: Number(realityScore.score.toFixed(1)),
       anchors: todayAnchors,
       available: availableTime,
       plan: dayPlan,
+      trustProtectors: taskSmartViews.trustProtectors,
+      inboxCandidates: taskSmartViews.inboxCandidates,
+      ignoredExcludedCount: taskSmartViews.ignoreToday.length,
+      parkingLotExcludedCount: taskSmartViews.parkingLot.length,
+      terminalExcludedCount: taskList.filter(
+        (task) =>
+          isDoneStatus(task.status) ||
+          task.status === "archived" ||
+          task.status === "trashed" ||
+          task.archived_at != null ||
+          task.deleted_at != null,
+      ).length,
       currentEnergy,
+      mood: state.dailyLog?.mood ?? "Not supplied",
       sleepReadiness: sleepScore || 6,
       academicPressure: academicScore || 5,
       workoutReadiness: workoutScore || 6,
@@ -543,11 +617,19 @@ export default function Dashboard() {
   );
 
   const handleTaskCreated = (created: Task) => {
-    setTaskList((prev) => [created, ...prev.filter((task) => task.id !== created.id)]);
+    setTaskList((prev) => {
+      const next = [created, ...prev.filter((task) => task.id !== created.id)];
+      saveTasks(next);
+      return next;
+    });
   };
 
   const handleTaskUpserted = (saved: Task) => {
-    setTaskList((prev) => prev.map((task) => (task.id === saved.id ? saved : task)));
+    setTaskList((prev) => {
+      const next = prev.map((task) => (task.id === saved.id ? saved : task));
+      saveTasks(next);
+      return next;
+    });
   };
 
   const handleDecisionSaved = (saved: DecisionLog) => {
@@ -604,6 +686,19 @@ export default function Dashboard() {
       }),
     [anchorList, currentEnergy, decisionLogs, taskList, today],
   );
+  const unscheduledTrustProtectors = useMemo(() => {
+    const scheduledTaskIds = new Set(
+      todayTimeBlocks
+        .map((block) => block.linked_task_id)
+        .filter((id): id is string => Boolean(id)),
+    );
+    return decisionLoop.trustProtectors.filter(
+      (protector) =>
+        protector.source === "task" &&
+        protector.task_id &&
+        !scheduledTaskIds.has(protector.task_id),
+    );
+  }, [decisionLoop.trustProtectors, todayTimeBlocks]);
 
   const outcomeMatches = useMemo(
     () =>
@@ -668,9 +763,10 @@ export default function Dashboard() {
 
   const decisionPromptPayload = useMemo(() => {
     const inboxAndToday = [
+      ...taskSmartViews.exportablePlanningSet.slice(0, 12),
       ...decisionLoop.todayCommitted.slice(0, 6),
       ...decisionLoop.inboxCandidates.slice(0, 6),
-    ];
+    ].filter((task, index, all) => all.findIndex((candidate) => candidate.id === task.id) === index);
     return {
       date: today,
       sourcePage: "dashboard",
@@ -701,6 +797,13 @@ export default function Dashboard() {
       weeklyReviewSummary: state.weeklyReview
         ? `Life score ${Number(state.weeklyReview.weekly_life_score ?? 0).toFixed(1)} · win: ${state.weeklyReview.biggest_win ?? "unset"} · leak: ${state.weeklyReview.biggest_leak ?? "unset"}`
         : undefined,
+      executionTruthSummary: (() => {
+        if (todayTimeBlocks.length === 0) return undefined;
+        const exec = aggregateExecutionStats(todayTimeBlocks);
+        return `${exec.total} blocks · ${exec.completed} done · ${exec.partial} partial · ${exec.missed} missed · ${exec.skipped} skipped · ${exec.notStarted} not started${
+          exec.mostCommonMissedReason ? ` · top miss reason: ${exec.mostCommonMissedReason}` : ""
+        }`;
+      })(),
       decisionSummary,
       reviewedDecisionsSummary,
       outcomeFeedbackSummary,
@@ -719,6 +822,7 @@ export default function Dashboard() {
     decisionLoop.inboxCandidates,
     decisionLoop.todayCommitted,
     decisionLoop.trustProtectors,
+    taskSmartViews.exportablePlanningSet,
     decisionSummary,
     reviewedDecisionsSummary,
     outcomeFeedbackSummary,
@@ -735,6 +839,7 @@ export default function Dashboard() {
     state.weeklyReview,
     state.workoutToday,
     today,
+    todayTimeBlocks,
     topTask,
   ]);
 
@@ -789,18 +894,285 @@ export default function Dashboard() {
     }
   };
 
+  // NOW / NEXT / LATER derivation from today's scheduled blocks.
+  const nowMinutes = useMemo(() => {
+    const d = new Date();
+    return d.getHours() * 60 + d.getMinutes();
+  }, []);
+  const nowNextLater = useMemo(() => {
+    const isDone = (b: TimeBlock) =>
+      b.execution_status === "done" || b.execution_status === "skipped";
+    const withTimes = todayTimeBlocks.map((b) => ({
+      block: b,
+      start: parseTimeToMinutes(b.start_time),
+      end: parseTimeToMinutes(b.end_time),
+    }));
+    const active = withTimes.find(
+      (b) => b.start <= nowMinutes && b.end > nowMinutes && !isDone(b.block),
+    );
+    const upcoming = withTimes
+      .filter((b) => b.start > nowMinutes && !isDone(b.block))
+      .sort((a, b) => a.start - b.start);
+    const now = active ?? upcoming[0] ?? null;
+    const next = (active ? upcoming[0] : upcoming[1]) ?? null;
+    const laterStart = active ? upcoming.slice(1) : upcoming.slice(2);
+    return {
+      now,
+      next,
+      later: laterStart.map((b) => b.block),
+      nowIsActive: Boolean(active),
+    };
+  }, [todayTimeBlocks, nowMinutes]);
+
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <div className="border-b border-[#ddd4c6] pb-4">
-        <h1 className="text-2xl font-semibold text-[#25313c]">
-          Daily Operating System
-        </h1>
-        <div className="mt-2 flex flex-wrap items-center gap-2">
-          <DailyOpModeChip mode={operatingMode} />
-          <SyncBadge status={planSyncStatus} />
-          {planSyncError ? <span className="text-xs text-destructive">{planSyncError}</span> : null}
+      <PageDecisionHeader
+        title="Daily OS"
+        question="What is the one thing to do right now?"
+      >
+        <DailyOpModeChip mode={operatingMode} />
+        <SyncBadge status={planSyncStatus} />
+        {planSyncError ? (
+          <span className="text-xs text-destructive">{planSyncError}</span>
+        ) : null}
+      </PageDecisionHeader>
+
+      {error ? (
+        <div className="rounded border border-[#c97a73]/30 bg-[#c97a73]/10 px-3 py-2 text-xs text-[#c97a73]">
+          {error}
         </div>
+      ) : null}
+
+      {/* 1. NOW / NEXT / LATER */}
+      <div className="grid gap-3 md:grid-cols-3">
+        {nowNextLater.now ? (
+          <NextActionCard
+            label={nowNextLater.nowIsActive ? "Now · active block" : "Now · next block"}
+            title={nowNextLater.now.block.title}
+            detail={
+              <span>
+                {nowNextLater.now.block.start_time}–{nowNextLater.now.block.end_time}
+                {nowNextLater.now.block.reason ? ` · ${nowNextLater.now.block.reason}` : ""}
+              </span>
+            }
+            tone={nowNextLater.nowIsActive ? "primary" : "calm"}
+            action={
+              <a
+                href="#today-progress"
+                className="inline-flex items-center rounded-md border border-primary/40 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20"
+              >
+                {nowNextLater.nowIsActive ? "Start / Complete" : "Open block"}
+              </a>
+            }
+          />
+        ) : (
+          <EmptyStateCard
+            missing="Now: no scheduled block right now"
+            nextAction="Plan your day with the AI calendar prompt below."
+            why="A scheduled NOW keeps the day on rails."
+          />
+        )}
+        {nowNextLater.next ? (
+          <InsightCard
+            label="Next"
+            value={`${nowNextLater.next.block.start_time}`}
+            interpretation={nowNextLater.next.block.title}
+            reason={`${nowNextLater.next.block.start_time}–${nowNextLater.next.block.end_time}`}
+          />
+        ) : (
+          <InsightCard label="Next" interpretation="Nothing else scheduled." />
+        )}
+        <InsightCard
+          label="Later"
+          value={nowNextLater.later.length ? `${nowNextLater.later.length} items` : undefined}
+          interpretation={
+            nowNextLater.later.length ? (
+              <ul className="space-y-0.5">
+                {nowNextLater.later.slice(0, 3).map((b) => (
+                  <li key={b.id} className="truncate">
+                    {b.start_time} · {b.title}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              "Nothing queued for later today."
+            )
+          }
+        />
       </div>
+
+      {/* 2. Today's Focus */}
+      <TodayDecisionLoop
+        today={today}
+        tasks={taskList}
+        anchors={anchorList}
+        currentEnergy={currentEnergy}
+        userId={userId}
+        hasSupabaseConfig={hasSupabaseConfig}
+        sessionLoading={isLoading}
+        remoteLoaded={remoteTasksLoaded}
+        onTaskCreated={handleTaskCreated}
+        onTaskUpserted={handleTaskUpserted}
+        planNotes={planNotes}
+        onPlanNotesChange={setPlanNotes}
+        planNotesSyncStatus={planSyncStatus}
+        planNotesError={planSyncError}
+        onLogIgnoreDecision={logIgnoreDecision}
+        outcomeMatches={outcomeMatches}
+        decisions={decisionLogs}
+      />
+
+      {/* 4. Risk / Drift — only when relevant */}
+      {weeklyBottleneckDiagnosis.bottleneckKind !== "insufficient-evidence" ? (
+        <NextActionCard
+          label="Needs Attention"
+          title={weeklyBottleneckDiagnosis.bottleneckLabel}
+          tone="warning"
+          detail={
+            <span>
+              {weeklyBottleneckDiagnosis.confidence} confidence ·{" "}
+              {weeklyBottleneckDiagnosis.suggestedFix}
+            </span>
+          }
+        />
+      ) : null}
+
+      {/* 3. Capture + 5. Today's Progress / Shutdown */}
+      <div id="today-progress">
+        <ExecutionTruthPanel
+          today={today}
+          userId={userId}
+          hasSupabaseConfig={hasSupabaseConfig}
+        />
+      </div>
+
+      {/* This week's one move — kept visible, compact */}
+      {activeOneMove ? (
+        <div className="rounded-lg border border-[#6b87ae]/30 bg-[#6b87ae]/10 px-3 py-2 text-xs text-[#25313c] flex flex-wrap items-center gap-2">
+          <span className="text-[10px] uppercase tracking-wider text-[#6b87ae] font-semibold">
+            This week's one move
+          </span>
+          <span className="font-medium">{activeOneMove}</span>
+          {activeOneMoveVerdict.outcome ? (
+            <span
+              className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${
+                activeOneMoveVerdict.outcome === "worked"
+                  ? "border-emerald-200 bg-emerald-100 text-emerald-700"
+                  : activeOneMoveVerdict.outcome === "partial"
+                    ? "border-amber-200 bg-amber-100 text-amber-700"
+                    : activeOneMoveVerdict.outcome === "missed"
+                      ? "border-rose-200 bg-rose-100 text-rose-700"
+                      : "border-stone-200 bg-stone-100 text-stone-700"
+              }`}
+              title={activeOneMoveVerdict.note || undefined}
+            >
+              Last verdict: {activeOneMoveVerdict.outcome}
+            </span>
+          ) : null}
+          {feedbackHistory && feedbackHistory.currentStreak > 0 ? (
+            <span className="rounded-full border border-[#6b87ae]/30 bg-white px-2 py-0.5 text-[10px] font-medium text-[#25313c]">
+              Verdict streak: {feedbackHistory.currentStreak}
+            </span>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => void copyWeeklyBrief()}
+            disabled={briefStatus === "copied" || briefStatus === "saved"}
+            className="ml-auto inline-flex items-center gap-1 rounded-md border border-[#ddd4c6] bg-white px-2 py-0.5 text-[10px] font-medium text-[#25313c] hover:bg-[#f7f3ec] disabled:opacity-70"
+            title="Copies a Weekly Strategy Brief prompt to clipboard"
+          >
+            <Copy size={10} />
+            {briefStatus === "saved"
+              ? "Copied + saved"
+              : briefStatus === "copied"
+                ? "Copied"
+                : briefStatus === "error"
+                  ? "Retry copy"
+                  : "Copy weekly brief"}
+          </button>
+          {briefError ? (
+            <span className="text-[10px] text-destructive">{briefError}</span>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* Plan with AI */}
+      <PrimaryActionBar>
+        <AIActionButton onClick={copyCalendarPrompt}>
+          {calendarPromptCopied ? "Copied" : "Plan with AI"}
+        </AIActionButton>
+        <Link
+          to="/calendar"
+          className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-1.5 text-xs hover:bg-muted/70"
+        >
+          Open Calendar →
+        </Link>
+        <Link
+          to="/tasks"
+          className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-1.5 text-xs hover:bg-muted/70"
+        >
+          Open Tasks →
+        </Link>
+        <span className="text-xs text-muted-foreground">
+          <AdvancedOnly>
+            {todayAnchors.length} anchors · {todayTimeBlocks.length} blocks ·{" "}
+            {availableTime.totalOpenMinutes} min open · shutdown{" "}
+            {availableTime.bestShutdownTarget}
+          </AdvancedOnly>
+          <SimpleOnly>
+            {todayTimeBlocks.length} planned blocks · shutdown{" "}
+            {availableTime.bestShutdownTarget}
+          </SimpleOnly>
+        </span>
+      </PrimaryActionBar>
+
+      {/* Notices — advanced / debug language only in Advanced mode */}
+      <AdvancedOnly>
+        {notice ? (
+          <div className="rounded border border-[#ddd4c6] bg-[#fdfaf4] px-3 py-2 text-xs text-[#6f685f]">
+            {notice}
+          </div>
+        ) : null}
+        {hasSupabaseConfig && !userId ? (
+          <div className="rounded border border-[#6b87ae]/30 bg-[#6b87ae]/10 px-3 py-2 text-xs text-[#6b87ae]">
+            Supabase is configured, but there is no session yet. The dashboard is
+            still usable in draft mode.
+          </div>
+        ) : null}
+        {!hasSupabaseConfig ? (
+          <div className="rounded border border-[#c39a4e]/30 bg-[#c39a4e]/10 px-3 py-2 text-xs text-[#c39a4e]">
+            Supabase env vars are missing. The dashboard still works locally.
+          </div>
+        ) : null}
+      </AdvancedOnly>
+
+      {/* 6. Review & Reflection — everything else collapsed */}
+      <CollapsibleSection
+        title="Review & Reflection"
+        subtitle="Decision log, daily log, plan detail, domain summaries"
+      >
+        <div className="space-y-4">
+          <DecisionsDueReviewPanel
+            today={today}
+            weekStart={weekStart}
+            weekEnd={weekEnd}
+            decisions={decisionLogs}
+            userId={userId}
+            hasSupabaseConfig={hasSupabaseConfig}
+            sessionLoading={isLoading}
+            remoteLoaded={remoteTasksLoaded}
+            onDecisionReviewed={handleDecisionSaved}
+          />
+
+          <DecisionLogCard
+            today={today}
+            decisions={decisionLogs}
+            userId={userId}
+            hasSupabaseConfig={hasSupabaseConfig}
+            sessionLoading={isLoading}
+            remoteLoaded={remoteTasksLoaded}
+            onDecisionSaved={handleDecisionSaved}
+          />
 
       <div className="card-surface p-4 flex flex-wrap items-center justify-between gap-4">
         <StatusRing score={sleepScore} label="Sleep" size={60} />
@@ -861,140 +1233,6 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
-
-      {error ? (
-        <div className="rounded border border-[#c97a73]/30 bg-[#c97a73]/10 px-3 py-2 text-xs text-[#c97a73]">
-          {error}
-        </div>
-      ) : null}
-      {notice ? (
-        <div className="rounded border border-[#ddd4c6] bg-[#fdfaf4] px-3 py-2 text-xs text-[#6f685f]">
-          {notice}
-        </div>
-      ) : null}
-      {hasSupabaseConfig && !userId ? (
-        <div className="rounded border border-[#6b87ae]/30 bg-[#6b87ae]/10 px-3 py-2 text-xs text-[#6b87ae]">
-          Supabase is configured, but there is no session yet. The dashboard is
-          still usable in draft mode.
-        </div>
-      ) : null}
-      {!hasSupabaseConfig ? (
-        <div className="rounded border border-[#c39a4e]/30 bg-[#c39a4e]/10 px-3 py-2 text-xs text-[#c39a4e]">
-          Supabase env vars are missing. The dashboard still works locally.
-        </div>
-      ) : null}
-
-      {weeklyBottleneckDiagnosis.bottleneckKind !== "insufficient-evidence" ? (
-        <div className="rounded-lg border border-[#ddd4c6] bg-[#fdfaf4] px-3 py-2 text-xs text-[#25313c] flex flex-wrap items-center gap-2">
-          <span className="text-[10px] uppercase tracking-wider text-[#c39a4e] font-semibold">
-            Current bottleneck
-          </span>
-          <span className="font-medium">{weeklyBottleneckDiagnosis.bottleneckLabel}</span>
-          <span
-            className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${
-              weeklyBottleneckDiagnosis.confidence === "high"
-                ? "border-rose-200 bg-rose-100 text-rose-700"
-                : weeklyBottleneckDiagnosis.confidence === "medium"
-                  ? "border-amber-200 bg-amber-100 text-amber-700"
-                  : "border-stone-200 bg-stone-100 text-stone-700"
-            }`}
-          >
-            {weeklyBottleneckDiagnosis.confidence}
-          </span>
-          <span className="text-[#6f685f]">· {weeklyBottleneckDiagnosis.suggestedFix}</span>
-        </div>
-      ) : null}
-
-      {activeOneMove ? (
-        <div className="rounded-lg border border-[#6b87ae]/30 bg-[#6b87ae]/10 px-3 py-2 text-xs text-[#25313c] flex flex-wrap items-center gap-2">
-          <span className="text-[10px] uppercase tracking-wider text-[#6b87ae] font-semibold">
-            This week's one move
-          </span>
-          <span className="font-medium">{activeOneMove}</span>
-          {activeOneMoveVerdict.outcome ? (
-            <span
-              className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${
-                activeOneMoveVerdict.outcome === "worked"
-                  ? "border-emerald-200 bg-emerald-100 text-emerald-700"
-                  : activeOneMoveVerdict.outcome === "partial"
-                    ? "border-amber-200 bg-amber-100 text-amber-700"
-                    : activeOneMoveVerdict.outcome === "missed"
-                      ? "border-rose-200 bg-rose-100 text-rose-700"
-                      : "border-stone-200 bg-stone-100 text-stone-700"
-              }`}
-              title={activeOneMoveVerdict.note || undefined}
-            >
-              Last verdict: {activeOneMoveVerdict.outcome}
-            </span>
-          ) : null}
-          {feedbackHistory && feedbackHistory.currentStreak > 0 ? (
-            <span className="rounded-full border border-[#6b87ae]/30 bg-white px-2 py-0.5 text-[10px] font-medium text-[#25313c]">
-              Verdict streak: {feedbackHistory.currentStreak}
-            </span>
-          ) : null}
-          <button
-            type="button"
-            onClick={() => void copyWeeklyBrief()}
-            disabled={briefStatus === "copied" || briefStatus === "saved"}
-            className="ml-auto inline-flex items-center gap-1 rounded-md border border-[#ddd4c6] bg-white px-2 py-0.5 text-[10px] font-medium text-[#25313c] hover:bg-[#f7f3ec] disabled:opacity-70"
-            title="Copies a Weekly Strategy Brief prompt to clipboard"
-          >
-            <Copy size={10} />
-            {briefStatus === "saved"
-              ? "Copied + saved"
-              : briefStatus === "copied"
-                ? "Copied"
-                : briefStatus === "error"
-                  ? "Retry copy"
-                  : "Copy weekly brief"}
-          </button>
-          {briefError ? (
-            <span className="text-[10px] text-destructive">{briefError}</span>
-          ) : null}
-        </div>
-      ) : null}
-
-      <TodayDecisionLoop
-        today={today}
-        tasks={taskList}
-        anchors={anchorList}
-        currentEnergy={currentEnergy}
-        userId={userId}
-        hasSupabaseConfig={hasSupabaseConfig}
-        sessionLoading={isLoading}
-        remoteLoaded={remoteTasksLoaded}
-        onTaskCreated={handleTaskCreated}
-        onTaskUpserted={handleTaskUpserted}
-        planNotes={planNotes}
-        onPlanNotesChange={setPlanNotes}
-        planNotesSyncStatus={planSyncStatus}
-        planNotesError={planSyncError}
-        onLogIgnoreDecision={logIgnoreDecision}
-        outcomeMatches={outcomeMatches}
-        decisions={decisionLogs}
-      />
-
-      <DecisionsDueReviewPanel
-        today={today}
-        weekStart={weekStart}
-        weekEnd={weekEnd}
-        decisions={decisionLogs}
-        userId={userId}
-        hasSupabaseConfig={hasSupabaseConfig}
-        sessionLoading={isLoading}
-        remoteLoaded={remoteTasksLoaded}
-        onDecisionReviewed={handleDecisionSaved}
-      />
-
-      <DecisionLogCard
-        today={today}
-        decisions={decisionLogs}
-        userId={userId}
-        hasSupabaseConfig={hasSupabaseConfig}
-        sessionLoading={isLoading}
-        remoteLoaded={remoteTasksLoaded}
-        onDecisionSaved={handleDecisionSaved}
-      />
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div className="card-surface p-4 border-l-2 border-[#6b87ae]">
@@ -1075,14 +1313,14 @@ export default function Dashboard() {
               Today's Plan
             </div>
             <div className="text-sm text-[#25313c]">
-              Saved to daily_plans from Task Command, Calendar, and energy. Energy: {currentEnergy}/10.
+              Saved daily plan from Tasks, Calendar, and energy. Energy: {currentEnergy}/10.
             </div>
           </div>
           <Link
             to="/tasks"
             className="rounded-md border border-[#ddd4c6] bg-white px-3 py-1.5 text-xs hover:bg-[#f7f3ec]"
           >
-            Open Task Command →
+            Open Tasks →
           </Link>
         </div>
         <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-4">
@@ -1092,8 +1330,75 @@ export default function Dashboard() {
           <DayPlanCard label="Should Do 2" tasks={dayPlan.shouldDo.slice(1, 2)} accent="#c39a4e" />
           <DayPlanCard label="Maintenance" tasks={dayPlan.maintenance} accent="#6f685f" />
           <DayPlanCard label="Quick Win" tasks={dayPlan.quickWins} accent="#6a9a74" />
-          <DayPlanCard label="Ignore Today" tasks={dayPlan.ignoreToday} accent="#9b938a" muted />
+          <DayPlanCard label="Hidden for Today" tasks={dayPlan.ignoreToday} accent="#9b938a" muted />
         </div>
+      </div>
+
+      <div className="card-surface p-4 space-y-3 border-l-2 border-[#6b87ae]">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="text-xs uppercase tracking-wider text-[#6b87ae] font-semibold">
+            Reality-constrained planning · realism {planningSnapshot.realism.score.toFixed(1)}/10
+          </div>
+          <span
+            className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${
+              planningSnapshot.recoveryReserveProtected
+                ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-700"
+                : "border-rose-500/25 bg-rose-500/10 text-rose-700"
+            }`}
+          >
+            {planningSnapshot.recoveryReserveProtected
+              ? "Recovery reserve protected"
+              : "Recovery reserve at risk"}
+          </span>
+        </div>
+        <div className="text-sm text-foreground">{planningSnapshot.realism.bottleneck}</div>
+        <div className="text-xs text-muted-foreground">→ {planningSnapshot.realism.correction}</div>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <div className="rounded-md border border-border p-2">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              Realistic open windows
+            </div>
+            {planningSnapshot.openWindows.length === 0 ? (
+              <div className="text-xs text-muted-foreground mt-1">None after fixed commitments.</div>
+            ) : (
+              <ul className="mt-1 space-y-0.5 text-xs text-foreground">
+                {planningSnapshot.openWindows.slice(0, 4).map((w) => (
+                  <li key={`${w.start}-${w.end}`}>
+                    {w.start}–{w.end} · {w.durationMinutes}m · {w.quality}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <div className="rounded-md border border-border p-2">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              Best deep-work windows
+            </div>
+            {planningSnapshot.deepWorkWindows.length === 0 ? (
+              <div className="text-xs text-muted-foreground mt-1">No deep-work-sized window.</div>
+            ) : (
+              <ol className="mt-1 space-y-0.5 text-xs text-foreground list-decimal list-inside">
+                {planningSnapshot.deepWorkWindows.map((w) => (
+                  <li key={`dw-${w.start}`}>
+                    {w.start}–{w.end} · {w.quality}
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
+        </div>
+        <div className="text-xs text-muted-foreground">
+          {planningSnapshot.capacity.message} · Sleep {planningSnapshot.sleepWindow.start}–
+          {planningSnapshot.sleepWindow.end} · Shutdown reserve{" "}
+          {planningSnapshot.shutdownReserve.start}–{planningSnapshot.shutdownReserve.end}
+        </div>
+        {planningSnapshot.warnings.length > 0 ? (
+          <ul className="space-y-0.5 text-xs text-rose-700">
+            {planningSnapshot.warnings.map((warning, i) => (
+              <li key={i}>⚠ {warning}</li>
+            ))}
+          </ul>
+        ) : null}
       </div>
 
       <div className="card-surface p-4 space-y-4">
@@ -1102,11 +1407,11 @@ export default function Dashboard() {
             <div className="flex items-center gap-2">
               <CalendarClock size={14} className="text-primary" />
               <div className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">
-                Today timeline · anchors + best windows
+                Today timeline · anchors + imported blocks
               </div>
             </div>
             <div className="text-sm text-foreground mt-1">
-              {todayAnchors.length} fixed anchors · {availableTime.totalOpenMinutes} min open · shutdown {availableTime.bestShutdownTarget}
+              {todayAnchors.length} fixed anchors · {todayTimeBlocks.length} imported blocks · {availableTime.totalOpenMinutes} min open · shutdown {availableTime.bestShutdownTarget}
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -1115,7 +1420,7 @@ export default function Dashboard() {
               className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-xs hover:bg-muted/70"
             >
               {calendarPromptCopied ? <CheckCheck size={12} /> : <Copy size={12} />}
-              {calendarPromptCopied ? "Copied" : "Copy Calendar Planning Prompt"}
+              {calendarPromptCopied ? "Copied" : "Plan with AI"}
             </button>
             <Link
               to="/calendar"
@@ -1148,7 +1453,13 @@ export default function Dashboard() {
                           ? "bg-amber-500"
                           : slot.kind === "shutdown"
                             ? "bg-violet-500"
-                            : "bg-primary";
+                            : slot.kind === "break"
+                              ? "bg-teal-500"
+                              : slot.kind === "freeform"
+                                ? "bg-zinc-500"
+                                : slot.kind === "imported-task"
+                                  ? "bg-blue-500"
+                                  : "bg-primary";
                   return (
                     <li key={`${slot.start}-${i}`} className="ml-4 relative">
                       <span
@@ -1175,6 +1486,19 @@ export default function Dashboard() {
                 })}
               </ol>
             )}
+            {unscheduledTrustProtectors.length > 0 ? (
+              <div className="notice-warning mt-4">
+                <div className="font-semibold">Trust protector still unscheduled</div>
+                <ul className="mt-1 space-y-0.5">
+                  {unscheduledTrustProtectors.slice(0, 4).map((protector) => (
+                    <li key={protector.id}>
+                      <AdvancedOnly>{protector.task_code ?? "TASK"} · </AdvancedOnly>
+                      {protector.title} · {protector.reason}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
           </div>
 
           <div className="space-y-3">
@@ -1216,7 +1540,7 @@ export default function Dashboard() {
             <div className="grid grid-cols-2 gap-2 text-xs">
               <div className="rounded-lg border border-border bg-card/60 p-2">
                 <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                  Best deep work
+                  Best focus window
                 </div>
                 <div className="text-foreground">
                   {availableTime.bestDeepWork
@@ -1450,7 +1774,7 @@ export default function Dashboard() {
                         : "text-[#c97a73]"
                   }
                 >
-                  {nutritionStatus?.status.toUpperCase() ?? "RED"}
+                  {nutritionStatus ? nutritionStatus.status.toUpperCase() : "Not logged yet"}
                 </span>
               </div>
             </div>
@@ -1579,7 +1903,9 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <DailyLogPanel />
+          <DailyLogPanel />
+        </div>
+      </CollapsibleSection>
     </div>
   );
 }

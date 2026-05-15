@@ -28,6 +28,11 @@ import {
   fetchSleepLogs,
   upsertSleepLog,
 } from "@/lib/lifeee-persistence";
+import {
+  CollapsibleSection,
+  NextActionCard,
+  PageDecisionHeader,
+} from "@/components/ui-kit";
 
 type SleepForm = {
   bedtime: string;
@@ -184,7 +189,7 @@ export default function SleepPage() {
         setNotice(
           todayRow
             ? "Loaded from Supabase."
-            : "No Supabase sleep log exists for today yet. Local draft only until you save.",
+            : "No sleep log exists for today yet. Draft only until you save.",
         );
         setSyncStatus(todayRow ? "saved" : "local");
       } catch (loadError) {
@@ -224,8 +229,8 @@ export default function SleepPage() {
       setSyncStatus(supabaseConfigured ? "waiting" : "local");
       setNotice(
         supabaseConfigured
-          ? "Waiting for login. This is not saved to Supabase yet."
-          : "Local draft only. Supabase is not configured.",
+          ? "Needs login. This is not saved yet."
+          : "Draft only. Saves are not configured.",
       );
       return;
     }
@@ -263,6 +268,22 @@ export default function SleepPage() {
   };
 
   const readinessLabel = getStatusLabel(sleepReadiness);
+  const recoveryLabel =
+    sleepReadiness >= 8
+      ? "sharp"
+      : sleepReadiness >= 6.5
+        ? "good"
+        : sleepReadiness >= 5
+          ? "moderate"
+          : "low";
+  const mainLimiter =
+    sleepDebt > 1
+      ? "sleep debt"
+      : form.stressBeforeBed > 7
+        ? "stress before bed"
+        : form.wakeEnergy < 5
+          ? "low wake energy"
+          : "none";
   const weekDebt = history.reduce((sum, row) => sum + Number(row.sleep_debt ?? 0), 0);
   const recoveryTasks =
     sleepReadiness < 6.5
@@ -273,21 +294,23 @@ export default function SleepPage() {
 
   return (
     <div className="space-y-6">
-      <div className="border-b border-[#ddd4c6] pb-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold text-[#25313c]">Sleep</h1>
-            <p className="text-sm text-[#6f685f] mt-1">
-              Track sleep quality, debt, recovery, and whether your body is ready to
-              perform.
-            </p>
-          </div>
-          <SyncBadge status={syncStatus} />
-        </div>
-      </div>
+      <PageDecisionHeader
+        title="Sleep"
+        question="Can I realistically perform well today?"
+      >
+        <SyncBadge status={syncStatus} />
+      </PageDecisionHeader>
+
+      <NextActionCard
+        label="Recovery readiness"
+        title={`${recoveryLabel} · ${sleepReadiness.toFixed(1)} / 10`}
+        tone={sleepReadiness >= 6.5 ? "calm" : "warning"}
+        detail={`Main limiter: ${mainLimiter}. Next action: ${recoveryTasks[0]}`}
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="card-surface p-5 flex flex-col items-center">
+        <CollapsibleSection title="How this score is calculated">
+          <div className="flex flex-col items-center">
           <StatusRing score={sleepReadiness} size={120} strokeWidth={6} />
           <div className="mt-4 w-full space-y-2">
             <ScoreBreakdown
@@ -339,7 +362,8 @@ export default function SleepPage() {
           >
             {readinessLabel.toUpperCase()}
           </span>
-        </div>
+          </div>
+        </CollapsibleSection>
 
         <div className="card-surface p-5 lg:col-span-2">
           <h3 className="text-sm font-semibold text-[#25313c] mb-4">
@@ -372,76 +396,106 @@ export default function SleepPage() {
             </div>
           ) : null}
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-5">
+            {/* 1. Sleep window */}
             <div>
-              <label className="text-[10px] uppercase tracking-wider text-[#6f685f] block mb-1">
-                Bedtime
-              </label>
-              <input
-                type="time"
-                value={form.bedtime}
-                onChange={(e) => setForm((p) => ({ ...p, bedtime: e.target.value }))}
-                className="input-dark w-full"
-              />
+              <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#8c8478] mb-2">
+                Sleep window
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[10px] uppercase tracking-wider text-[#6f685f] block mb-1">
+                    Bedtime
+                  </label>
+                  <input
+                    type="time"
+                    value={form.bedtime}
+                    onChange={(e) => setForm((p) => ({ ...p, bedtime: e.target.value }))}
+                    className="input-dark w-full"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] uppercase tracking-wider text-[#6f685f] block mb-1">
+                    Wake Time
+                  </label>
+                  <input
+                    type="time"
+                    value={form.wakeTime}
+                    onChange={(e) => setForm((p) => ({ ...p, wakeTime: e.target.value }))}
+                    className="input-dark w-full"
+                  />
+                </div>
+                <div className="col-span-2 font-mono-data text-xs text-[#6f685f]">
+                  {hoursSlept}h duration
+                </div>
+              </div>
             </div>
+
+            {/* 2. Morning state */}
             <div>
-              <label className="text-[10px] uppercase tracking-wider text-[#6f685f] block mb-1">
-                Wake Time
-              </label>
-              <input
-                type="time"
-                value={form.wakeTime}
-                onChange={(e) => setForm((p) => ({ ...p, wakeTime: e.target.value }))}
-                className="input-dark w-full"
-              />
+              <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#8c8478] mb-2">
+                Morning state
+              </div>
+              <div className="space-y-3">
+                <SliderInput
+                  label="Wake Energy"
+                  value={form.wakeEnergy}
+                  onChange={(v) => setForm((p) => ({ ...p, wakeEnergy: v }))}
+                  scale={["Exhausted", "Slow", "Ready", "Sharp"]}
+                />
+                <SliderInput
+                  label="Sleep Quality"
+                  value={form.sleepQuality}
+                  onChange={(v) => setForm((p) => ({ ...p, sleepQuality: v }))}
+                  scale={["Poor", "OK", "Good", "Excellent"]}
+                />
+              </div>
             </div>
-            <div className="col-span-2">
-              <SliderInput
-                label="Sleep Quality"
-                value={form.sleepQuality}
-                onChange={(v) => setForm((p) => ({ ...p, sleepQuality: v }))}
-              />
-            </div>
-            <div className="col-span-2">
-              <SliderInput
-                label="Wake Energy"
-                value={form.wakeEnergy}
-                onChange={(v) => setForm((p) => ({ ...p, wakeEnergy: v }))}
-              />
-            </div>
-            <div className="col-span-2">
-              <SliderInput
-                label="Stress Before Bed"
-                value={form.stressBeforeBed}
-                onChange={(v) => setForm((p) => ({ ...p, stressBeforeBed: v }))}
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={form.caffeineAfter3pm}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, caffeineAfter3pm: e.target.checked }))
-                }
-                className="rounded border-[#ddd4c6] bg-[#f0ebe2]"
-              />
-              <span className="text-xs text-[#6f685f]">Caffeine after 3pm</span>
-            </div>
+
+            {/* 3. Disruptors */}
             <div>
-              <label className="text-[10px] uppercase tracking-wider text-[#6f685f] block mb-1">
-                Nap (min)
-              </label>
-              <input
-                type="number"
-                value={form.napMinutes}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, napMinutes: Number(e.target.value) }))
-                }
-                className="input-dark w-full"
-              />
+              <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#8c8478] mb-2">
+                Disruptors
+              </div>
+              <div className="space-y-3">
+                <SliderInput
+                  label="Stress Before Bed"
+                  value={form.stressBeforeBed}
+                  onChange={(v) => setForm((p) => ({ ...p, stressBeforeBed: v }))}
+                  scale={["Calm", "Moderate", "High", "High"]}
+                />
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={form.caffeineAfter3pm}
+                      onChange={(e) =>
+                        setForm((p) => ({ ...p, caffeineAfter3pm: e.target.checked }))
+                      }
+                      className="rounded border-[#ddd4c6] bg-[#f0ebe2]"
+                    />
+                    <span className="text-xs text-[#6f685f]">Caffeine after 3pm</span>
+                  </label>
+                  <div>
+                    <label className="text-[10px] uppercase tracking-wider text-[#6f685f] block mb-1">
+                      Nap (min)
+                    </label>
+                    <input
+                      type="number"
+                      value={form.napMinutes}
+                      onChange={(e) =>
+                        setForm((p) => ({ ...p, napMinutes: Number(e.target.value) }))
+                      }
+                      className="input-dark w-full"
+                    />
+                  </div>
+                </div>
+              </div>
             </div>
-            <div className="col-span-2">
-              <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-[#6f685f]">
+
+            {/* 4. Notes */}
+            <div>
+              <label className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.16em] text-[#8c8478]">
                 Notes
               </label>
               <textarea
@@ -450,11 +504,6 @@ export default function SleepPage() {
                 value={form.notes}
                 onChange={(e) => setForm((p) => ({ ...p, notes: e.target.value }))}
               />
-            </div>
-            <div className="flex items-end">
-              <span className="font-mono-data text-xs text-[#6f685f] pb-2">
-                {hoursSlept}h duration
-              </span>
             </div>
           </div>
 
@@ -633,13 +682,23 @@ function SliderInput({
   onChange,
   min = 1,
   max = 10,
+  scale,
 }: {
   label: string;
   value: number;
   onChange: (v: number) => void;
   min?: number;
   max?: number;
+  scale?: string[];
 }) {
+  const humanLabel = scale
+    ? scale[
+        Math.min(
+          scale.length - 1,
+          Math.floor(((value - min) / (max - min)) * scale.length),
+        )
+      ]
+    : null;
   return (
     <div>
       <div className="flex items-center justify-between mb-1">
@@ -647,6 +706,7 @@ function SliderInput({
           {label}
         </label>
         <span className="font-mono-data text-[10px] text-[#6b87ae]">
+          {humanLabel ? `${humanLabel} · ` : ""}
           {value}/{max}
         </span>
       </div>

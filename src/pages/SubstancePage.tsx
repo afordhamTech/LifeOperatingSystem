@@ -11,6 +11,12 @@ import {
   upsertSubstanceEntry,
 } from "@/lib/lifeee-persistence";
 import { BookOpen, PenLine, MessageSquare, Lightbulb } from "lucide-react";
+import {
+  CollapsibleSection,
+  NextActionCard,
+  PageDecisionHeader,
+  StatusPill,
+} from "@/components/ui-kit";
 
 const STORAGE_KEY = "lifeee.substance_logs.v1";
 
@@ -253,22 +259,19 @@ New concept: ${form.newConcept || "—"}
 Question of the day: ${form.questionOfDay || "—"}
 Writing practice: ${form.writingPractice ? "Yes" : "No"}
 Speaking practice: ${form.speakingPractice ? "Yes" : "No"}
-Substance score: ${(score * 100).toFixed(0)}%
+Learning Depth: ${(score * 100).toFixed(0)}%
 
 Turn this into a deeper explanation, 5 talking points, and 3 questions I could use in a real conversation.`;
 
   return (
     <div className="space-y-6">
       <div className="border-b border-[#ddd4c6] pb-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold text-[#25313c]">Substance & Learning</h1>
-            <p className="text-sm text-[#6f685f] mt-1">
-              Build depth, better thinking, better speech, and stronger conversation ability.
-            </p>
-          </div>
+        <PageDecisionHeader
+          title="Depth & Learning"
+          question="What did I learn, how did it change my thinking, and can I explain it?"
+        >
           <SyncBadge status={syncStatus} />
-        </div>
+        </PageDecisionHeader>
         {syncError && <p className="mt-2 text-xs text-destructive">{syncError}</p>}
         {conflict ? (
           <div className="mt-3 rounded border border-[#c39a4e]/30 bg-[#c39a4e]/10 p-3 text-xs text-[#6f685f]">
@@ -293,47 +296,89 @@ Turn this into a deeper explanation, 5 talking points, and 3 questions I could u
         ) : null}
       </div>
 
+      <div className="grid gap-3 md:grid-cols-4">
+        <NextActionCard
+          label="Topic"
+          title={form.topicStudied || "Choose one thing to understand"}
+          detail="Keep it narrow enough to explain today."
+          tone="calm"
+        />
+        <NextActionCard
+          label="One idea"
+          title={form.newConcept || "Capture the core idea"}
+          detail="One idea beats a pile of unprocessed notes."
+          tone="calm"
+        />
+        <NextActionCard
+          label="One question"
+          title={form.questionOfDay || "Ask the useful question"}
+          detail="Questions reveal whether the idea is actually understood."
+          tone="calm"
+        />
+        <NextActionCard
+          label="Conversation angle"
+          title={form.conversationPractice ? "Practice it out loud" : "Find a way to explain it"}
+          detail="If you can explain it, you can use it."
+          tone="calm"
+        />
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 card-surface p-4">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-sm font-semibold text-[#25313c]">LEARNING LOG</h3>
             <span className="text-[10px] text-[#6a9a74]">
-              Topic studied and notes taken save to Supabase.
+              Topic studied and notes taken save.
             </span>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <input
-              type="text"
-              placeholder="Reading done (book/article)"
-              value={form.readingDone}
-              onChange={(e) => setForm((p) => ({ ...p, readingDone: e.target.value }))}
-              className="input-dark"
-            />
-            <input
-              type="text"
-              placeholder="Topic studied"
-              value={form.topicStudied}
-              onChange={(e) => setForm((p) => ({ ...p, topicStudied: e.target.value }))}
-              className="input-dark"
-            />
-            <textarea
-              placeholder="Notes taken"
-              value={form.notesTaken}
-              onChange={(e) => setForm((p) => ({ ...p, notesTaken: e.target.value }))}
-              className="input-dark h-16 resize-none md:col-span-2"
-            />
-            <textarea
-              placeholder="New concept learned"
-              value={form.newConcept}
-              onChange={(e) => setForm((p) => ({ ...p, newConcept: e.target.value }))}
-              className="input-dark h-16 resize-none"
-            />
-            <textarea
-              placeholder="Question of the day"
-              value={form.questionOfDay}
-              onChange={(e) => setForm((p) => ({ ...p, questionOfDay: e.target.value }))}
-              className="input-dark h-16 resize-none"
-            />
+            <label className="block">
+              <span className="mb-1 block text-[10px] uppercase text-[#6f685f]">Reading/source</span>
+              <input
+                type="text"
+                placeholder="Book, article, lecture, video"
+                value={form.readingDone}
+                onChange={(e) => setForm((p) => ({ ...p, readingDone: e.target.value }))}
+                className="input-dark w-full"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-[10px] uppercase text-[#6f685f]">Topic studied</span>
+              <input
+                type="text"
+                placeholder="Topic studied"
+                value={form.topicStudied}
+                onChange={(e) => setForm((p) => ({ ...p, topicStudied: e.target.value }))}
+                className="input-dark w-full"
+              />
+            </label>
+            <label className="block md:col-span-2">
+              <span className="mb-1 block text-[10px] uppercase text-[#6f685f]">Notes taken</span>
+              <textarea
+                placeholder="What mattered?"
+                value={form.notesTaken}
+                onChange={(e) => setForm((p) => ({ ...p, notesTaken: e.target.value }))}
+                className="input-dark h-16 resize-none w-full"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-[10px] uppercase text-[#6f685f]">New concept learned</span>
+              <textarea
+                placeholder="Core idea"
+                value={form.newConcept}
+                onChange={(e) => setForm((p) => ({ ...p, newConcept: e.target.value }))}
+                className="input-dark h-16 resize-none w-full"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-[10px] uppercase text-[#6f685f]">Question of the day</span>
+              <textarea
+                placeholder="Question worth asking"
+                value={form.questionOfDay}
+                onChange={(e) => setForm((p) => ({ ...p, questionOfDay: e.target.value }))}
+                className="input-dark h-16 resize-none w-full"
+              />
+            </label>
             <div className="flex items-center gap-4">
               <label className="flex items-center gap-2 text-xs text-[#6f685f] cursor-pointer">
                 <input
@@ -342,7 +387,7 @@ Turn this into a deeper explanation, 5 talking points, and 3 questions I could u
                   onChange={(e) => setForm((p) => ({ ...p, writingPractice: e.target.checked }))}
                   className="rounded"
                 />
-                Writing
+                Writing practice
               </label>
               <label className="flex items-center gap-2 text-xs text-[#6f685f] cursor-pointer">
                 <input
@@ -351,7 +396,7 @@ Turn this into a deeper explanation, 5 talking points, and 3 questions I could u
                   onChange={(e) => setForm((p) => ({ ...p, speakingPractice: e.target.checked }))}
                   className="rounded"
                 />
-                Speaking
+                Speaking practice
               </label>
               <label className="flex items-center gap-2 text-xs text-[#6f685f] cursor-pointer">
                 <input
@@ -360,7 +405,7 @@ Turn this into a deeper explanation, 5 talking points, and 3 questions I could u
                   onChange={(e) => setForm((p) => ({ ...p, conversationPractice: e.target.checked }))}
                   className="rounded"
                 />
-                Conversation
+                Conversation practice
               </label>
             </div>
             <div>
@@ -380,14 +425,17 @@ Turn this into a deeper explanation, 5 talking points, and 3 questions I could u
 
         <div className="space-y-4">
           <div className="card-surface p-4 text-center">
-            <h3 className="text-sm font-semibold text-[#25313c] mb-3">SUBSTANCE SCORE</h3>
+            <h3 className="text-sm font-semibold text-[#25313c] mb-3">LEARNING DEPTH</h3>
             <div className="text-4xl font-bold text-[#c39a4e]">{(score * 100).toFixed(0)}%</div>
             <div className="text-xs text-[#6f685f] mt-1">
               {score >= 0.8 ? "Deep thinker" : score >= 0.5 ? "Building" : "Start reading"}
             </div>
+            <StatusPill tone={score >= 0.8 ? "good" : score >= 0.5 ? "warning" : "neutral"} className="mt-2">
+              Next: explain one idea
+            </StatusPill>
           </div>
 
-          <div className="card-surface p-4">
+          <CollapsibleSection title="How this score is calculated">
             <h3 className="text-sm font-semibold text-[#25313c] mb-2">FACTORS</h3>
             <div className="space-y-2">
               <FactorBar label="Reading" value={form.readingDone ? 25 : 0} max={25} icon={<BookOpen size={12} />} />
@@ -396,7 +444,7 @@ Turn this into a deeper explanation, 5 talking points, and 3 questions I could u
               <FactorBar label="Speaking" value={form.speakingPractice ? 20 : 0} max={20} icon={<MessageSquare size={12} />} />
               <FactorBar label="New Ideas" value={form.newConcept ? 10 : 0} max={10} icon={<Lightbulb size={12} />} />
             </div>
-          </div>
+          </CollapsibleSection>
 
           <div className="card-surface p-4">
             <h3 className="text-sm font-semibold text-[#25313c] mb-2">WEEKLY TREND</h3>

@@ -30,6 +30,11 @@ import {
   fetchNutritionLogs,
   upsertNutritionLog,
 } from "@/lib/lifeee-persistence";
+import {
+  CollapsibleSection,
+  NextActionCard,
+  PageDecisionHeader,
+} from "@/components/ui-kit";
 
 type NutritionForm = {
   bodyweight: number;
@@ -133,7 +138,7 @@ export default function NutritionPage() {
         setNotice(
           todayNutrition
             ? "Loaded from Supabase."
-            : "No Supabase nutrition log exists for today yet. Local draft only until you save.",
+            : "No nutrition log exists for today yet. Draft only until you save.",
         );
         setSyncStatus(todayNutrition ? "saved" : "local");
       } catch (loadError) {
@@ -153,8 +158,10 @@ export default function NutritionPage() {
   }, [hasSupabaseConfig, sessionLoading, setSyncStatus, today, userId]);
 
   const maintenance = Math.round(form.bodyweight * 15);
-  const targetCalories = maintenance + surplus;
-  const proteinTarget = Math.round(form.bodyweight * 1.0);
+  const targetCalories = form.trainingDay
+    ? Math.max(3000, Math.min(3400, maintenance + surplus))
+    : maintenance + surplus;
+  const proteinTarget = form.trainingDay ? 165 : Math.round(form.bodyweight * 1.0);
 
   const currentStatus = calcNutritionStatus(
     form.calories,
@@ -164,6 +171,27 @@ export default function NutritionPage() {
     form.bodyweight,
     targetCalories,
   );
+  const hasNutritionLogged =
+    form.calories > 0 || form.proteinG > 0 || form.waterOz > 0 || form.mealsCount > 0;
+  const visibleFuelStatus = !hasNutritionLogged
+    ? "Not logged yet"
+    : form.calories > targetCalories + 250
+      ? "Over target"
+      : currentStatus.status === "green"
+        ? "On track"
+        : "Behind";
+  const caloriesRemaining = Math.max(0, targetCalories - form.calories);
+  const proteinRemaining = Math.max(0, proteinTarget - form.proteinG);
+  const nextFoodFix =
+    !hasNutritionLogged
+      ? "Log the first meal."
+      : proteinRemaining > 35
+        ? "Whey smoothie + bagel."
+        : caloriesRemaining > 700
+          ? "Rice/chicken meal or dining hall plate."
+          : form.waterOz < 6
+            ? "Water bottle plus electrolytes."
+            : "Protein shake if dinner is delayed.";
 
   const weightTrend = history
     .filter((row) => row.bodyweight != null)
@@ -271,22 +299,27 @@ export default function NutritionPage() {
 
   return (
     <div className="space-y-6">
-      <div className="border-b border-[#ddd4c6] pb-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold text-[#25313c]">Nutrition</h1>
-            <p className="text-sm text-[#6f685f] mt-1">
-              Track whether your food supports muscle gain, energy, school, and
-              recovery.
-            </p>
-          </div>
-          <SyncBadge status={syncStatus} />
-        </div>
-      </div>
+      <PageDecisionHeader
+        title="Fuel Command"
+        question="What food or water fix would make today support training and recovery?"
+      >
+        <SyncBadge status={syncStatus} />
+      </PageDecisionHeader>
+
+      <NextActionCard
+        label="Today's Fuel Status"
+        title={visibleFuelStatus}
+        tone={
+          visibleFuelStatus === "On track" || visibleFuelStatus === "Not logged yet"
+            ? "calm"
+            : "warning"
+        }
+        detail={`${caloriesRemaining} calories, ${proteinRemaining}g protein, and ${Math.max(0, 8 - form.waterOz)} water glasses remaining. Next Food Fix: ${nextFoodFix}`}
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="space-y-4">
-          <div className="card-surface p-4">
+          <CollapsibleSection title="Edit target" defaultOpen={false}>
             <h3 className="text-sm font-semibold text-[#25313c] mb-3">
               CALORIE TARGET
             </h3>
@@ -355,7 +388,7 @@ export default function NutritionPage() {
                 {calorieFeedback.message}
               </span>
             </div>
-          </div>
+          </CollapsibleSection>
 
           <div className="card-surface p-4">
             <h3 className="text-sm font-semibold text-[#25313c] mb-3">
@@ -538,7 +571,7 @@ export default function NutritionPage() {
         <div className="space-y-4">
           <div className="card-surface p-4">
             <h3 className="text-sm font-semibold text-[#25313c] mb-3">
-              NUTRITION STATUS
+              FUEL STATUS
             </h3>
             <div className="grid grid-cols-2 gap-3 text-xs">
               <StatusChip label="Calories" ok={currentStatus.caloriesHit} />
@@ -553,6 +586,9 @@ export default function NutritionPage() {
               Status:{" "}
               <span
                 className={
+                  !hasNutritionLogged
+                    ? "text-[#6f685f]"
+                    :
                   currentStatus.status === "green"
                     ? "text-[#6a9a74]"
                     : currentStatus.status === "yellow"
@@ -560,7 +596,7 @@ export default function NutritionPage() {
                       : "text-[#c97a73]"
                 }
               >
-                {currentStatus.status.toUpperCase()}
+                {hasNutritionLogged ? visibleFuelStatus : "Not logged yet"}
               </span>
             </div>
           </div>

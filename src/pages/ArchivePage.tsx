@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { EmptyState } from "@/components/EmptyState";
 import { getStatusColor } from "@/components/StatusRing";
 import { SyncBadge } from "@/components/SyncBadge";
+import { EmptyStateCard, SegmentedModeTabs } from "@/components/ui-kit";
 import { useSupabaseSession } from "@/hooks/useSupabaseSession";
 import {
   deleteDecisionLog,
@@ -10,12 +11,20 @@ import {
   fetchNutritionLogs,
   fetchProofItems,
   fetchSleepLogs,
+  fetchUniversalTasks,
   fetchWorkoutLogs,
   type DecisionLog,
   type LifeeeSyncStatus,
   type ProofItem,
+  upsertUniversalTask,
   upsertDecisionLog,
 } from "@/lib/lifeee-persistence";
+import {
+  isArchivedTask,
+  isTrashedTask,
+  restoreTask,
+  type Task,
+} from "@/lib/task-system";
 import type {
   AcademicTaskRow,
   NutritionLogRow,
@@ -55,6 +64,7 @@ type ArchiveData = {
   workoutLogs: WorkoutLogRow[];
   nutritionLogs: NutritionLogRow[];
   proofItems: ProofItem[];
+  archivedTasks: Task[];
 };
 
 const emptyArchiveData: ArchiveData = {
@@ -63,6 +73,7 @@ const emptyArchiveData: ArchiveData = {
   workoutLogs: [],
   nutritionLogs: [],
   proofItems: [],
+  archivedTasks: [],
 };
 
 function addDays(date: Date, days: number) {
@@ -80,6 +91,7 @@ export default function ArchivePage() {
   const [decisionDraft, setDecisionDraft] = useState<DecisionDraft>(emptyDecisionDraft);
   const [syncStatus, setSyncStatus] = useState<LifeeeSyncStatus>("waiting");
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [tab, setTab] = useState<"patterns" | "evidence" | "archive">("patterns");
 
   useEffect(() => {
     let active = true;
@@ -108,6 +120,7 @@ export default function ArchivePage() {
           workoutLogs,
           nutritionLogs,
           proofItems,
+          universalTasks,
           decisions,
         ] = await Promise.all([
           fetchSleepLogs(userId, archiveStart, today),
@@ -115,6 +128,7 @@ export default function ArchivePage() {
           fetchWorkoutLogs(userId, archiveStart, today),
           fetchNutritionLogs(userId, archiveStart, today),
           fetchProofItems(userId),
+          fetchUniversalTasks(userId),
           fetchDecisionLogs(userId),
         ]);
         if (!active) return;
@@ -124,6 +138,7 @@ export default function ArchivePage() {
           workoutLogs,
           nutritionLogs,
           proofItems,
+          archivedTasks: universalTasks.filter((task) => isArchivedTask(task) || isTrashedTask(task)),
         });
         setDecisionLogs(decisions);
         setSyncStatus("saved");
@@ -191,6 +206,28 @@ export default function ArchivePage() {
     }
   };
 
+  const restoreArchivedTask = async (task: Task) => {
+    if (!hasSupabaseConfig || !userId) {
+      setSyncStatus(hasSupabaseConfig ? "waiting" : "local");
+      return;
+    }
+
+    setSyncStatus("saving");
+    setSyncError(null);
+    try {
+      const restored = restoreTask(task);
+      await upsertUniversalTask(userId, restored, 7);
+      setArchiveData((current) => ({
+        ...current,
+        archivedTasks: current.archivedTasks.filter((item) => item.id !== task.id),
+      }));
+      setSyncStatus("saved");
+    } catch (error) {
+      setSyncStatus("error");
+      setSyncError(error instanceof Error ? error.message : "Could not restore task.");
+    }
+  };
+
   const sections = [
     {
       title: "Sleep Logs",
@@ -254,9 +291,9 @@ export default function ArchivePage() {
       <div className="border-b border-[#ddd4c6] pb-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-semibold text-[#25313c]">Archive</h1>
+            <h1 className="text-2xl font-semibold text-[#25313c]">History</h1>
             <p className="text-sm text-[#6f685f] mt-1">
-              Historical data from all life modules. Browse and review past entries.
+              Patterns, evidence, and things worth remembering.
             </p>
           </div>
           <SyncBadge status={syncStatus} />
@@ -264,13 +301,24 @@ export default function ArchivePage() {
         {syncError ? <p className="mt-2 text-xs text-destructive">{syncError}</p> : null}
       </div>
 
+      <SegmentedModeTabs
+        value={tab}
+        onChange={setTab}
+        options={[
+          { value: "patterns", label: "Patterns" },
+          { value: "evidence", label: "Evidence" },
+          { value: "archive", label: "Archive" },
+        ]}
+      />
+
+      {tab === "patterns" ? (
+      <div className="space-y-6">
       <div className="card-surface p-4">
         <div className="mb-3 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <Brain size={16} className="text-[#6b87ae]" />
             <h2 className="text-sm font-semibold text-[#25313c]">Decision Log</h2>
           </div>
-          <span className="text-xs text-[#6f685f]">Writes to decision_logs</span>
         </div>
 
         <div className="grid gap-3 lg:grid-cols-[0.9fr_1.1fr]">
@@ -280,7 +328,7 @@ export default function ArchivePage() {
               onChange={(event) =>
                 setDecisionDraft((draft) => ({ ...draft, decision: event.target.value }))
               }
-              placeholder="Decision"
+              placeholder="Decision made"
               className="input-dark w-full"
             />
             <textarea
@@ -296,12 +344,12 @@ export default function ArchivePage() {
               onChange={(event) =>
                 setDecisionDraft((draft) => ({ ...draft, reason_chosen: event.target.value }))
               }
-              placeholder="Reason chosen"
+              placeholder="Why I chose it"
               className="input-dark w-full"
             />
             <div className="grid grid-cols-2 gap-2">
               <label className="text-[10px] uppercase text-[#6f685f]">
-                Review date
+                Review date — when to revisit
                 <input
                   type="date"
                   value={decisionDraft.review_date}
@@ -320,20 +368,23 @@ export default function ArchivePage() {
                 Add Decision
               </button>
             </div>
-            <textarea
-              value={decisionDraft.notes}
-              onChange={(event) =>
-                setDecisionDraft((draft) => ({ ...draft, notes: event.target.value }))
-              }
-              placeholder="Notes"
-              className="input-dark min-h-[80px] w-full"
-            />
+            <label className="block text-[10px] uppercase text-[#6f685f]">
+              Expected outcome · Actual outcome · Lesson
+              <textarea
+                value={decisionDraft.notes}
+                onChange={(event) =>
+                  setDecisionDraft((draft) => ({ ...draft, notes: event.target.value }))
+                }
+                placeholder="Expected outcome now; come back to add the actual outcome and the lesson"
+                className="input-dark mt-1 min-h-[80px] w-full"
+              />
+            </label>
           </div>
 
           <div>
             {decisionLogs.length === 0 ? (
               <EmptyState
-                title={userId ? "No decisions saved yet" : "Waiting for login"}
+                title={userId ? "No decisions saved yet" : "Needs login"}
                 description={
                   userId
                     ? "Save a decision to create an audit trail."
@@ -346,10 +397,13 @@ export default function ArchivePage() {
                   <li key={row.id} className="py-3">
                     <div className="flex items-start justify-between gap-3">
                       <div>
+                        <div className="text-[10px] uppercase tracking-wider text-[#9b938a]">
+                          Decision made
+                        </div>
                         <div className="text-sm font-medium text-[#25313c]">{row.decision}</div>
                         <div className="mt-1 text-xs text-[#6f685f]">
                           {row.decision_date ?? "No date"}
-                          {row.review_date ? ` - review ${row.review_date}` : ""}
+                          {row.review_date ? ` · Review date ${row.review_date}` : ""}
                         </div>
                       </div>
                       <button
@@ -361,9 +415,21 @@ export default function ArchivePage() {
                       </button>
                     </div>
                     {row.reason_chosen ? (
-                      <div className="mt-2 text-xs text-[#25313c]">{row.reason_chosen}</div>
+                      <div className="mt-2 text-xs text-[#25313c]">
+                        <span className="text-[10px] uppercase tracking-wider text-[#9b938a]">
+                          Why I chose it:{" "}
+                        </span>
+                        {row.reason_chosen}
+                      </div>
                     ) : null}
-                    {row.notes ? <div className="mt-1 text-xs text-[#6f685f]">{row.notes}</div> : null}
+                    {row.notes ? (
+                      <div className="mt-1 text-xs text-[#6f685f]">
+                        <span className="text-[10px] uppercase tracking-wider text-[#9b938a]">
+                          Expected outcome · Actual outcome · Lesson:{" "}
+                        </span>
+                        {row.notes}
+                      </div>
+                    ) : null}
                   </li>
                 ))}
               </ul>
@@ -371,7 +437,11 @@ export default function ArchivePage() {
           </div>
         </div>
       </div>
+      </div>
+      ) : null}
 
+      {tab === "evidence" ? (
+      <div className="space-y-6">
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         {sections.map((section) => {
           const Icon = section.icon;
@@ -428,6 +498,55 @@ export default function ArchivePage() {
           </div>
         ))}
       </div>
+      </div>
+      ) : null}
+
+      {tab === "archive" ? (
+      <div className="space-y-6">
+      <div className="card-surface p-4">
+        <h2 className="text-sm font-semibold text-[#25313c] mb-3">Archived / Trashed Tasks</h2>
+        {archiveData.archivedTasks.length === 0 ? (
+          <div className="text-sm text-[#8c8478] py-4 text-center">
+            No archived or trashed universal tasks.
+          </div>
+        ) : (
+          <ul className="divide-y divide-[#ddd4c6]">
+            {archiveData.archivedTasks.map((task) => (
+              <li key={task.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-mono-data rounded border border-[#ddd4c6] bg-white px-1.5 py-0.5 text-[10px] text-[#6f685f]">
+                      {task.task_code}
+                    </span>
+                    <span className="text-sm font-medium text-[#25313c]">{task.title}</span>
+                    <span className="text-[10px] uppercase tracking-wider text-[#8c8478]">
+                      {isTrashedTask(task) ? "trashed" : "archived"}
+                    </span>
+                  </div>
+                  <div className="mt-1 text-xs text-[#6f685f]">
+                    {task.task_type} · previous {task.previous_status ?? "inbox"}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void restoreArchivedTask(task)}
+                  className="rounded-md border border-[#ddd4c6] bg-white px-3 py-1.5 text-xs text-[#25313c] hover:bg-[#f7f3ec]"
+                >
+                  Restore
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <EmptyStateCard
+        missing="Old logs archive is not wired yet."
+        nextAction="Archived daily logs and snapshots will collect here over time."
+        why="Keeps long-term records out of the active modules without losing them."
+      />
+      </div>
+      ) : null}
     </div>
   );
 }

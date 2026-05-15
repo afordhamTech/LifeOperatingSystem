@@ -6,6 +6,7 @@
 import type { Task, TaskType } from "@/lib/task-system";
 import type { CalendarAnchor } from "@/lib/calendar-system";
 import type { DecisionLog } from "@/lib/lifeee-persistence";
+import { isActiveTask } from "@/lib/task-system";
 import { hasResult } from "@/lib/decision-log-summary";
 
 export type BottleneckKind =
@@ -134,7 +135,7 @@ export function buildWeeklyBottleneckDiagnosis(
 ): WeeklyBottleneckDiagnosis {
   const { tasks, decisionLogs, anchors, weekStart, weekEnd, today } = input;
 
-  const liveTasks = tasks.filter((task) => task.status !== "completed");
+  const liveTasks = tasks.filter(isActiveTask);
 
   const overdueTasks = liveTasks.filter(
     (task) => task.due_date != null && task.due_date < today,

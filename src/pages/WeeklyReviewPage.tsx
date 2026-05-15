@@ -1,13 +1,4 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  ReferenceLine,
-} from "recharts";
 import { Frown, Loader2, Save, Sparkles, Trophy, TrendingDown } from "lucide-react";
 import StatusRing, { getStatusColor } from "@/components/StatusRing";
 import { SyncBadge } from "@/components/SyncBadge";
@@ -21,6 +12,7 @@ import type {
 import { calculateWeeklyLifeScore } from "@/lib/life-scoring";
 import { getWeekStartDateKey, toDateKey } from "@/lib/date-helpers";
 import { useSupabaseSession } from "@/hooks/useSupabaseSession";
+import WeeklyExecutionStats from "@/components/WeeklyExecutionStats";
 import { calcNutritionStatus } from "@/lib/calculations";
 import { useSyncStatus } from "@/hooks/useSyncStatus";
 import { runSupabasePersistence } from "@/lib/persistence-runner";
@@ -59,6 +51,15 @@ import {
 } from "@/lib/one-move-feedback-history";
 import type { CalendarAnchor } from "@/lib/calendar-system";
 import type { Task } from "@/lib/task-system";
+import {
+  AdvancedDetails,
+  AdvancedOnly,
+  CollapsibleSection,
+  EmptyStateCard,
+  PageDecisionHeader,
+  PrimaryActionBar,
+} from "@/components/ui-kit";
+import { useUIMode } from "@/providers/UIModeContext";
 
 type WeeklyReviewForm = {
   academicsScore: number;
@@ -174,6 +175,7 @@ export default function WeeklyReviewPage() {
   const today = useMemo(() => toDateKey(new Date()), []);
   const weekStart = useMemo(() => getWeekStartDateKey(new Date()), []);
   const { hasSupabaseConfig, isLoading: sessionLoading, userId } = useSupabaseSession();
+  const { isAdvanced } = useUIMode();
   const [form, setForm] = useState<WeeklyReviewForm>(defaultForm);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -611,192 +613,323 @@ export default function WeeklyReviewPage() {
 
   const categories = chartData;
 
+  const scoreBand =
+    weeklyLifeScore >= 8
+      ? "Dominant week"
+      : weeklyLifeScore >= 6.5
+        ? "Decent week"
+        : "Needs work";
+
   return (
     <div className="space-y-6">
-      <div className="border-b border-[#ddd4c6] pb-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold text-[#25313c]">Weekly Review</h1>
-            <p className="text-sm text-[#6f685f] mt-1">
-              Turn the week into feedback. Week of {weekStart}.
-            </p>
-          </div>
-          <SyncBadge status={syncStatus} />
-        </div>
-      </div>
+      <PageDecisionHeader
+        title="Weekly Review"
+        question={`What happened, why, and what changes next week? Week of ${weekStart}.`}
+      >
+        <SyncBadge status={syncStatus} />
+      </PageDecisionHeader>
 
-      <div className="flex flex-wrap gap-3">
-        <button
-          onClick={handleUseSnapshot}
-          className="btn-primary inline-flex items-center gap-2"
-          type="button"
-        >
-          <Sparkles size={14} />
-          Use Current Snapshot
-        </button>
-        <button
-          onClick={handleSave}
-          className="btn-primary inline-flex items-center gap-2"
-          disabled={isSaving || isLoading || sessionLoading}
-          type="button"
-        >
-          {isSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-          {isSaving ? "Saving..." : "Save Weekly Review"}
-        </button>
-      </div>
+      {/* ---------------- STEP 1 — What happened? ---------------- */}
+      <section className="space-y-3">
+        <StepHeading n={1} title="What happened?" subtitle="The week in two lines." />
 
-      <div className="card-surface p-6">
-        <div className="flex flex-wrap items-center gap-6 justify-center">
-          <StatusRing score={weeklyLifeScore} size={140} strokeWidth={7} />
-          <div className="space-y-1">
-            <div className="text-sm text-[#6f685f]">Weekly Life Score</div>
-            <div
-              className="text-3xl font-bold"
-              style={{ color: getStatusColor(weeklyLifeScore) }}
-            >
-              {weeklyLifeScore.toFixed(1)} / 10
-            </div>
-            <div className="text-xs" style={{ color: getStatusColor(weeklyLifeScore) }}>
-              {weeklyLifeScore >= 8 ? "Dominant week" : weeklyLifeScore >= 6.5 ? "Decent week" : "Needs work"}
-            </div>
-          </div>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          <ReviewTextCard
+            title="BIGGEST WIN"
+            icon={<Trophy size={14} className="text-[#6a9a74]" />}
+            accent="text-[#6a9a74]"
+            value={form.biggestWin}
+            onChange={(value) => setForm((p) => ({ ...p, biggestWin: value }))}
+            placeholder="What went well this week?"
+          />
+          <ReviewTextCard
+            title="BIGGEST LEAK"
+            icon={<TrendingDown size={14} className="text-[#c97a73]" />}
+            accent="text-[#c97a73]"
+            value={form.biggestLeak}
+            onChange={(value) => setForm((p) => ({ ...p, biggestLeak: value }))}
+            placeholder="Where did energy go to waste?"
+          />
         </div>
 
-        <div className="flex flex-wrap justify-center gap-2 mt-4">
-          {categories.map((cat) => (
-            <div
-              key={cat.label}
-              className="px-3 py-1.5 rounded-md text-center"
-              style={{ backgroundColor: `${getStatusColor(cat.score)}10` }}
-            >
-              <div className="text-[10px] text-[#6f685f]">{cat.label}</div>
-              <div className="text-sm font-bold" style={{ color: getStatusColor(cat.score) }}>
-                {cat.score.toFixed(1)}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
+        <AdvancedDetails title="Notes (optional)">
+          <textarea
+            className="input-dark h-28 w-full resize-none"
+            placeholder="Patterns, lessons, and what matters next"
+            value={form.notes}
+            onChange={(e) => setForm((p) => ({ ...p, notes: e.target.value }))}
+          />
+        </AdvancedDetails>
+      </section>
 
-      <div className="card-surface p-4">
-        <h3 className="text-sm font-semibold text-[#25313c] mb-3">
-          CATEGORY BREAKDOWN
-        </h3>
-        <ResponsiveContainer width="100%" height={220}>
-          <BarChart data={chartData}>
-            <XAxis dataKey="label" stroke="#8c8478" fontSize={10} />
-            <YAxis domain={[0, 10]} stroke="#8c8478" fontSize={10} />
-            <Tooltip
-              contentStyle={{
-                background: "#f0ebe2",
-                border: "1px solid rgba(111,104,95,0.18)",
-                fontSize: "11px",
-              }}
-            />
-            <ReferenceLine y={8} stroke="#6a9a74" strokeDasharray="3 3" />
-            <Bar dataKey="score" fill="#6b87ae" radius={[2, 2, 0, 0]} />
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-
-      <div className="card-surface p-4 border-l-2 border-[#c39a4e]">
-        <h3 className="text-sm font-semibold text-[#25313c] mb-2">
-          WEEKLY BOTTLENECK DIAGNOSIS
-        </h3>
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm font-medium text-[#25313c]">
-            {bottleneckDiagnosis.bottleneckLabel}
-          </span>
-          <span
-            className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${
-              bottleneckDiagnosis.confidence === "high"
-                ? "border-rose-200 bg-rose-100 text-rose-700"
-                : bottleneckDiagnosis.confidence === "medium"
-                  ? "border-amber-200 bg-amber-100 text-amber-700"
-                  : "border-stone-200 bg-stone-100 text-stone-700"
-            }`}
-          >
-            confidence: {bottleneckDiagnosis.confidence}
-          </span>
-        </div>
-        <p className="mt-2 text-xs text-[#6f685f]">
-          {bottleneckDiagnosis.bottleneckDescription}
-        </p>
-        {bottleneckDiagnosis.evidence.length > 0 ? (
-          <ul className="mt-2 flex flex-wrap gap-2 text-[11px]">
-            {bottleneckDiagnosis.evidence.slice(0, 3).map((item) => (
-              <li
-                key={item.label}
-                className="rounded-md border border-[#ece5da] bg-white/70 px-2 py-0.5 text-[#25313c]"
-              >
-                {item.label}: <span className="font-semibold">{item.count}</span>
-              </li>
-            ))}
-          </ul>
-        ) : null}
-        <div className="mt-2 text-xs text-[#25313c]">
-          <span className="text-[10px] uppercase tracking-wider text-[#c39a4e] font-semibold">
-            Suggested fix
-          </span>{" "}
-          {bottleneckDiagnosis.suggestedFix}
-        </div>
-      </div>
-
-      <div className="card-surface p-4 border-l-2 border-[#6b87ae]">
-        <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-          <h3 className="text-sm font-semibold text-[#25313c]">
-            NEXT WEEK ONE MOVE
-          </h3>
-          <span className="text-[10px] uppercase tracking-wider text-[#6f685f]">
-            Saves to weekly_reviews.next_week_big_3[0]
-          </span>
-        </div>
-        <p className="text-xs text-[#6f685f] mb-2">
-          One specific move that targets the diagnosed bottleneck. Next week's
-          Daily OS surfaces this as the active commitment.
-        </p>
-        <textarea
-          value={oneMoveDraft}
-          onChange={(event) => setOneMoveDraft(event.target.value)}
-          placeholder={oneMoveSuggestion || "Pick one move you can verify next week."}
-          rows={2}
-          className="w-full rounded-md border border-[#ddd4c6] bg-white px-3 py-2 text-sm"
+      {/* ---------------- STEP 2 — Why? ---------------- */}
+      <section className="space-y-3">
+        <StepHeading
+          n={2}
+          title="Why?"
+          subtitle="What the week's data says drove the result."
         />
-        <div className="mt-2 flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => void handleSaveOneMove()}
-            disabled={isSaving || !oneMoveDraft.trim()}
-            className="inline-flex items-center gap-2 rounded-md bg-[#25313c] px-3 py-2 text-sm text-white hover:bg-[#3a4754] disabled:opacity-50"
-          >
-            <Save size={14} />
-            Save one move
-          </button>
-          <button
-            type="button"
-            onClick={() => setOneMoveDraft(oneMoveSuggestion)}
-            disabled={!oneMoveSuggestion}
-            className="inline-flex items-center gap-2 rounded-md border border-[#ddd4c6] bg-white px-3 py-2 text-sm hover:bg-[#f7f3ec] disabled:opacity-50"
-          >
-            Use suggestion
-          </button>
-        </div>
-        {oneMoveSuggestion ? (
-          <div className="mt-2 text-[11px] text-[#9b938a]">
-            Suggestion: {oneMoveSuggestion}
-          </div>
-        ) : null}
-      </div>
 
-      {previousWeekReview || previousOneMove ? (
+        <div className="card-surface p-4 border-l-2 border-[#c39a4e]">
+          <h3 className="text-sm font-semibold text-[#25313c] mb-2">
+            Weekly bottleneck diagnosis
+          </h3>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-medium text-[#25313c]">
+              {bottleneckDiagnosis.bottleneckLabel}
+            </span>
+            <AdvancedOnly>
+              <span
+                className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${
+                  bottleneckDiagnosis.confidence === "high"
+                    ? "border-rose-200 bg-rose-100 text-rose-700"
+                    : bottleneckDiagnosis.confidence === "medium"
+                      ? "border-amber-200 bg-amber-100 text-amber-700"
+                      : "border-stone-200 bg-stone-100 text-stone-700"
+                }`}
+              >
+                confidence: {bottleneckDiagnosis.confidence}
+              </span>
+            </AdvancedOnly>
+          </div>
+          <p className="mt-2 text-xs text-[#6f685f]">
+            {bottleneckDiagnosis.bottleneckDescription}
+          </p>
+          {bottleneckDiagnosis.evidence.length > 0 ? (
+            <ul className="mt-2 flex flex-wrap gap-2 text-[11px]">
+              {bottleneckDiagnosis.evidence.slice(0, 3).map((item) => (
+                <li
+                  key={item.label}
+                  className="rounded-md border border-[#ece5da] bg-white/70 px-2 py-0.5 text-[#25313c]"
+                >
+                  {item.label}: <span className="font-semibold">{item.count}</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          <div className="mt-2 text-xs text-[#25313c]">
+            <span className="text-[10px] uppercase tracking-wider text-[#c39a4e] font-semibold">
+              Suggested fix
+            </span>{" "}
+            {bottleneckDiagnosis.suggestedFix}
+          </div>
+        </div>
+
+        <WeeklyExecutionStats
+          weekStart={weekStart}
+          weekEnd={weekEnd}
+          userId={userId}
+          hasSupabaseConfig={hasSupabaseConfig}
+        />
+
+        {(isAdvanced || patternDigest.topRecurringDecisionTitles.length > 0) ? (
+        <CollapsibleSection
+          title="Decision pattern digest"
+          subtitle="Most common missed reason & recurring decisions"
+        >
+          <AdvancedOnly>
+          <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-4 text-xs text-[#6f685f]">
+            <Stat label="Reviewed total" value={patternDigest.totalsReviewed} />
+            <Stat
+              label="This week"
+              value={patternDigest.currentWeekReviewedCount}
+              hint={`prior ${patternDigest.priorWeekReviewedCount} · Δ ${
+                patternDigest.weeklyDelta > 0 ? "+" : ""
+              }${patternDigest.weeklyDelta}`}
+            />
+            <Stat
+              label="Sentiment"
+              value={`${patternDigest.positiveCount}/${patternDigest.negativeCount}/${patternDigest.neutralCount}`}
+              hint="positive / negative / neutral"
+            />
+            <Stat
+              label="Open overdue reviews"
+              value={patternDigest.openOverdueReviewCount}
+              hint={
+                patternDigest.openOverdueReviewCount > 0
+                  ? "review_date past, result_later empty"
+                  : "all caught up"
+              }
+            />
+          </div>
+          </AdvancedOnly>
+          {patternDigest.topRecurringDecisionTitles.length === 0 ? (
+            <EmptyStateCard
+              className="mt-3"
+              missing="No repeated decisions yet."
+              nextAction="Review a decision at least twice on Daily OS."
+              why="Patterns appear once a normalized decision title recurs."
+            />
+          ) : (
+            <ul className="mt-3 space-y-1.5 text-xs">
+              {patternDigest.topRecurringDecisionTitles.slice(0, 3).map((recurring) => (
+                <li
+                  key={recurring.title}
+                  className="rounded-md border border-[#ece5da] bg-white/70 p-2"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-sm text-[#25313c]">{recurring.title}</span>
+                    <span
+                      className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${
+                        recurring.dominantSentiment === "positive"
+                          ? "border-emerald-200 bg-emerald-100 text-emerald-700"
+                          : recurring.dominantSentiment === "negative"
+                            ? "border-rose-200 bg-rose-100 text-rose-700"
+                            : "border-stone-200 bg-stone-100 text-stone-700"
+                      }`}
+                    >
+                      ×{recurring.count} {recurring.dominantSentiment}
+                    </span>
+                  </div>
+                  {recurring.lastResultExcerpt ? (
+                    <div className="mt-0.5 text-[11px] text-[#6f685f]">
+                      Last result: {recurring.lastResultExcerpt}
+                    </div>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          )}
+        </CollapsibleSection>
+        ) : null}
+
+        {(isAdvanced || reviewedThisWeek.length > 0) ? (
+        <CollapsibleSection
+          title="Decisions reviewed this week"
+          subtitle={`${reviewedThisWeek.length} closed`}
+        >
+          {reviewedThisWeek.length === 0 ? (
+            <EmptyStateCard
+              missing="No decisions were closed this week."
+              nextAction="Mark items reviewed on Daily OS."
+              why="Closed decisions become next week's feedback."
+            />
+          ) : (
+            <ul className="space-y-2">
+              {reviewedThisWeek.map((decision) => {
+                const ts = reviewedTimestamp(decision);
+                const reviewedDate = ts ? ts.slice(0, 10) : null;
+                return (
+                  <li
+                    key={decision.id}
+                    className="rounded-md border border-[#ece5da] bg-white/70 p-3"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-sm text-[#25313c]">{decision.decision}</span>
+                      {decision.review_date ? (
+                        <span className="text-[10px] text-[#6f685f]">
+                          Review {decision.review_date}
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="mt-1 text-[12px] text-[#25313c]">
+                      Result: {decision.result_later?.trim()}
+                    </div>
+                    {reviewedDate ? (
+                      <div className="text-[10px] text-[#9b938a]">
+                        Reviewed {reviewedDate}
+                      </div>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </CollapsibleSection>
+        ) : null}
+      </section>
+
+      {/* ---------------- STEP 3 — What changes? ---------------- */}
+      <section className="space-y-3">
+        <StepHeading
+          n={3}
+          title="What changes next week?"
+          subtitle="One move, three priorities, one correction rule."
+        />
+
+        {/* Next Week One Move — the most important concept on the page. */}
+        <div className="rounded-2xl border-2 border-[#6b87ae] bg-[#6b87ae]/5 p-5 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#6b87ae]">
+              Next week — One Move
+            </div>
+            <AdvancedOnly>
+              <span className="text-[10px] uppercase tracking-wider text-[#6f685f]">
+                Saves to weekly_reviews.next_week_big_3[0]
+              </span>
+            </AdvancedOnly>
+          </div>
+          <p className="mt-1 text-base font-semibold text-[#25313c]">
+            The one move that targets your diagnosed bottleneck.
+          </p>
+          <p className="mt-0.5 text-xs text-[#6f685f]">
+            Next week's Daily OS surfaces this as the active commitment. Make it
+            specific enough to verify.
+          </p>
+          <textarea
+            value={oneMoveDraft}
+            onChange={(event) => setOneMoveDraft(event.target.value)}
+            placeholder={oneMoveSuggestion || "Pick one move you can verify next week."}
+            rows={2}
+            className="mt-3 w-full rounded-md border border-[#ddd4c6] bg-white px-3 py-2 text-sm"
+          />
+          <div className="mt-2 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => void handleSaveOneMove()}
+              disabled={isSaving || !oneMoveDraft.trim()}
+              className="inline-flex items-center gap-2 rounded-md bg-[#25313c] px-3 py-2 text-sm text-white hover:bg-[#3a4754] disabled:opacity-50"
+            >
+              <Save size={14} />
+              Save one move
+            </button>
+            <button
+              type="button"
+              onClick={() => setOneMoveDraft(oneMoveSuggestion)}
+              disabled={!oneMoveSuggestion}
+              className="inline-flex items-center gap-2 rounded-md border border-[#ddd4c6] bg-white px-3 py-2 text-sm hover:bg-[#f7f3ec] disabled:opacity-50"
+            >
+              Use suggestion
+            </button>
+          </div>
+          {oneMoveSuggestion ? (
+            <div className="mt-2 text-[11px] text-[#9b938a]">
+              Suggestion: {oneMoveSuggestion}
+            </div>
+          ) : null}
+        </div>
+
+        <ReviewTextCard
+          title="NEXT WEEK BIG 3"
+          icon={<Frown size={14} className="text-[#c39a4e]" />}
+          accent="text-[#c39a4e]"
+          value={form.nextWeekBig3.join("\n")}
+          onChange={(value) =>
+            setForm((p) => ({
+              ...p,
+              nextWeekBig3: value
+                .split("\n")
+                .map((line) => line.trim())
+                .filter(Boolean)
+                .slice(0, 3) as WeeklyReviewForm["nextWeekBig3"],
+            }))
+          }
+          placeholder={"1. ...\n2. ...\n3. ..."}
+          textarea
+        />
+
+        {/* Correction rule — last week's One Move verdict. */}
+        {previousWeekReview || previousOneMove ? (
         <div className="card-surface p-4 border-l-2 border-[#6a9a74]">
           <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
             <h3 className="text-sm font-semibold text-[#25313c]">
-              LAST WEEK ONE MOVE VERDICT
+              Correction rule — last week's One Move
             </h3>
-            <span className="text-[10px] uppercase tracking-wider text-[#6f685f]">
-              Writes to previous week notes
-            </span>
+            <AdvancedOnly>
+              <span className="text-[10px] uppercase tracking-wider text-[#6f685f]">
+                Writes to previous week notes
+              </span>
+            </AdvancedOnly>
           </div>
           {previousOneMove ? (
             <>
@@ -868,8 +1001,120 @@ export default function WeeklyReviewPage() {
             <div className="text-xs text-[#9b938a]">No move was set last week.</div>
           )}
         </div>
-      ) : null}
+        ) : null}
+      </section>
 
+      {/* ---------------- STEP 4 — Score & archive ---------------- */}
+      <section className="space-y-3">
+        <StepHeading
+          n={4}
+          title="Score & archive"
+          subtitle="Save the week after the story and next move are clear."
+        />
+        <div className="card-surface p-5">
+          <div className="flex flex-wrap items-center gap-5">
+            <StatusRing score={weeklyLifeScore} size={104} strokeWidth={7} />
+            <div className="min-w-[220px] flex-1">
+              <div className="text-sm text-[#6f685f]">Weekly life score</div>
+              <div
+                className="text-3xl font-bold"
+                style={{ color: getStatusColor(weeklyLifeScore) }}
+              >
+                {weeklyLifeScore.toFixed(1)} / 10
+              </div>
+              <div className="text-xs" style={{ color: getStatusColor(weeklyLifeScore) }}>
+                {scoreBand}
+              </div>
+            </div>
+            <div className="grid min-w-[260px] flex-1 grid-cols-2 gap-2 md:grid-cols-4">
+              {categories.map((cat) => (
+                <div
+                  key={cat.label}
+                  className="rounded-md px-3 py-2 text-center"
+                  style={{ backgroundColor: `${getStatusColor(cat.score)}10` }}
+                >
+                  <div className="text-[10px] text-[#6f685f]">{cat.label}</div>
+                  <div
+                    className="text-sm font-bold"
+                    style={{ color: getStatusColor(cat.score) }}
+                  >
+                    {cat.score.toFixed(1)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="card-surface p-4">
+          <h3 className="text-sm font-semibold text-[#25313c] mb-3">
+            Score sliders
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <ScoreSlider
+              label="Academics"
+              value={form.academicsScore}
+              onChange={(value) => setForm((p) => ({ ...p, academicsScore: value }))}
+            />
+            <ScoreSlider
+              label="Sleep"
+              value={form.sleepScore}
+              onChange={(value) => setForm((p) => ({ ...p, sleepScore: value }))}
+            />
+            <ScoreSlider
+              label="Training"
+              value={form.trainingScore}
+              onChange={(value) => setForm((p) => ({ ...p, trainingScore: value }))}
+            />
+            <ScoreSlider
+              label="Nutrition"
+              value={form.nutritionScore}
+              onChange={(value) => setForm((p) => ({ ...p, nutritionScore: value }))}
+            />
+            <ScoreSlider
+              label="Career Proof"
+              value={form.careerProofScore}
+              onChange={(value) =>
+                setForm((p) => ({ ...p, careerProofScore: value }))
+              }
+            />
+            <ScoreSlider
+              label="Faith Substance"
+              value={form.faithSubstanceScore}
+              onChange={(value) =>
+                setForm((p) => ({ ...p, faithSubstanceScore: value }))
+              }
+            />
+            <ScoreSlider
+              label="Money Admin"
+              value={form.moneyAdminScore}
+              onChange={(value) => setForm((p) => ({ ...p, moneyAdminScore: value }))}
+            />
+          </div>
+        </div>
+
+        <PrimaryActionBar>
+          <button
+            onClick={handleUseSnapshot}
+            className="btn-primary inline-flex items-center gap-2"
+            type="button"
+          >
+            <Sparkles size={14} />
+            Use Current Snapshot
+          </button>
+          <button
+            onClick={handleSave}
+            className="btn-primary inline-flex items-center gap-2"
+            disabled={isSaving || isLoading || sessionLoading}
+            type="button"
+          >
+            {isSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+            {isSaving ? "Saving..." : "Save Weekly Review"}
+          </button>
+        </PrimaryActionBar>
+      </section>
+
+      <AdvancedDetails title="Review archive and raw weekly details">
       {feedbackHistory ? (
         <div className="card-surface p-4 border-l-2 border-[#6b87ae]">
           <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
@@ -1085,64 +1330,7 @@ export default function WeeklyReviewPage() {
         />
       </div>
 
-      <div className="card-surface p-4">
-        <h3 className="text-sm font-semibold text-[#25313c] mb-3">
-          SCORE SLIDERS
-        </h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <ScoreSlider
-            label="Academics"
-            value={form.academicsScore}
-            onChange={(value) => setForm((p) => ({ ...p, academicsScore: value }))}
-          />
-          <ScoreSlider
-            label="Sleep"
-            value={form.sleepScore}
-            onChange={(value) => setForm((p) => ({ ...p, sleepScore: value }))}
-          />
-          <ScoreSlider
-            label="Training"
-            value={form.trainingScore}
-            onChange={(value) => setForm((p) => ({ ...p, trainingScore: value }))}
-          />
-          <ScoreSlider
-            label="Nutrition"
-            value={form.nutritionScore}
-            onChange={(value) => setForm((p) => ({ ...p, nutritionScore: value }))}
-          />
-          <ScoreSlider
-            label="Career Proof"
-            value={form.careerProofScore}
-            onChange={(value) =>
-              setForm((p) => ({ ...p, careerProofScore: value }))
-            }
-          />
-          <ScoreSlider
-            label="Faith Substance"
-            value={form.faithSubstanceScore}
-            onChange={(value) =>
-              setForm((p) => ({ ...p, faithSubstanceScore: value }))
-            }
-          />
-          <ScoreSlider
-            label="Money Admin"
-            value={form.moneyAdminScore}
-            onChange={(value) => setForm((p) => ({ ...p, moneyAdminScore: value }))}
-          />
-        </div>
-      </div>
-
-      <div className="card-surface p-4">
-        <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-[#6f685f]">
-          Notes
-        </label>
-        <textarea
-          className="input-dark h-28 w-full resize-none"
-          placeholder="Patterns, lessons, and what matters next"
-          value={form.notes}
-          onChange={(e) => setForm((p) => ({ ...p, notes: e.target.value }))}
-        />
-      </div>
+      </AdvancedDetails>
 
       {hasSupabaseConfig && !userId ? (
         <div className="rounded border border-[#6b87ae]/30 bg-[#6b87ae]/10 px-3 py-2 text-xs text-[#6b87ae]">
@@ -1198,6 +1386,28 @@ function ScoreSlider({
         onChange={(e) => onChange(Number(e.target.value))}
         className="slider-dark"
       />
+    </div>
+  );
+}
+
+function StepHeading({
+  n,
+  title,
+  subtitle,
+}: {
+  n: number;
+  title: string;
+  subtitle: string;
+}) {
+  return (
+    <div className="flex items-center gap-3">
+      <div className="flex h-7 w-7 items-center justify-center rounded-full bg-[#25313c] text-xs font-semibold text-white">
+        {n}
+      </div>
+      <div>
+        <h2 className="text-sm font-semibold text-[#25313c]">{title}</h2>
+        <p className="text-xs text-[#6f685f]">{subtitle}</p>
+      </div>
     </div>
   );
 }

@@ -1,4 +1,9 @@
-import type { CalendarAnchor } from "@/lib/calendar-system";
+import {
+  EXECUTION_STATUSES,
+  type CalendarAnchor,
+  type ExecutionStatus,
+  type TimeBlock,
+} from "@/lib/calendar-system";
 import type {
   AcademicTaskRow,
   NutritionLogRow,
@@ -12,7 +17,12 @@ import {
   calcProofScore,
   calcSubstanceScore,
 } from "@/lib/calculations";
-import { calcTaskPriority, type DayPlan, type Task } from "@/lib/task-system";
+import {
+  calcTaskPriority,
+  normalizeTask,
+  type DayPlan,
+  type Task,
+} from "@/lib/task-system";
 import { supabase } from "@/lib/supabase-client";
 
 export type LifeeeSyncStatus =
@@ -27,21 +37,41 @@ export type LifeeeSyncStatus =
 export type UniversalTaskRow = {
   id: string;
   user_id: string;
+  task_code?: string | null;
   title: string;
+  description?: string | null;
+  domain?: string | null;
   task_type: string | null;
   due_date: string | null;
+  fixed_time?: string | null;
+  scheduled_start?: string | null;
+  scheduled_end?: string | null;
   estimated_minutes: number | null;
   energy_required: number | null;
+  resistance_level?: number | null;
   urgency: number | null;
   importance: number | null;
   consequence_if_delayed: number | null;
+  consequence_level?: string | null;
   trust_impact: number | null;
   time_efficiency: number | null;
+  priority?: string | null;
   priority_score: number | null;
   status: string | null;
   daily_role: string | null;
   recurring: boolean | null;
   notes: string | null;
+  source?: string | null;
+  previous_status?: string | null;
+  ignored_until?: string | null;
+  ignored_count?: number | null;
+  carry_forward_count?: number | null;
+  rescheduled_count?: number | null;
+  parent_task_id?: string | null;
+  review_date?: string | null;
+  completed_at?: string | null;
+  archived_at?: string | null;
+  deleted_at?: string | null;
   next_physical_action: string | null;
   friction_type: string | null;
   privacy_layer: string | null;
@@ -69,6 +99,50 @@ export type CalendarAnchorRow = {
   updated_at: string;
 };
 
+export type TimeBlockRow = {
+  id: string;
+  user_id: string;
+  title: string;
+  date: string | null;
+  start_time: string | null;
+  end_time: string | null;
+  block_type: string | null;
+  linked_task_id?: string | null;
+  linked_anchor_id?: string | null;
+  source?: string | null;
+  import_batch_id?: string | null;
+  reason?: string | null;
+  energy_required?: number | null;
+  notes: string | null;
+  status?: string | null;
+  missed_reason?: string | null;
+  completed_at?: string | null;
+  execution_status?: string | null;
+  started_at?: string | null;
+  missed_at?: string | null;
+  skipped_at?: string | null;
+  actual_minutes?: number | null;
+  execution_notes?: string | null;
+  rescheduled_from_block_id?: string | null;
+  carry_forward_task_id?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ScheduleImportRow = {
+  id: string;
+  user_id: string;
+  date: string;
+  raw_text: string;
+  parsed_json: unknown;
+  applied: boolean;
+  plan_realism_score: number | null;
+  risks: unknown;
+  unscheduled: unknown;
+  created_at: string;
+  updated_at: string;
+};
+
 export type DailyPlanRow = {
   id: string;
   user_id: string;
@@ -83,6 +157,18 @@ export type DailyPlanRow = {
   reality_score: number | null;
   main_bottleneck: string | null;
   shutdown_target: string | null;
+  generated_from?: unknown;
+  locked_at?: string | null;
+  unlocked_at?: string | null;
+  lock_status?: string | null;
+  lock_reason?: string | null;
+  plan_change_count?: number | null;
+  plan_change_reasons?: unknown;
+  shutdown_completed_at?: string | null;
+  shutdown_notes?: string | null;
+  tomorrow_first_move?: string | null;
+  missed_summary?: unknown;
+  carry_forward_summary?: unknown;
   notes: string | null;
   created_at: string;
   updated_at: string;
@@ -100,6 +186,18 @@ export type DailyPlanPayload = {
   reality_score?: number | null;
   main_bottleneck?: string | null;
   shutdown_target?: string | null;
+  generated_from?: unknown;
+  locked_at?: string | null;
+  unlocked_at?: string | null;
+  lock_status?: string | null;
+  lock_reason?: string | null;
+  plan_change_count?: number | null;
+  plan_change_reasons?: unknown;
+  shutdown_completed_at?: string | null;
+  shutdown_notes?: string | null;
+  tomorrow_first_move?: string | null;
+  missed_summary?: unknown;
+  carry_forward_summary?: unknown;
   notes?: string | null;
 };
 
@@ -207,11 +305,11 @@ export type SubstanceEntry = {
 export function getSyncLabel(status: LifeeeSyncStatus) {
   if (status === "loading") return "Loading Supabase";
   if (status === "saving") return "Saving";
-  if (status === "saved") return "Saved to Supabase";
-  if (status === "waiting") return "Waiting for login";
+  if (status === "saved") return "Saved";
+  if (status === "waiting") return "Needs login";
   if (status === "error") return "Sync failed";
   if (status === "placeholder") return "Placeholder only";
-  return "Local draft only";
+  return "Draft only";
 }
 
 export function getSyncTone(status: LifeeeSyncStatus) {
@@ -312,6 +410,51 @@ export type AiPromptExportPayload = {
   prompt_type: string;
   prompt_text: string;
   source_page?: string | null;
+};
+
+export type TaskEventType =
+  | "created"
+  | "edited"
+  | "status_changed"
+  | "moved_today"
+  | "ignored_today"
+  | "completed"
+  | "archived"
+  | "trashed"
+  | "restored"
+  | "scheduled"
+  | "rescheduled"
+  | "carried_forward"
+  | "plan_locked"
+  | "plan_unlocked"
+  | "block_started"
+  | "block_completed"
+  | "block_partial"
+  | "block_missed"
+  | "block_skipped"
+  | "block_rescheduled"
+  | "task_carried_forward"
+  | "task_archived"
+  | "task_trashed"
+  | "shutdown_completed";
+
+export type TaskEventPayload = {
+  task_id: string;
+  event_type: TaskEventType;
+  old_value?: unknown;
+  new_value?: unknown;
+  reason?: string | null;
+};
+
+export type ScheduleImportPayload = {
+  id?: string;
+  date: string;
+  raw_text: string;
+  parsed_json: unknown;
+  applied?: boolean;
+  plan_realism_score?: number | null;
+  risks?: unknown;
+  unscheduled?: unknown;
 };
 
 export async function fetchSleepLog(userId: string, date: string) {
@@ -575,21 +718,41 @@ export function taskToRow(userId: string, task: Task, currentEnergy: number) {
   return {
     id: task.id,
     user_id: userId,
+    task_code: task.task_code,
     title: task.title,
+    description: task.description,
+    domain: task.task_type,
     task_type: task.task_type,
     due_date: makeLocalDateTime(task.due_date, task.fixed_time),
+    fixed_time: task.fixed_time,
+    scheduled_start: task.scheduled_start,
+    scheduled_end: task.scheduled_end,
     estimated_minutes: task.estimated_minutes,
     energy_required: task.energy_required,
+    resistance_level: task.resistance_level,
     urgency: task.urgency,
     importance: task.importance,
     consequence_if_delayed: task.consequence_if_delayed,
+    consequence_level: task.consequence_level,
     trust_impact: task.trust_impact,
     time_efficiency: task.time_efficiency,
+    priority: task.priority,
     priority_score: calcTaskPriority(task, currentEnergy),
-    status: task.status,
+    status: task.status === "completed" ? "done" : task.status,
     daily_role: task.daily_role,
     recurring: task.recurring,
     notes: task.notes,
+    source: task.source,
+    previous_status: task.previous_status,
+    ignored_until: task.ignored_until,
+    ignored_count: task.ignored_count,
+    carry_forward_count: task.carry_forward_count,
+    rescheduled_count: task.rescheduled_count,
+    parent_task_id: task.parent_task_id,
+    review_date: task.review_date,
+    completed_at: task.completed_at,
+    archived_at: task.archived_at,
+    deleted_at: task.deleted_at,
     linked_anchor_id: task.linked_anchor_id ?? null,
   };
 }
@@ -597,29 +760,48 @@ export function taskToRow(userId: string, task: Task, currentEnergy: number) {
 export function rowToTask(row: UniversalTaskRow): Task {
   const dueDate = dateKeyFromTimestamp(row.due_date);
   const localTime = timeFromTimestamp(row.due_date);
-  const fixedTime = localTime && localTime !== "00:00" ? localTime : null;
+  const fixedTime = row.fixed_time ?? (localTime && localTime !== "00:00" ? localTime : null);
 
-  return {
+  return normalizeTask({
     id: row.id,
+    task_code: row.task_code ?? undefined,
     title: row.title,
+    description: row.description ?? "",
     task_type: (row.task_type ?? "Personal") as Task["task_type"],
     due_date: dueDate,
-    estimated_minutes: row.estimated_minutes ?? 15,
-    energy_required: row.energy_required ?? 5,
+    fixed_time: fixedTime,
+    scheduled_start: row.scheduled_start ?? null,
+    scheduled_end: row.scheduled_end ?? null,
+    estimated_minutes: row.estimated_minutes,
+    energy_required: row.energy_required,
+    resistance_level: row.resistance_level ?? null,
     urgency: row.urgency ?? 5,
     importance: row.importance ?? 5,
     consequence_if_delayed: row.consequence_if_delayed ?? 5,
+    consequence_level: row.consequence_level as Task["consequence_level"],
     trust_impact: row.trust_impact ?? 5,
     time_efficiency: row.time_efficiency ?? 5,
+    priority: row.priority as Task["priority"],
+    priority_score: row.priority_score,
     status: (row.status ?? "inbox") as Task["status"],
     daily_role: (row.daily_role as Task["daily_role"]) ?? null,
     recurring: row.recurring ?? false,
     notes: row.notes ?? "",
+    source: row.source ?? "manual",
+    previous_status: row.previous_status as Task["previous_status"],
+    ignored_until: row.ignored_until ?? null,
+    ignored_count: row.ignored_count ?? 0,
+    carry_forward_count: row.carry_forward_count ?? 0,
+    rescheduled_count: row.rescheduled_count ?? 0,
+    parent_task_id: row.parent_task_id ?? null,
+    review_date: row.review_date ?? null,
+    completed_at: row.completed_at ?? null,
+    archived_at: row.archived_at ?? null,
+    deleted_at: row.deleted_at ?? null,
     linked_anchor_id: row.linked_anchor_id ?? null,
-    fixed_time: fixedTime,
     created_at: row.created_at,
     updated_at: row.updated_at,
-  };
+  });
 }
 
 export async function fetchUniversalTasks(userId: string) {
@@ -655,6 +837,32 @@ export async function deleteUniversalTask(userId: string, id: string) {
     .eq("user_id", userId);
 
   if (error) throw error;
+}
+
+export async function hardDeleteUniversalTask(userId: string, task: Task, confirmed: boolean) {
+  if (!confirmed || task.status !== "trashed") {
+    throw new Error("Hard delete requires confirmation and a trashed task.");
+  }
+  await deleteUniversalTask(userId, task.id);
+}
+
+export async function insertTaskEvent(userId: string, payload: TaskEventPayload) {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("task_events")
+    .insert({
+      task_id: payload.task_id,
+      user_id: userId,
+      event_type: payload.event_type,
+      old_value: payload.old_value ?? null,
+      new_value: payload.new_value ?? null,
+      reason: payload.reason ?? null,
+    })
+    .select("*")
+    .maybeSingle();
+
+  if (error) throw error;
+  return data;
 }
 
 export function anchorToRow(userId: string, anchor: CalendarAnchor) {
@@ -734,6 +942,167 @@ export async function deleteCalendarAnchor(userId: string, id: string) {
   if (error) throw error;
 }
 
+export function timeBlockToRow(userId: string, block: TimeBlock) {
+  return {
+    id: block.id,
+    user_id: userId,
+    title: block.title,
+    date: block.date,
+    start_time: makeLocalDateTime(block.date, block.start_time),
+    end_time: makeLocalDateTime(block.date, block.end_time),
+    block_type: block.block_type,
+    linked_task_id: block.linked_task_id,
+    linked_anchor_id: block.linked_anchor_id,
+    source: block.source,
+    import_batch_id: block.import_batch_id,
+    reason: block.reason,
+    notes: block.notes,
+    status: block.status,
+    missed_reason: block.missed_reason,
+    completed_at: block.completed_at,
+    execution_status: block.execution_status,
+    started_at: block.started_at,
+    missed_at: block.missed_at,
+    skipped_at: block.skipped_at,
+    actual_minutes: block.actual_minutes,
+    execution_notes: block.execution_notes,
+    rescheduled_from_block_id: block.rescheduled_from_block_id,
+    carry_forward_task_id: block.carry_forward_task_id,
+  };
+}
+
+export function rowToTimeBlock(row: TimeBlockRow): TimeBlock {
+  const date = row.date ?? dateKeyFromTimestamp(row.start_time) ?? new Date().toISOString().slice(0, 10);
+  return {
+    id: row.id,
+    title: row.title,
+    date,
+    start_time: timeFromTimestamp(row.start_time, "09:00") ?? "09:00",
+    end_time: timeFromTimestamp(row.end_time, "09:30") ?? "09:30",
+    block_type: row.block_type ?? "focus",
+    linked_task_id: row.linked_task_id ?? null,
+    linked_anchor_id: row.linked_anchor_id ?? null,
+    source: row.source ?? "manual",
+    import_batch_id: row.import_batch_id ?? null,
+    reason: row.reason ?? "",
+    notes: row.notes ?? "",
+    status:
+      row.status === "complete" || row.status === "missed" || row.status === "planned"
+        ? row.status
+        : "planned",
+    missed_reason: row.missed_reason ?? null,
+    completed_at: row.completed_at ?? null,
+    execution_status: normalizeExecutionStatus(row.execution_status),
+    started_at: row.started_at ?? null,
+    missed_at: row.missed_at ?? null,
+    skipped_at: row.skipped_at ?? null,
+    actual_minutes: row.actual_minutes ?? null,
+    execution_notes: row.execution_notes ?? null,
+    rescheduled_from_block_id: row.rescheduled_from_block_id ?? null,
+    carry_forward_task_id: row.carry_forward_task_id ?? null,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+function normalizeExecutionStatus(value: string | null | undefined): ExecutionStatus {
+  return EXECUTION_STATUSES.includes(value as ExecutionStatus)
+    ? (value as ExecutionStatus)
+    : "not_started";
+}
+
+export async function fetchTimeBlocks(userId: string, startDate?: string, endDate?: string) {
+  const client = requireSupabase();
+  let query = client
+    .from("time_blocks")
+    .select("*")
+    .eq("user_id", userId)
+    .order("date", { ascending: true })
+    .order("start_time", { ascending: true });
+
+  if (startDate) query = query.gte("date", startDate);
+  if (endDate) query = query.lte("date", endDate);
+
+  const { data, error } = await query;
+  if (error) throw error;
+  return ((data ?? []) as TimeBlockRow[]).map(rowToTimeBlock);
+}
+
+export async function fetchTimeBlocksForDate(userId: string, date: string) {
+  return fetchTimeBlocks(userId, date, date);
+}
+
+export async function upsertTimeBlock(userId: string, block: TimeBlock) {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("time_blocks")
+    .upsert(timeBlockToRow(userId, block), { onConflict: "id" })
+    .select("*")
+    .maybeSingle();
+
+  if (error) throw error;
+  return data ? rowToTimeBlock(data as TimeBlockRow) : block;
+}
+
+export async function deleteTimeBlock(userId: string, id: string) {
+  const client = requireSupabase();
+  const { error } = await client
+    .from("time_blocks")
+    .delete()
+    .eq("id", id)
+    .eq("user_id", userId);
+
+  if (error) throw error;
+}
+
+export async function deleteImportedTimeBlocksForDate(userId: string, date: string) {
+  const client = requireSupabase();
+  const { error } = await client
+    .from("time_blocks")
+    .delete()
+    .eq("user_id", userId)
+    .eq("date", date)
+    .eq("source", "chatgpt_import");
+
+  if (error) throw error;
+}
+
+export async function insertScheduleImport(userId: string, payload: ScheduleImportPayload) {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("schedule_imports")
+    .insert({
+      id: payload.id ?? createLifeeeId(),
+      user_id: userId,
+      date: payload.date,
+      raw_text: payload.raw_text,
+      parsed_json: payload.parsed_json ?? {},
+      applied: payload.applied ?? false,
+      plan_realism_score: payload.plan_realism_score ?? null,
+      risks: payload.risks ?? [],
+      unscheduled: payload.unscheduled ?? [],
+    })
+    .select("*")
+    .maybeSingle();
+
+  if (error) throw error;
+  return data as ScheduleImportRow | null;
+}
+
+export async function markScheduleImportApplied(userId: string, id: string) {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("schedule_imports")
+    .update({ applied: true })
+    .eq("id", id)
+    .eq("user_id", userId)
+    .select("*")
+    .maybeSingle();
+
+  if (error) throw error;
+  return data as ScheduleImportRow | null;
+}
+
 export function buildDailyPlanPayload(input: {
   date: string;
   plan: DayPlan;
@@ -751,6 +1120,7 @@ export function buildDailyPlanPayload(input: {
     quick_win_task_id: input.plan.quickWins[0]?.id ?? null,
     ignore_today: input.plan.ignoreToday.map((task) => ({
       id: task.id,
+      task_code: task.task_code,
       title: task.title,
       reason: task.daily_role ?? "Ignore Today",
     })),
@@ -775,6 +1145,20 @@ export async function fetchDailyPlan(userId: string, date: string) {
   return data as DailyPlanRow | null;
 }
 
+export async function fetchDailyPlans(userId: string, startDate: string, endDate: string) {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("daily_plans")
+    .select("*")
+    .eq("user_id", userId)
+    .gte("date", startDate)
+    .lte("date", endDate)
+    .order("date", { ascending: true });
+
+  if (error) throw error;
+  return (data ?? []) as DailyPlanRow[];
+}
+
 export async function upsertDailyPlan(userId: string, payload: DailyPlanPayload) {
   const client = requireSupabase();
   const { data, error } = await client
@@ -787,8 +1171,159 @@ export async function upsertDailyPlan(userId: string, payload: DailyPlanPayload)
   return data as DailyPlanRow | null;
 }
 
+// ── Phase 1C: Plan Lock ─────────────────────────────────────────────────────
+export type PlanLockUpdate = {
+  date: string;
+  lock_status: "locked" | "unlocked";
+  lock_reason?: string | null;
+  changeReason?: string | null;
+};
+
+export async function updateDailyPlanLock(userId: string, update: PlanLockUpdate) {
+  const client = requireSupabase();
+  const existing = await fetchDailyPlan(userId, update.date);
+  const now = new Date().toISOString();
+  const priorReasons = Array.isArray(existing?.plan_change_reasons)
+    ? (existing!.plan_change_reasons as unknown[])
+    : [];
+  const nextReasons = update.changeReason
+    ? [...priorReasons, { at: now, reason: update.changeReason, action: update.lock_status }]
+    : priorReasons;
+  const priorCount = existing?.plan_change_count ?? 0;
+  const payload: DailyPlanPayload = {
+    date: update.date,
+    lock_status: update.lock_status,
+    lock_reason: update.lock_reason ?? existing?.lock_reason ?? null,
+    locked_at: update.lock_status === "locked" ? now : existing?.locked_at ?? null,
+    unlocked_at: update.lock_status === "unlocked" ? now : existing?.unlocked_at ?? null,
+    plan_change_count: update.changeReason ? priorCount + 1 : priorCount,
+    plan_change_reasons: nextReasons,
+  };
+  const { data, error } = await client
+    .from("daily_plans")
+    .upsert({ ...payload, user_id: userId }, { onConflict: "user_id,date" })
+    .select("*")
+    .maybeSingle();
+
+  if (error) throw error;
+  return data as DailyPlanRow | null;
+}
+
+// ── Phase 1C: Time Block Execution ──────────────────────────────────────────
+export type BlockExecutionUpdate = {
+  execution_status: ExecutionStatus;
+  started_at?: string | null;
+  completed_at?: string | null;
+  missed_at?: string | null;
+  skipped_at?: string | null;
+  actual_minutes?: number | null;
+  execution_notes?: string | null;
+  missed_reason?: string | null;
+  carry_forward_task_id?: string | null;
+  rescheduled_from_block_id?: string | null;
+};
+
+export async function updateTimeBlockExecution(
+  userId: string,
+  blockId: string,
+  update: BlockExecutionUpdate,
+) {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("time_blocks")
+    .update(update)
+    .eq("id", blockId)
+    .eq("user_id", userId)
+    .select("*")
+    .maybeSingle();
+
+  if (error) throw error;
+  return data ? rowToTimeBlock(data as TimeBlockRow) : null;
+}
+
+// ── Phase 1C: Daily Shutdowns ───────────────────────────────────────────────
+export type DailyShutdownRow = {
+  id: string;
+  user_id: string;
+  date: string;
+  completed_at: string | null;
+  shutdown_notes: string | null;
+  anti_drift_lesson: string | null;
+  tomorrow_first_move: string | null;
+  tomorrow_shutdown_target: string | null;
+  missed_summary: unknown;
+  carry_forward_summary: unknown;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DailyShutdownPayload = {
+  date: string;
+  completed_at?: string | null;
+  shutdown_notes?: string | null;
+  anti_drift_lesson?: string | null;
+  tomorrow_first_move?: string | null;
+  tomorrow_shutdown_target?: string | null;
+  missed_summary?: unknown;
+  carry_forward_summary?: unknown;
+};
+
+export async function fetchDailyShutdown(userId: string, date: string) {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("daily_shutdowns")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("date", date)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data as DailyShutdownRow | null;
+}
+
+export async function fetchDailyShutdowns(
+  userId: string,
+  startDate: string,
+  endDate: string,
+) {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("daily_shutdowns")
+    .select("*")
+    .eq("user_id", userId)
+    .gte("date", startDate)
+    .lte("date", endDate)
+    .order("date", { ascending: true });
+
+  if (error) throw error;
+  return (data ?? []) as DailyShutdownRow[];
+}
+
+export async function upsertDailyShutdown(userId: string, payload: DailyShutdownPayload) {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("daily_shutdowns")
+    .upsert(
+      {
+        ...payload,
+        user_id: userId,
+        missed_summary: payload.missed_summary ?? [],
+        carry_forward_summary: payload.carry_forward_summary ?? [],
+      },
+      { onConflict: "user_id,date" },
+    )
+    .select("*")
+    .maybeSingle();
+
+  if (error) throw error;
+  return data as DailyShutdownRow | null;
+}
+
 export function createLifeeeId() {
-  return crypto.randomUUID();
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `lifeee_${Math.random().toString(36).slice(2)}_${Date.now()}`;
 }
 
 function numberOrDefault(value: unknown, fallback = 0) {

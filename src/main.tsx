@@ -4,16 +4,19 @@ import { BrowserRouter } from 'react-router'
 import './index.css'
 import { TRPCProvider } from "@/providers/trpc"
 import { ThemeProvider } from "@/components/theme-provider"
+import { UIModeProvider } from "@/providers/UIModeContext"
 import App from './App.tsx'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ThemeProvider>
-      <BrowserRouter>
-        <TRPCProvider>
-          <App />
-        </TRPCProvider>
-      </BrowserRouter>
+      <UIModeProvider>
+        <BrowserRouter>
+          <TRPCProvider>
+            <App />
+          </TRPCProvider>
+        </BrowserRouter>
+      </UIModeProvider>
     </ThemeProvider>
   </StrictMode>,
 )
