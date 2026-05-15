@@ -11,6 +11,7 @@ import {
   upsertFaithEntry,
 } from "@/lib/lifeee-persistence";
 import { Flame } from "lucide-react";
+import { Label } from "@/components/ui/label";
 
 const STORAGE_KEY = "lifeee.faith_logs.v1";
 
@@ -280,6 +281,24 @@ Help me turn this into a short Bible study, reflection, prayer, and one action s
         ) : null}
       </div>
 
+      <div className="card-surface p-4">
+        <h3 className="text-sm font-semibold text-[#25313c] mb-2">TODAY'S FAITH FOCUS</h3>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+          <div>
+            <div className="text-[10px] uppercase text-[#6f685f]">Passage</div>
+            <div className="text-[#25313c]">{form.bibleReading || "—"}</div>
+          </div>
+          <div>
+            <div className="text-[10px] uppercase text-[#6f685f]">Prayer focus</div>
+            <div className="text-[#25313c]">{form.prayerDone ? "Completed" : "Not yet"}</div>
+          </div>
+          <div>
+            <div className="text-[10px] uppercase text-[#6f685f]">Action step</div>
+            <div className="text-[#25313c]">{form.actionStep || "—"}</div>
+          </div>
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 card-surface p-4">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -307,51 +326,93 @@ Help me turn this into a short Bible study, reflection, prayer, and one action s
               />
               Church/group involvement
             </label>
-            <input
-              type="text"
-              placeholder="Bible passage / reading"
-              value={form.bibleReading}
-              onChange={(e) => setForm((p) => ({ ...p, bibleReading: e.target.value }))}
-              className="input-dark"
-            />
-            <input
-              type="text"
-              placeholder="Chapter studied"
-              value={form.chapterStudied}
-              onChange={(e) => setForm((p) => ({ ...p, chapterStudied: e.target.value }))}
-              className="input-dark"
-            />
-            <textarea
-              placeholder="Main lesson"
-              value={form.mainLesson}
-              onChange={(e) => setForm((p) => ({ ...p, mainLesson: e.target.value }))}
-              className="input-dark h-16 resize-none"
-            />
-            <textarea
-              placeholder="Question I had"
-              value={form.question}
-              onChange={(e) => setForm((p) => ({ ...p, question: e.target.value }))}
-              className="input-dark h-16 resize-none"
-            />
-            <textarea
-              placeholder="Temptation or struggle"
-              value={form.temptation}
-              onChange={(e) => setForm((p) => ({ ...p, temptation: e.target.value }))}
-              className="input-dark h-16 resize-none"
-            />
-            <textarea
-              placeholder="Gratitude"
-              value={form.gratitude}
-              onChange={(e) => setForm((p) => ({ ...p, gratitude: e.target.value }))}
-              className="input-dark h-16 resize-none"
-            />
-            <input
-              type="text"
-              placeholder="Action step"
-              value={form.actionStep}
-              onChange={(e) => setForm((p) => ({ ...p, actionStep: e.target.value }))}
-              className="input-dark md:col-span-2"
-            />
+            <div>
+              <Label htmlFor="faith-bible-passage" className="text-[10px] uppercase text-[#6f685f] mb-1">
+                Bible passage
+              </Label>
+              <input
+                id="faith-bible-passage"
+                type="text"
+                placeholder="Bible passage / reading"
+                value={form.bibleReading}
+                onChange={(e) => setForm((p) => ({ ...p, bibleReading: e.target.value }))}
+                className="input-dark w-full"
+              />
+            </div>
+            <div>
+              <Label htmlFor="faith-chapter-studied" className="text-[10px] uppercase text-[#6f685f] mb-1">
+                Chapter studied
+              </Label>
+              <input
+                id="faith-chapter-studied"
+                type="text"
+                placeholder="Chapter studied"
+                value={form.chapterStudied}
+                onChange={(e) => setForm((p) => ({ ...p, chapterStudied: e.target.value }))}
+                className="input-dark w-full"
+              />
+            </div>
+            <div>
+              <Label htmlFor="faith-main-lesson" className="text-[10px] uppercase text-[#6f685f] mb-1">
+                What stood out?
+              </Label>
+              <textarea
+                id="faith-main-lesson"
+                placeholder="Main lesson"
+                value={form.mainLesson}
+                onChange={(e) => setForm((p) => ({ ...p, mainLesson: e.target.value }))}
+                className="input-dark h-16 resize-none w-full"
+              />
+            </div>
+            <div>
+              <Label htmlFor="faith-question" className="text-[10px] uppercase text-[#6f685f] mb-1">
+                Question I have
+              </Label>
+              <textarea
+                id="faith-question"
+                placeholder="Question I had"
+                value={form.question}
+                onChange={(e) => setForm((p) => ({ ...p, question: e.target.value }))}
+                className="input-dark h-16 resize-none w-full"
+              />
+            </div>
+            <div>
+              <Label htmlFor="faith-temptation" className="text-[10px] uppercase text-[#6f685f] mb-1">
+                Current struggle or temptation
+              </Label>
+              <textarea
+                id="faith-temptation"
+                placeholder="Temptation or struggle"
+                value={form.temptation}
+                onChange={(e) => setForm((p) => ({ ...p, temptation: e.target.value }))}
+                className="input-dark h-16 resize-none w-full"
+              />
+            </div>
+            <div>
+              <Label htmlFor="faith-gratitude" className="text-[10px] uppercase text-[#6f685f] mb-1">
+                Gratitude
+              </Label>
+              <textarea
+                id="faith-gratitude"
+                placeholder="Gratitude"
+                value={form.gratitude}
+                onChange={(e) => setForm((p) => ({ ...p, gratitude: e.target.value }))}
+                className="input-dark h-16 resize-none w-full"
+              />
+            </div>
+            <div className="md:col-span-2">
+              <Label htmlFor="faith-action-step" className="text-[10px] uppercase text-[#6f685f] mb-1">
+                Action step
+              </Label>
+              <input
+                id="faith-action-step"
+                type="text"
+                placeholder="Action step"
+                value={form.actionStep}
+                onChange={(e) => setForm((p) => ({ ...p, actionStep: e.target.value }))}
+                className="input-dark w-full"
+              />
+            </div>
           </div>
           <button onClick={handleSave} className="btn-primary w-full mt-3">
             {syncStatus === "saving" ? "Saving..." : "Save & Score"}
@@ -360,10 +421,12 @@ Help me turn this into a short Bible study, reflection, prayer, and one action s
 
         <div className="space-y-4">
           <div className="card-surface p-4 text-center">
-            <h3 className="text-sm font-semibold text-[#25313c] mb-3">FAITH SCORE</h3>
-            <div className="text-4xl font-bold text-[#9a7bbd]">{score}%</div>
-            <div className="text-xs text-[#6f685f] mt-1">
+            <h3 className="text-sm font-semibold text-[#25313c] mb-3">FAITH PRACTICE</h3>
+            <div className="text-sm text-[#6f685f]">
               {score >= 80 ? "Strong" : score >= 50 ? "Growing" : "Needs attention"}
+            </div>
+            <div className="text-xs text-[#8c8478] mt-2">
+              Practice score: <span className="font-mono-data text-[#9a7bbd]">{score}%</span>
             </div>
           </div>
 

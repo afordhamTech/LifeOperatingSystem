@@ -35,6 +35,12 @@ function isLiveTask(task: Task) {
   return isActiveTask(task) && task.status !== "parking_lot";
 }
 
+function localDateKey(date = new Date()) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
+    date.getDate(),
+  ).padStart(2, "0")}`;
+}
+
 function isTodayString(value: string | null, today: string) {
   return Boolean(value) && value === today;
 }
@@ -171,7 +177,7 @@ export function pickInboxCandidates(tasks: Task[], currentEnergy: number) {
     .slice(0, 8);
 }
 
-export function pickIgnoredToday(tasks: Task[], today = new Date().toISOString().slice(0, 10)) {
+export function pickIgnoredToday(tasks: Task[], today = localDateKey()) {
   return tasks
     .filter((task) => isIgnoredTodayTask(task, today))
     .slice(0, 10);

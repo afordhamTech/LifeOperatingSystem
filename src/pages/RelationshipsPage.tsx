@@ -11,6 +11,12 @@ import {
   upsertRelationshipEntry,
 } from "@/lib/lifeee-persistence";
 import { Users, Plus, Bell } from "lucide-react";
+import {
+  EmptyStateCard,
+  NextActionCard,
+  PageDecisionHeader,
+  StatusPill,
+} from "@/components/ui-kit";
 
 const STORAGE_KEY = "lifeee.relationship_logs.v1";
 
@@ -136,9 +142,16 @@ export default function RelationshipsPage() {
     setForm({ personName: "", conversationQuality: 7, unresolvedIssue: "", followUpNeeded: false, notes: "" });
   };
 
+  const unresolved = entries.filter((entry) => entry.unresolvedIssue.trim());
+  const radarTitle = followUps[0]?.personName
+    ? `${followUps[0].personName} needs follow-up`
+    : unresolved[0]?.personName
+      ? `${unresolved[0].personName} has unresolved tension`
+      : "No urgent relationship action";
+
   const promptText = `Here is my relationship data:
 
-People tracked: ${people.length}
+People remembered: ${people.length}
 Follow-ups needed: ${followUps.length}
 
 Most recent interactions:
@@ -151,26 +164,46 @@ Help me understand who needs attention and give me mature next messages or actio
 
   return (
     <div className="space-y-6">
-      <div className="border-b border-[#ddd4c6] pb-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold text-[#25313c]">Relationships</h1>
-            <p className="text-sm text-[#6f685f] mt-1">
-              Track communication, friendships, family, and social presence.
-            </p>
+      <PageDecisionHeader
+        title="People"
+        question="Who needs remembering, repair, follow-through, or space?"
+      >
+        <span className={`rounded-full border px-2.5 py-1 text-[11px] ${getSyncTone(syncStatus)}`}>
+          {getSyncLabel(syncStatus)}
+        </span>
+      </PageDecisionHeader>
+      {syncError && <p className="text-xs text-destructive">{syncError}</p>}
+
+      <div className="grid gap-3 md:grid-cols-2">
+        <NextActionCard
+          label="Relationship Radar"
+          title={radarTitle}
+          detail={
+            followUps.length > 0
+              ? "Next mature action: follow through on the specific thing already noted."
+              : unresolved.length > 0
+                ? "Next mature action: repair simply before making it a bigger conversation."
+                : "Next mature action: remember one useful detail after your next interaction."
+          }
+          tone={followUps.length || unresolved.length ? "warning" : "calm"}
+        />
+        <div className="rounded-xl border border-border bg-card p-4">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+            Do Not Overdo
           </div>
-          <span className={`rounded-full border px-2.5 py-1 text-[11px] ${getSyncTone(syncStatus)}`}>
-            {getSyncLabel(syncStatus)}
-          </span>
+          <ul className="mt-2 space-y-1 text-xs text-[#6f685f]">
+            <li>Do one mature action, then leave space.</li>
+            <li>Do not double-text from anxiety.</li>
+            <li>Do not force a serious talk if simple repair works.</li>
+          </ul>
         </div>
-        {syncError && <p className="mt-2 text-xs text-destructive">{syncError}</p>}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="card-surface p-4">
           <h3 className="text-sm font-semibold text-[#25313c] mb-3 flex items-center gap-2">
             <Users size={14} />
-            PEOPLE
+            PEOPLE REMEMBERED
           </h3>
           <div className="space-y-2">
             {people.map((person) => (
@@ -178,33 +211,38 @@ Help me understand who needs attention and give me mature next messages or actio
                 <div>
                   <div className="text-sm text-[#25313c]">{person.personName}</div>
                   <div className="text-[10px] text-[#6f685f]">
-                    Last: {person.lastContact ?? "—"} | Quality: {person.conversationQuality ?? "—"}/10
+                    Last: {person.lastContact ?? "—"} | Connection: {person.conversationQuality ?? "—"}/10
                   </div>
                 </div>
                 {person.followUpNeeded && <Bell size={14} className="text-[#c39a4e]" />}
               </div>
             ))}
             {people.length === 0 && (
-              <div className="text-sm text-[#8c8478] text-center py-4">
-                No people tracked yet. Add someone you want to keep warm.
-              </div>
+              <EmptyStateCard
+                missing="No people remembered yet."
+                nextAction="Add one person and the next useful detail to remember."
+                why="This helps you follow through without turning people into a tracking system."
+              />
             )}
           </div>
         </div>
 
         <div className="card-surface p-4">
-          <h3 className="text-sm font-semibold text-[#25313c] mb-3">LOG INTERACTION</h3>
+          <h3 className="text-sm font-semibold text-[#25313c] mb-3">REMEMBER INTERACTION</h3>
           <div className="space-y-3">
-            <input
-              type="text"
-              placeholder="Person name"
-              value={form.personName}
-              onChange={(e) => setForm((p) => ({ ...p, personName: e.target.value }))}
-              className="input-dark w-full"
-            />
+            <label className="block">
+              <span className="mb-1 block text-[10px] uppercase text-[#6f685f]">Person</span>
+              <input
+                type="text"
+                placeholder="Person name"
+                value={form.personName}
+                onChange={(e) => setForm((p) => ({ ...p, personName: e.target.value }))}
+                className="input-dark w-full"
+              />
+            </label>
             <div>
               <div className="flex items-center justify-between mb-1">
-                <label className="text-[10px] uppercase text-[#6f685f]">Conversation Quality</label>
+                <label className="text-[10px] uppercase text-[#6f685f]">Connection Quality</label>
                 <span className="font-mono-data text-[10px] text-[#6b87ae]">{form.conversationQuality}/10</span>
               </div>
               <input
@@ -216,18 +254,24 @@ Help me understand who needs attention and give me mature next messages or actio
                 className="slider-dark"
               />
             </div>
-            <textarea
-              placeholder="Unresolved issue (optional)"
-              value={form.unresolvedIssue}
-              onChange={(e) => setForm((p) => ({ ...p, unresolvedIssue: e.target.value }))}
-              className="input-dark w-full h-16 resize-none"
-            />
-            <textarea
-              placeholder="Notes"
-              value={form.notes}
-              onChange={(e) => setForm((p) => ({ ...p, notes: e.target.value }))}
-              className="input-dark w-full h-16 resize-none"
-            />
+            <label className="block">
+              <span className="mb-1 block text-[10px] uppercase text-[#6f685f]">What happened?</span>
+              <textarea
+                placeholder="Interaction summary"
+                value={form.unresolvedIssue}
+                onChange={(e) => setForm((p) => ({ ...p, unresolvedIssue: e.target.value }))}
+                className="input-dark w-full h-16 resize-none"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-[10px] uppercase text-[#6f685f]">Important detail to remember</span>
+              <textarea
+                placeholder="Important detail, promise, preference, or context"
+                value={form.notes}
+                onChange={(e) => setForm((p) => ({ ...p, notes: e.target.value }))}
+                className="input-dark w-full h-16 resize-none"
+              />
+            </label>
             <label className="flex items-center gap-2 text-xs text-[#6f685f] cursor-pointer">
               <input
                 type="checkbox"
@@ -235,11 +279,12 @@ Help me understand who needs attention and give me mature next messages or actio
                 onChange={(e) => setForm((p) => ({ ...p, followUpNeeded: e.target.checked }))}
                 className="rounded"
               />
-              Follow-up needed
+              Follow-up needed?
             </label>
+            <StatusPill tone="neutral">Private by default</StatusPill>
             <button onClick={handleLog} className="btn-primary w-full flex items-center justify-center gap-2">
               <Plus size={14} />
-              {syncStatus === "saving" ? "Saving..." : "Log Interaction"}
+              {syncStatus === "saving" ? "Saving..." : "Remember Interaction"}
             </button>
           </div>
         </div>
@@ -260,7 +305,7 @@ Help me understand who needs attention and give me mature next messages or actio
         </div>
       )}
 
-      <ChatGPTPrompt title="Relationship Advice" promptText={promptText} />
+      <ChatGPTPrompt title="Relationship Check-in" promptText={promptText} />
     </div>
   );
 }

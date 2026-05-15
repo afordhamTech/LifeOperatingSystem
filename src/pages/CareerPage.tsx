@@ -25,6 +25,11 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import {
+  CollapsibleSection,
+  NextActionCard,
+  PageDecisionHeader,
+} from "@/components/ui-kit";
 
 const STORAGE_KEY = "lifeee.proof_items.v1";
 
@@ -252,6 +257,9 @@ export default function CareerPage() {
     items.length > 0
       ? Math.round((items.reduce((sum, item) => sum + item.proofScore, 0) / items.length) * 100) / 100
       : 0;
+  const strongestProof = [...items].sort(
+    (a, b) => Number(b.proofScore ?? 0) - Number(a.proofScore ?? 0),
+  )[0];
   const nextAction =
     bulletsToUpdate > 0
       ? "Update resume with recent project bullets"
@@ -261,7 +269,7 @@ export default function CareerPage() {
 
   const promptText = `Here is my career and proof data:
 
-Projects:
+Proof Library:
 ${items
   .map(
     (p) =>
@@ -271,30 +279,35 @@ ${items
 
 Resume bullets to update: ${bulletsToUpdate}
 LinkedIn updates needed: ${linkedInUpdates}
-Average proof score: ${proofScore.toFixed(1)}
+Average proof strength: ${proofScore.toFixed(1)}
 
 Tell me what proof is strongest, what I should polish, what I should add to my resume, and what my next career move should be this week.`;
 
   return (
     <div className="space-y-6">
-      <div className="border-b border-[#ddd4c6] pb-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold text-[#25313c]">Career & Proof</h1>
-            <p className="text-sm text-[#6f685f] mt-1">
-              Track whether you are creating evidence that future people can trust.
-            </p>
-          </div>
-          <SyncBadge status={syncStatus} />
-        </div>
-        {syncError && <p className="mt-2 text-xs text-destructive">{syncError}</p>}
-      </div>
+      <PageDecisionHeader
+        title="Career & Proof"
+        question="What proof do I have, and how do I turn it into leverage?"
+      >
+        <SyncBadge status={syncStatus} />
+      </PageDecisionHeader>
+      {syncError && <p className="text-xs text-destructive">{syncError}</p>}
+
+      <NextActionCard
+        label="Strongest proof"
+        title={strongestProof?.projectName || "Add one proof item"}
+        detail={
+          strongestProof
+            ? `Proof strength ${Number(strongestProof.proofScore || 0).toFixed(1)}. Next leverage move: ${nextAction}.`
+            : "Add a shipped artifact, resume story, GitHub artifact, or project result."
+        }
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="card-surface p-4">
           <div className="mb-3 flex items-center justify-between gap-2">
             <h3 className="text-sm font-semibold text-[#25313c]">
-              {editingId ? "EDIT PROJECT" : "ADD PROJECT"}
+              {editingId ? "EDIT PROOF" : "ADD PROOF"}
             </h3>
             {editingId ? (
               <button
@@ -354,7 +367,11 @@ Tell me what proof is strongest, what I should polish, what I should add to my r
               {(["visibility", "difficulty", "relevance", "completion"] as const).map((field) => (
                 <div key={field}>
                   <label className="text-[10px] uppercase text-[#6f685f] block mb-1">
-                    {field}
+                    {field === "visibility"
+                      ? "Showability"
+                      : field === "relevance"
+                        ? "Direction fit"
+                        : field}
                   </label>
                   <input
                     type="range"
@@ -372,7 +389,7 @@ Tell me what proof is strongest, what I should polish, what I should add to my r
             </div>
             <button onClick={() => void handleSave()} className="btn-primary flex items-center gap-2">
               {editingId ? <CheckCircle2 size={14} /> : <Plus size={14} />}
-              {editingId ? "Save Changes" : "Add Entry"}
+              {editingId ? "Save Changes" : "Add Proof"}
             </button>
           </div>
         </div>
@@ -381,7 +398,7 @@ Tell me what proof is strongest, what I should polish, what I should add to my r
           <div className="grid grid-cols-2 gap-3">
             <div className="card-surface p-3 text-center">
               <div className="text-xl font-bold text-[#25313c]">{items.length}</div>
-              <div className="text-[10px] text-[#6f685f]">Projects</div>
+              <div className="text-[10px] text-[#6f685f]">Proof Library</div>
             </div>
             <div className="card-surface p-3 text-center">
               <div className="text-xl font-bold text-[#c39a4e]">{bulletsToUpdate}</div>
@@ -393,18 +410,18 @@ Tell me what proof is strongest, what I should polish, what I should add to my r
             </div>
             <div className="card-surface p-3 text-center">
               <div className="text-xl font-bold text-[#9a7bbd]">{proofScore.toFixed(1)}</div>
-              <div className="text-[10px] text-[#6f685f]">Avg Proof Score</div>
+              <div className="text-[10px] text-[#6f685f]">Average Proof Strength</div>
             </div>
           </div>
           <div className="card-surface p-3">
-            <div className="text-xs text-[#6f685f]">Next action:</div>
+            <div className="text-xs text-[#6f685f]">Next leverage move:</div>
             <div className="text-sm text-[#6b87ae] mt-1">{nextAction}</div>
           </div>
         </div>
       </div>
 
       <div className="card-surface p-4">
-        <h3 className="text-sm font-semibold text-[#25313c] mb-3">PROJECTS</h3>
+        <h3 className="text-sm font-semibold text-[#25313c] mb-3">PROOF LIBRARY</h3>
         <div className="space-y-3">
           {items.map((project) => (
             <div key={project.id} className="p-3 bg-[#f0ebe2] rounded">
@@ -447,9 +464,9 @@ Tell me what proof is strongest, what I should polish, what I should add to my r
               </div>
               <div className="grid grid-cols-4 gap-2 mt-2">
                 {[
-                  { label: "Visibility", value: project.visibility ?? 0 },
+                  { label: "Showability", value: project.visibility ?? 0 },
                   { label: "Difficulty", value: project.difficulty ?? 0 },
-                  { label: "Relevance", value: project.relevance ?? 0 },
+                  { label: "Direction fit", value: project.relevance ?? 0 },
                   { label: "Completion", value: project.completion ?? 0 },
                 ].map((item) => (
                   <div key={item.label}>
@@ -463,7 +480,8 @@ Tell me what proof is strongest, what I should polish, what I should add to my r
                   </div>
                 ))}
               </div>
-              <div className="flex items-center gap-3 mt-2">
+              <CollapsibleSection title="Leverage checklist" defaultOpen={false} className="mt-2">
+              <div className="flex items-center gap-3">
                 <button
                   onClick={() => void toggleProjectFlag(project, "githubUpdated")}
                   className="inline-flex items-center gap-1 rounded-md border border-[#ddd4c6] bg-white px-2 py-1 text-[11px] text-[#6f685f] hover:bg-[#f7f3ec]"
@@ -501,6 +519,7 @@ Tell me what proof is strongest, what I should polish, what I should add to my r
                   Resume
                 </button>
               </div>
+              </CollapsibleSection>
             </div>
           ))}
           {items.length === 0 && (
@@ -512,7 +531,7 @@ Tell me what proof is strongest, what I should polish, what I should add to my r
         </div>
       </div>
 
-      <ChatGPTPrompt title="Career Analysis" promptText={promptText} />
+      <ChatGPTPrompt title="Career Leverage" promptText={promptText} />
     </div>
   );
 }

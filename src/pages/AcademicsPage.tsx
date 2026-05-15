@@ -23,10 +23,18 @@ import {
   upsertAcademicTask,
   type AcademicTaskPayload,
 } from "@/lib/lifeee-persistence";
+import {
+  CollapsibleSection,
+  EmptyStateCard,
+  NextActionCard,
+  PageDecisionHeader,
+  StatusPill,
+} from "@/components/ui-kit";
 
 type AcademicTaskForm = {
   className: string;
   taskName: string;
+  itemType: "assignment" | "exam" | "quiz" | "lab" | "reading" | "office hours" | "study block";
   dueDate: string;
   estimatedHours: number;
   difficulty: number;
@@ -38,6 +46,7 @@ type AcademicTaskForm = {
 const baseForm: Omit<AcademicTaskForm, "dueDate"> = {
   className: "",
   taskName: "",
+  itemType: "assignment",
   estimatedHours: 1,
   difficulty: 5,
   gradeImpact: 5,
@@ -78,7 +87,7 @@ function formToRowDraft(form: AcademicTaskForm, userId: string) {
     grade_impact: form.gradeImpact,
     status: form.status,
     priority_score: priorityScore,
-    notes: form.notes.trim() || null,
+    notes: academicNotesFromForm(form),
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   } satisfies AcademicTaskRow;
@@ -101,8 +110,14 @@ function taskPayloadFromForm(form: AcademicTaskForm): AcademicTaskPayload {
     grade_impact: form.gradeImpact,
     status: form.status,
     priority_score: priorityScore,
-    notes: form.notes.trim() || null,
+    notes: academicNotesFromForm(form),
   };
+}
+
+function academicNotesFromForm(form: AcademicTaskForm) {
+  const notes = form.notes.trim();
+  const typeLine = `Type: ${form.itemType}`;
+  return notes ? `${typeLine}\n${notes}` : typeLine;
 }
 
 function taskPayloadFromRow(task: AcademicTaskRow): AcademicTaskPayload {
@@ -201,6 +216,9 @@ export default function AcademicsPage() {
     name: task.task_name.slice(0, 12),
     score: Number(task.priority_score ?? 0),
   }));
+  const highestRisk = highRiskTasks[0] ?? sortedTasks[0] ?? null;
+  const academicPressure =
+    highRiskTasks.length > 0 ? "high" : sortedTasks.length >= 4 ? "medium" : "low";
 
   const handleAddTask = async () => {
     if (!form.className.trim() || !form.taskName.trim()) return;
@@ -298,18 +316,23 @@ export default function AcademicsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="border-b border-[#ddd4c6] pb-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold text-[#25313c]">Academics</h1>
-            <p className="text-sm text-[#6f685f] mt-1">
-              Track assignments, exams, study load, grade risk, and weekly academic
-              execution.
-            </p>
-          </div>
-          <SyncBadge status={syncStatus} />
-        </div>
-      </div>
+      <PageDecisionHeader
+        title="Academic Risk Control"
+        question="What academic item can hurt the week if it slips?"
+      >
+        <SyncBadge status={syncStatus} />
+      </PageDecisionHeader>
+
+      <NextActionCard
+        label="Academic pressure"
+        title={`${academicPressure[0].toUpperCase()}${academicPressure.slice(1)}`}
+        tone={academicPressure === "high" ? "warning" : "calm"}
+        detail={
+          highestRisk
+            ? `Highest risk: ${highestRisk.class_name} - ${highestRisk.task_name}. Next action: start the first 25 minutes or mark it in progress.`
+            : "No deadlines captured yet. Add the first course item so pressure is visible."
+        }
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
         <div className="lg:col-span-3 space-y-4">
@@ -318,35 +341,73 @@ export default function AcademicsPage() {
               ADD TASK
             </h3>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-              <input
-                type="text"
-                placeholder="Task name"
-                value={form.taskName}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, taskName: e.target.value }))
-                }
-                className="input-dark col-span-2 md:col-span-1"
-              />
-              <input
-                type="text"
-                placeholder="Class"
-                value={form.className}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, className: e.target.value }))
-                }
-                className="input-dark"
-              />
-              <input
-                type="date"
-                value={form.dueDate}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, dueDate: e.target.value }))
-                }
-                className="input-dark"
-              />
+              <div className="col-span-2 md:col-span-1">
+                <label className="text-[10px] uppercase tracking-wider text-[#6f685f] block mb-1">
+                  Item title
+                </label>
+                <input
+                  type="text"
+                  placeholder="Problem set, exam, lab report"
+                  value={form.taskName}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, taskName: e.target.value }))
+                  }
+                  className="input-dark w-full"
+                />
+              </div>
               <div>
                 <label className="text-[10px] uppercase tracking-wider text-[#6f685f] block mb-1">
-                  Est. Hours
+                  Course
+                </label>
+                <input
+                  type="text"
+                  placeholder="BIO 101"
+                  value={form.className}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, className: e.target.value }))
+                  }
+                  className="input-dark w-full"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] uppercase tracking-wider text-[#6f685f] block mb-1">
+                  Type
+                </label>
+                <select
+                  value={form.itemType}
+                  onChange={(e) =>
+                    setForm((p) => ({
+                      ...p,
+                      itemType: e.target.value as AcademicTaskForm["itemType"],
+                    }))
+                  }
+                  className="input-dark w-full"
+                >
+                  <option value="assignment">Assignment</option>
+                  <option value="exam">Exam</option>
+                  <option value="quiz">Quiz</option>
+                  <option value="lab">Lab</option>
+                  <option value="reading">Reading</option>
+                  <option value="office hours">Office hours</option>
+                  <option value="study block">Study block</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] uppercase tracking-wider text-[#6f685f] block mb-1">
+                  Due date
+                </label>
+                <input
+                  type="date"
+                  value={form.dueDate}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, dueDate: e.target.value }))
+                  }
+                  className="input-dark w-full"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] uppercase tracking-wider text-[#6f685f] block mb-1">
+                  Estimated hours
                 </label>
                 <input
                   type="number"
@@ -385,7 +446,7 @@ export default function AcademicsPage() {
               </div>
               <div>
                 <label className="text-[10px] uppercase tracking-wider text-[#6f685f] block mb-1">
-                  Grade Impact
+                  Grade impact
                 </label>
                 <input
                   type="range"
@@ -548,9 +609,11 @@ export default function AcademicsPage() {
                 );
               })}
             {sortedTasks.length === 0 && !isLoading ? (
-              <div className="text-center py-8 text-sm text-[#8c8478]">
-                No tasks yet. Capture anything from school, Connex, family, or personal life.
-              </div>
+              <EmptyStateCard
+                missing="No academic items captured yet."
+                nextAction="Add one course deadline with an estimated hour count."
+                why="Academic risk control needs due dates and grade impact before it can protect study time."
+              />
             ) : null}
             </div>
           </div>
@@ -591,6 +654,32 @@ export default function AcademicsPage() {
 
           <div className="card-surface p-4">
             <h3 className="text-sm font-semibold text-[#25313c] mb-3">
+              STUDY PLAN
+            </h3>
+            <div className="space-y-2 text-xs text-[#6f685f]">
+              <div className="flex items-center justify-between gap-3 rounded-md bg-[#f0ebe2] px-3 py-2">
+                <span>Courses</span>
+                <StatusPill tone="info">
+                  {new Set(sortedTasks.map((task) => task.class_name)).size}
+                </StatusPill>
+              </div>
+              <div className="flex items-center justify-between gap-3 rounded-md bg-[#f0ebe2] px-3 py-2">
+                <span>Deadlines</span>
+                <StatusPill tone={sortedTasks.length > 0 ? "info" : "warning"}>
+                  {sortedTasks.length}
+                </StatusPill>
+              </div>
+              <div className="flex items-center justify-between gap-3 rounded-md bg-[#f0ebe2] px-3 py-2">
+                <span>Grade risk</span>
+                <StatusPill tone={academicPressure === "high" ? "danger" : "neutral"}>
+                  {academicPressure}
+                </StatusPill>
+              </div>
+            </div>
+          </div>
+
+          <CollapsibleSection title="Priority breakdown" defaultOpen={false}>
+            <h3 className="text-sm font-semibold text-[#25313c] mb-3">
               PRIORITY BREAKDOWN
             </h3>
             {chartData.length > 0 ? (
@@ -614,7 +703,7 @@ export default function AcademicsPage() {
                 Add a few tasks to see the priority spread.
               </div>
             )}
-          </div>
+          </CollapsibleSection>
 
           <div className="card-surface p-4">
             <h3 className="text-sm font-semibold text-[#25313c] mb-3">
@@ -622,8 +711,8 @@ export default function AcademicsPage() {
             </h3>
             <div className="text-xs text-[#6f685f]">
               {supabaseConfigured
-                ? "Waiting for login. Unsynced tasks shown here are local draft only."
-                : "Local draft only. Supabase writes are disabled until the env vars are added."}
+                ? "Needs login. Unsynced tasks shown here are draft only."
+                : "Draft only. Saves are disabled until the env vars are added."}
             </div>
           </div>
         </div>

@@ -28,7 +28,6 @@ import {
   parseTimeToMinutes,
   minutesToTime,
   anchorDuration,
-  calculateAvailableTime,
   buildTodayTimeline,
   buildPlanningExportValidation,
   detectConflicts,
@@ -86,8 +85,26 @@ import {
   type ScheduleImportPreview,
   type ScheduleImportPreviewRow,
 } from "@/lib/schedule-import";
+import {
+  AdvancedOnly,
+  AIActionButton,
+  CollapsibleSection,
+  EmptyStateCard,
+  PageDecisionHeader,
+  PrimaryActionBar,
+  SegmentedModeTabs,
+  StatusPill,
+} from "@/components/ui-kit";
 
 type View = "today" | "week" | "month" | "agenda";
+type WorkflowMode = "reality" | "plan" | "execute" | "details";
+
+const WORKFLOW_OPTIONS: { value: WorkflowMode; label: string }[] = [
+  { value: "reality", label: "Reality" },
+  { value: "plan", label: "Plan" },
+  { value: "execute", label: "Execute" },
+  { value: "details", label: "Details" },
+];
 
 const VIEW_TABS: { key: View; label: string; icon: React.ComponentType<{ size?: number }> }[] = [
   { key: "today", label: "Today", icon: CalendarClock },
@@ -131,6 +148,7 @@ export default function CalendarPage() {
   const saveSequenceRef = useRef(0);
   const [syncStatus, setSyncStatus] = useState<LifeeeSyncStatus>("local");
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [workflowMode, setWorkflowMode] = useState<WorkflowMode>("reality");
   const [view, setView] = useState<View>("today");
   const [activeDate, setActiveDate] = useState<string>(today);
   const [currentEnergy] = useState<number>(readEnergy());
@@ -244,7 +262,6 @@ export default function CalendarPage() {
     [activeDate, timeBlocks],
   );
 
-  const available = useMemo(() => calculateAvailableTime(onDayAnchors), [onDayAnchors]);
   const planningSnapshot = useMemo(
     () =>
       buildPlanningSnapshot({
@@ -253,6 +270,33 @@ export default function CalendarPage() {
         timeBlocks: onDayTimeBlocks,
       }),
     [activeDate, onDayAnchors, onDayTimeBlocks],
+  );
+  const available = useMemo(
+    () => ({
+      totalOpenMinutes: planningSnapshot.capacity.totalAvailableMinutes,
+      largestOpenBlock: planningSnapshot.largestWindow
+        ? {
+            start: planningSnapshot.largestWindow.start,
+            end: planningSnapshot.largestWindow.end,
+            durationMinutes: planningSnapshot.largestWindow.durationMinutes,
+          }
+        : null,
+      bestDeepWork: planningSnapshot.deepWorkWindows[0]
+        ? {
+            start: planningSnapshot.deepWorkWindows[0].start,
+            end: planningSnapshot.deepWorkWindows[0].end,
+            durationMinutes: planningSnapshot.deepWorkWindows[0].durationMinutes,
+          }
+        : null,
+      bestWorkout: null,
+      bestShutdownTarget: planningSnapshot.shutdownReserve.start,
+      openBlocks: planningSnapshot.openWindows.map((window) => ({
+        start: window.start,
+        end: window.end,
+        durationMinutes: window.durationMinutes,
+      })),
+    }),
+    [planningSnapshot],
   );
   const plan = useMemo(() => buildDayPlan(tasks, currentEnergy, activeDate), [activeDate, tasks, currentEnergy]);
   const smartViews = useMemo(
@@ -287,7 +331,7 @@ export default function CalendarPage() {
   const conflicts = useMemo(() => detectConflicts(onDayAnchors), [onDayAnchors]);
   const timeline = useMemo(
     () => buildTodayTimeline(onDayAnchors, available, { timeBlocks: onDayTimeBlocks }),
-    [onDayAnchors, available, onDayTimeBlocks],
+    [onDayAnchors, onDayTimeBlocks, available],
   );
   const reality = useMemo(
     () =>
@@ -599,7 +643,7 @@ export default function CalendarPage() {
 
     if (!userId || !remoteLoadedRef.current) {
       setSyncStatus(hasSupabaseConfig ? "waiting" : "local");
-      setImportNotice("Applied as Local draft only. Sign in to persist schedule blocks to Supabase.");
+      setImportNotice("Applied as Draft only. Sign in to save schedule blocks.");
       clearAppliedScheduleImport();
       return;
     }
@@ -683,6 +727,43 @@ export default function CalendarPage() {
       });
   };
 
+  const updateTimeBlockExecutionStatus = (
+    id: string,
+    executionStatus: TimeBlock["execution_status"],
+  ) => {
+    const current = timeBlocks.find((block) => block.id === id);
+    if (!current) return;
+    const now = new Date().toISOString();
+    const next: TimeBlock = {
+      ...current,
+      execution_status: executionStatus,
+      status:
+        executionStatus === "done"
+          ? "complete"
+          : executionStatus === "missed"
+            ? "missed"
+            : current.status,
+      started_at: executionStatus === "in_progress" ? now : current.started_at,
+      completed_at: executionStatus === "done" ? now : current.completed_at,
+      missed_at: executionStatus === "missed" ? now : current.missed_at,
+      skipped_at: executionStatus === "skipped" ? now : current.skipped_at,
+      updated_at: now,
+    };
+    setTimeBlocks((prev) => prev.map((block) => (block.id === id ? next : block)));
+    if (!userId || !remoteLoadedRef.current) {
+      setSyncStatus(hasSupabaseConfig ? "waiting" : "local");
+      return;
+    }
+    setSyncStatus("saving");
+    setSyncError(null);
+    void upsertTimeBlock(userId, next)
+      .then(() => setSyncStatus("saved"))
+      .catch((error: unknown) => {
+        setSyncStatus("error");
+        setSyncError(error instanceof Error ? error.message : "Unable to update time block.");
+      });
+  };
+
   const loops = useMemo(() => listRecurringLoops(new Date(activeDate)), [activeDate]);
   const visibleSyncStatus: LifeeeSyncStatus = sessionLoading
     ? "loading"
@@ -691,6 +772,8 @@ export default function CalendarPage() {
       : !userId
         ? "waiting"
         : syncStatus;
+  const planningWarningCount =
+    planningValidation.blockers.length + planningValidation.warnings.length;
 
   useEffect(() => {
     if (!userId || sessionLoading || !remoteLoadedRef.current) return;
@@ -729,69 +812,43 @@ export default function CalendarPage() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <div className="border-b border-border pb-4 flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold text-foreground">Calendar</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Fixed anchors + flexible tasks + energy limits + reality check.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <span
-            className={`rounded-full border px-3 py-2 text-xs font-semibold ${getSyncTone(visibleSyncStatus)}`}
-            title={visibleSyncStatus === "error" ? syncError ?? undefined : undefined}
-          >
-            {getSyncLabel(visibleSyncStatus)}
-          </span>
-          <button
-            onClick={copyPlanningPrompt}
-            className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm hover:bg-muted/70"
-          >
-            {copied === "planning" ? <CheckCheck size={14} /> : <Copy size={14} />}
-            {copied === "planning" ? "Copied" : "Copy Calendar Planning Prompt"}
-          </button>
+      <PageDecisionHeader
+        title="Calendar"
+        question="Reality first, then plan, then execute."
+      >
+        <span
+          className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${getSyncTone(visibleSyncStatus)}`}
+          title={visibleSyncStatus === "error" ? syncError ?? undefined : undefined}
+        >
+          {getSyncLabel(visibleSyncStatus)}
+        </span>
+        <AIActionButton onClick={copyPlanningPrompt}>
+          {copied === "planning" ? "Copied" : "Plan with AI"}
+        </AIActionButton>
+        <AdvancedOnly>
           <button
             onClick={copyWeeklyReviewPrompt}
             className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm hover:bg-muted/70"
           >
             {copied === "weekly" ? <CheckCheck size={14} /> : <Copy size={14} />}
-            {copied === "weekly" ? "Copied" : "Copy Weekly Calendar Review Prompt"}
+            {copied === "weekly" ? "Copied" : "Weekly calendar review"}
           </button>
-          <Link
-            to="/tasks"
-            className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm hover:bg-muted/70"
-          >
-            <ListChecks size={14} />
-            Open Task Command
-          </Link>
-        </div>
-      </div>
+        </AdvancedOnly>
+        <Link
+          to="/tasks"
+          className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm hover:bg-muted/70"
+        >
+          <ListChecks size={14} />
+          Open Tasks
+        </Link>
+      </PageDecisionHeader>
 
-      <ExecutionTruthPanel
-        today={activeDate}
-        userId={userId}
-        hasSupabaseConfig={hasSupabaseConfig}
-      />
-
-      <div className="flex flex-wrap items-center gap-2">
-        {VIEW_TABS.map((t) => {
-          const Icon = t.icon;
-          const active = view === t.key;
-          return (
-            <button
-              key={t.key}
-              onClick={() => setView(t.key)}
-              className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs transition-colors ${
-                active
-                  ? "border-primary bg-primary text-primary-foreground"
-                  : "border-border bg-card text-muted-foreground hover:bg-muted/70"
-              }`}
-            >
-              <Icon size={12} />
-              {t.label}
-            </button>
-          );
-        })}
+      <div className="flex flex-wrap items-center gap-3">
+        <SegmentedModeTabs
+          value={workflowMode}
+          onChange={setWorkflowMode}
+          options={WORKFLOW_OPTIONS}
+        />
         <div className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
           <CalendarDays size={12} />
           <input
@@ -803,66 +860,159 @@ export default function CalendarPage() {
         </div>
       </div>
 
-      <RealitySummary planning={planningSnapshot} />
+      {workflowMode === "reality" ? (
+        <div className="space-y-4">
+          <RealitySummary
+            planning={planningSnapshot}
+            anchors={onDayAnchors}
+            conflicts={conflicts}
+          />
+          <FixedAnchorsPanel
+            anchors={onDayAnchors}
+            onUpdate={updateAnchor}
+            onRemove={removeAnchor}
+            onGenerateFollowUpTask={generateFollowUpTask}
+          />
+          <AddAnchorPanel draft={draft} setDraft={setDraft} onAdd={addAnchor} />
+          <CollapsibleSection title="Operating Rhythms" defaultOpen={false}>
+            <RecurringLoopsPanel loops={loops} />
+          </CollapsibleSection>
+        </div>
+      ) : null}
 
-      <PlanningExportValidationPanel validation={planningValidation} />
+      {workflowMode === "plan" ? (
+        <div className="space-y-4">
+          <PrimaryActionBar>
+            <AIActionButton onClick={copyPlanningPrompt}>
+              {copied === "planning" ? "Copied" : "Plan with AI"}
+            </AIActionButton>
+            <span className="text-xs text-muted-foreground">
+              Export keeps stable task codes so imported blocks can reconnect to Tasks.
+            </span>
+          </PrimaryActionBar>
+          <CollapsibleSection
+            title="Ready for Planning"
+            subtitle={
+              planningWarningCount > 0
+                ? `${planningWarningCount} item${planningWarningCount === 1 ? "" : "s"} need attention`
+                : "No warnings"
+            }
+            defaultOpen={planningWarningCount > 0}
+          >
+            <PlanningExportValidationPanel validation={planningValidation} />
+          </CollapsibleSection>
+          <ScheduleImportPanel
+            value={scheduleImportText}
+            onChange={setScheduleImportText}
+            parsed={scheduleParsed}
+            preview={schedulePreview}
+            notice={importNotice}
+            replaceExistingImported={replaceExistingImported}
+            setReplaceExistingImported={setReplaceExistingImported}
+            onParse={parseScheduleImportText}
+            onPreview={previewScheduleImport}
+            onApplyNonConflicting={() => void applyScheduleImport("non-conflicting")}
+            onApplyWithSoftConflicts={() => void applyScheduleImport("include-soft-conflicts")}
+            onCancel={clearScheduleImport}
+          />
+        </div>
+      ) : null}
 
-      {view === "today" && (
-        <TodayView
-          anchors={onDayAnchors}
-          timeBlocks={onDayTimeBlocks}
-          tasks={tasks}
-          timeline={timeline}
-          conflicts={conflicts}
-          onUpdate={updateAnchor}
-          onRemove={removeAnchor}
-          onRemoveTimeBlock={removeTimeBlock}
-          onUpdateTimeBlockStatus={updateTimeBlockStatus}
-          onGenerateFollowUpTask={generateFollowUpTask}
-        />
-      )}
-      {view === "agenda" && (
-        <AgendaView
-          anchors={[...anchors].sort(
-            (a, b) =>
-              a.date.localeCompare(b.date) ||
-              parseTimeToMinutes(a.start_time) - parseTimeToMinutes(b.start_time),
+      {workflowMode === "execute" ? (
+        <div className="space-y-4">
+          <ExecutionTruthPanel
+            today={activeDate}
+            userId={userId}
+            hasSupabaseConfig={hasSupabaseConfig}
+          />
+          <TodayView
+            anchors={onDayAnchors}
+            timeBlocks={onDayTimeBlocks}
+            tasks={tasks}
+            timeline={timeline}
+            conflicts={conflicts}
+            onUpdate={updateAnchor}
+            onRemove={removeAnchor}
+            onRemoveTimeBlock={removeTimeBlock}
+            onUpdateTimeBlockStatus={updateTimeBlockStatus}
+            onUpdateTimeBlockExecutionStatus={updateTimeBlockExecutionStatus}
+            onGenerateFollowUpTask={generateFollowUpTask}
+          />
+        </div>
+      ) : null}
+
+      {workflowMode === "details" ? (
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center gap-2">
+            {VIEW_TABS.map((t) => {
+              const Icon = t.icon;
+              const active = view === t.key;
+              return (
+                <button
+                  key={t.key}
+                  onClick={() => setView(t.key)}
+                  className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs transition-colors ${
+                    active
+                      ? "border-primary bg-primary text-primary-foreground"
+                      : "border-border bg-card text-muted-foreground hover:bg-muted/70"
+                  }`}
+                >
+                  <Icon size={12} />
+                  {t.label}
+                </button>
+              );
+            })}
+          </div>
+          {view === "today" && (
+            <TodayView
+              anchors={onDayAnchors}
+              timeBlocks={onDayTimeBlocks}
+              tasks={tasks}
+              timeline={timeline}
+              conflicts={conflicts}
+              onUpdate={updateAnchor}
+              onRemove={removeAnchor}
+              onRemoveTimeBlock={removeTimeBlock}
+              onUpdateTimeBlockStatus={updateTimeBlockStatus}
+              onUpdateTimeBlockExecutionStatus={updateTimeBlockExecutionStatus}
+              onGenerateFollowUpTask={generateFollowUpTask}
+            />
           )}
-          timeBlocks={[...timeBlocks].sort(
-            (a, b) =>
-              a.date.localeCompare(b.date) ||
-              parseTimeToMinutes(a.start_time) - parseTimeToMinutes(b.start_time),
+          {view === "agenda" && (
+            <AgendaView
+              anchors={[...anchors].sort(
+                (a, b) =>
+                  a.date.localeCompare(b.date) ||
+                  parseTimeToMinutes(a.start_time) - parseTimeToMinutes(b.start_time),
+              )}
+              timeBlocks={[...timeBlocks].sort(
+                (a, b) =>
+                  a.date.localeCompare(b.date) ||
+                  parseTimeToMinutes(a.start_time) - parseTimeToMinutes(b.start_time),
+              )}
+              onRemove={removeAnchor}
+              onRemoveTimeBlock={removeTimeBlock}
+            />
           )}
-          onRemove={removeAnchor}
-          onRemoveTimeBlock={removeTimeBlock}
-        />
-      )}
-      {view === "week" && <WeekView anchors={anchors} activeDate={activeDate} />}
-      {view === "month" && <MonthView anchors={anchors} activeDate={activeDate} />}
-
-      <ScheduleImportPanel
-        value={scheduleImportText}
-        onChange={setScheduleImportText}
-        parsed={scheduleParsed}
-        preview={schedulePreview}
-        notice={importNotice}
-        replaceExistingImported={replaceExistingImported}
-        setReplaceExistingImported={setReplaceExistingImported}
-        onParse={parseScheduleImportText}
-        onPreview={previewScheduleImport}
-        onApplyNonConflicting={() => void applyScheduleImport("non-conflicting")}
-        onApplyWithSoftConflicts={() => void applyScheduleImport("include-soft-conflicts")}
-        onCancel={clearScheduleImport}
-      />
-
-      <AddAnchorPanel draft={draft} setDraft={setDraft} onAdd={addAnchor} />
-
-      <RecurringLoopsPanel loops={loops} />
+          {view === "week" && <WeekView anchors={anchors} activeDate={activeDate} />}
+          {view === "month" && <MonthView anchors={anchors} activeDate={activeDate} />}
+          <AddAnchorPanel draft={draft} setDraft={setDraft} onAdd={addAnchor} />
+          <RecurringLoopsPanel loops={loops} />
+        </div>
+      ) : null}
     </div>
   );
 }
 
-function RealitySummary({ planning }: { planning: PlanningSnapshot }) {
+function RealitySummary({
+  planning,
+  anchors,
+  conflicts,
+}: {
+  planning: PlanningSnapshot;
+  anchors: CalendarAnchor[];
+  conflicts: ReturnType<typeof detectConflicts>;
+}) {
   const tone =
     planning.realism.score >= 7
       ? "border-emerald-200 bg-emerald-50 text-emerald-800"
@@ -871,44 +1021,74 @@ function RealitySummary({ planning }: { planning: PlanningSnapshot }) {
         : "border-rose-200 bg-rose-50 text-rose-800";
   const largest = planning.largestWindow;
   const topDeepWork = planning.deepWorkWindows[0];
+  const focusHours = (planning.capacity.deepWorkCapacityMinutes / 60).toFixed(1);
+  const deepWorkText = topDeepWork
+    ? `${topDeepWork.start}-${topDeepWork.end}`
+    : "no protected deep-work window";
   return (
-    <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-5">
+    <div className="space-y-3">
       <div className={`rounded-2xl border p-4 ${tone}`}>
         <div className="text-[10px] uppercase tracking-wider font-semibold">Plan reality</div>
-        <div className="font-mono-data mt-2 text-3xl font-semibold">
-          {planning.realism.score.toFixed(1)}
+        <div className="mt-2 text-base font-semibold">
+          You realistically have {focusHours} hours of quality focus capacity today. Best
+          deep-work window: {deepWorkText}. Shutdown protected at{" "}
+          {planning.shutdownReserve.start}.
         </div>
-        <div className="mt-1 text-xs">{planning.realism.bottleneck}</div>
-        <div className="mt-1 text-xs opacity-80">→ {planning.realism.correction}</div>
+        <div className="mt-2 flex flex-wrap gap-2 text-xs">
+          <StatusPill tone={planning.realism.score >= 7 ? "good" : planning.realism.score >= 5 ? "warning" : "danger"}>
+            Reality {planning.realism.score.toFixed(1)} / 10
+          </StatusPill>
+          <StatusPill tone={conflicts.length > 0 ? "danger" : "good"}>
+            {conflicts.length > 0
+              ? `${conflicts.length} overlap${conflicts.length === 1 ? "" : "s"}`
+              : "No overlaps"}
+          </StatusPill>
+          <StatusPill tone={anchors.length > 0 ? "info" : "warning"}>
+            {anchors.length} fixed anchor{anchors.length === 1 ? "" : "s"}
+          </StatusPill>
+        </div>
+        <div className="mt-2 text-xs">{planning.realism.bottleneck}</div>
+        <div className="mt-1 text-xs opacity-80">Next: {planning.realism.correction}</div>
       </div>
-      <SmallStat
-        label="Open time"
-        value={`${planning.capacity.totalAvailableMinutes} min`}
-        hint="Realistic free time after sleep, anchors, blocks, buffers, reserves"
-      />
-      <SmallStat
-        label="Largest block"
-        value={largest ? `${largest.start}–${largest.end}` : "—"}
-        hint={largest ? `${largest.durationMinutes} min · ${largest.quality}` : "Calendar full or unset"}
-      />
-      <SmallStat
-        label="Best deep work"
-        value={topDeepWork ? `${topDeepWork.start}–${topDeepWork.end}` : "—"}
-        hint={
-          topDeepWork
-            ? `${topDeepWork.durationMinutes} min · deep-work score ${topDeepWork.deepWorkScore}/10`
-            : "No deep-work-sized window"
-        }
-      />
-      <SmallStat
-        label="Shutdown reserve"
-        value={`${planning.shutdownReserve.start}–${planning.shutdownReserve.end}`}
-        hint={`Sleep window ${planning.sleepWindow.start}–${planning.sleepWindow.end} protected`}
-      />
 
-      <div className="md:col-span-3 xl:col-span-3 card-surface p-4">
-        <div className="text-xs font-semibold text-foreground mb-2">
-          Realistic open windows
+      <div className="grid gap-3 md:grid-cols-3">
+        <SmallStat
+          label="Open time"
+          value={`${planning.capacity.totalAvailableMinutes} min`}
+          hint="After fixed commitments, buffers, and reserves"
+        />
+        <SmallStat
+          label="Best focus window"
+          value={topDeepWork ? `${topDeepWork.start}–${topDeepWork.end}` : "—"}
+          hint={
+            topDeepWork
+              ? `${topDeepWork.durationMinutes} min · ${topDeepWork.quality}`
+              : "No deep-work-sized window"
+          }
+        />
+        <SmallStat
+          label="Shutdown reserve"
+          value={`${planning.shutdownReserve.start}–${planning.shutdownReserve.end}`}
+          hint={`Sleep window ${planning.sleepWindow.start}–${planning.sleepWindow.end} protected`}
+        />
+      </div>
+
+      <CollapsibleSection title="Capacity details" defaultOpen={planning.warnings.length > 0}>
+        <div className="mb-3 grid gap-3 md:grid-cols-2">
+          <SmallStat
+            label="Largest realistic window"
+            value={largest ? `${largest.start}–${largest.end}` : "—"}
+            hint={
+              largest
+                ? `${largest.durationMinutes} min · ${largest.quality}`
+                : "Calendar full or unset"
+            }
+          />
+          <SmallStat
+            label="Focus capacity"
+            value={`~${Math.round(planning.capacity.deepWorkCapacityMinutes)} min`}
+            hint={planning.capacity.message}
+          />
         </div>
         {planning.openWindows.length === 0 ? (
           <div className="text-sm text-muted-foreground">No open windows after fixed commitments.</div>
@@ -940,14 +1120,9 @@ function RealitySummary({ planning }: { planning: PlanningSnapshot }) {
             ))}
           </ol>
         )}
-      </div>
 
-      <div className="md:col-span-3 xl:col-span-2 card-surface p-4">
-        <div className="text-xs font-semibold text-foreground mb-2">Realistic capacity</div>
-        <div className="text-sm text-muted-foreground">{planning.capacity.message}</div>
         <div className="mt-2 text-xs text-muted-foreground">
-          Focus capacity ~{Math.round(planning.capacity.deepWorkCapacityMinutes)} min · recovery
-          reserve {planning.capacity.recoveryReserveMinutes} min ·{" "}
+          Recovery reserve {planning.capacity.recoveryReserveMinutes} min ·{" "}
           {planning.recoveryReserveProtected ? (
             <span className="text-emerald-700">Recovery reserve protected.</span>
           ) : (
@@ -964,7 +1139,7 @@ function RealitySummary({ planning }: { planning: PlanningSnapshot }) {
             ))}
           </ul>
         ) : null}
-      </div>
+      </CollapsibleSection>
     </div>
   );
 }
@@ -1261,6 +1436,53 @@ function SchedulePreviewTable({ rows }: { rows: ScheduleImportPreviewRow[] }) {
   );
 }
 
+function FixedAnchorsPanel({
+  anchors,
+  onUpdate,
+  onRemove,
+  onGenerateFollowUpTask,
+}: {
+  anchors: CalendarAnchor[];
+  onUpdate: (id: string, patch: Partial<CalendarAnchor>) => void;
+  onRemove: (id: string) => void;
+  onGenerateFollowUpTask: (anchor: CalendarAnchor) => void;
+}) {
+  return (
+    <div className="card-surface p-4">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <div className="text-sm font-semibold text-foreground">Fixed anchors</div>
+          <div className="text-xs text-muted-foreground">
+            Classes, meetings, shifts, appointments, and immovable commitments.
+          </div>
+        </div>
+        <StatusPill tone={anchors.length > 0 ? "info" : "warning"}>
+          {anchors.length} today
+        </StatusPill>
+      </div>
+      {anchors.length === 0 ? (
+        <EmptyStateCard
+          missing="No fixed anchors for this day."
+          nextAction="Add the first class, shift, meeting, or appointment below."
+          why="Reality planning needs fixed commitments before it can trust open windows."
+        />
+      ) : (
+        <ul className="divide-y divide-border">
+          {anchors.map((anchor) => (
+            <AnchorRow
+              key={anchor.id}
+              anchor={anchor}
+              onUpdate={onUpdate}
+              onRemove={onRemove}
+              onGenerateFollowUpTask={onGenerateFollowUpTask}
+            />
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function TodayView({
   anchors,
   timeBlocks,
@@ -1271,6 +1493,7 @@ function TodayView({
   onRemove,
   onRemoveTimeBlock,
   onUpdateTimeBlockStatus,
+  onUpdateTimeBlockExecutionStatus,
   onGenerateFollowUpTask,
 }: {
   anchors: CalendarAnchor[];
@@ -1282,6 +1505,10 @@ function TodayView({
   onRemove: (id: string) => void;
   onRemoveTimeBlock: (id: string) => void;
   onUpdateTimeBlockStatus: (id: string, status: TimeBlock["status"]) => void;
+  onUpdateTimeBlockExecutionStatus: (
+    id: string,
+    executionStatus: TimeBlock["execution_status"],
+  ) => void;
   onGenerateFollowUpTask: (anchor: CalendarAnchor) => void;
 }) {
   return (
@@ -1336,6 +1563,7 @@ function TodayView({
             tasks={tasks}
             onRemove={onRemoveTimeBlock}
             onUpdateStatus={onUpdateTimeBlockStatus}
+            onUpdateExecutionStatus={onUpdateTimeBlockExecutionStatus}
           />
         </div>
       </div>
@@ -1402,14 +1630,25 @@ function TimeBlockList({
   tasks,
   onRemove,
   onUpdateStatus,
+  onUpdateExecutionStatus,
 }: {
   blocks: TimeBlock[];
   tasks: Task[];
   onRemove: (id: string) => void;
   onUpdateStatus: (id: string, status: TimeBlock["status"]) => void;
+  onUpdateExecutionStatus: (
+    id: string,
+    executionStatus: TimeBlock["execution_status"],
+  ) => void;
 }) {
   if (blocks.length === 0) {
-    return <div className="empty-state">No imported schedule blocks for this day.</div>;
+    return (
+      <EmptyStateCard
+        missing="No imported schedule blocks for this day."
+        nextAction="Use Plan with AI, paste the schedule back, then apply it."
+        why="Imported blocks turn the plan into executable progress."
+      />
+    );
   }
   return (
     <ul className="divide-y divide-border">
@@ -1417,6 +1656,8 @@ function TimeBlockList({
         const task = block.linked_task_id
           ? tasks.find((candidate) => candidate.id === block.linked_task_id)
           : null;
+        const isDone = block.status === "complete" || block.execution_status === "done";
+        const isInProgress = block.execution_status === "in_progress";
         return (
           <li key={block.id} className="py-3">
             <div className="flex items-start justify-between gap-3">
@@ -1430,7 +1671,9 @@ function TimeBlockList({
                     {block.source === "chatgpt_import" ? "ChatGPT import" : block.source ?? "manual"}
                   </span>
                   <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
-                    {block.status}
+                    {block.execution_status === "not_started"
+                      ? block.status
+                      : block.execution_status}
                   </span>
                 </div>
                 <div className="mt-1 text-xs text-muted-foreground">
@@ -1438,31 +1681,79 @@ function TimeBlockList({
                   {block.reason ? ` · ${block.reason}` : ""}
                 </div>
               </div>
-              <button
-                onClick={() => onRemove(block.id)}
-                className="text-muted-foreground hover:text-destructive"
-                title="Delete time block only"
-              >
-                <Trash2 size={14} />
-              </button>
+              <div className="flex flex-shrink-0 items-center gap-2">
+                <button
+                  onClick={() =>
+                    onUpdateExecutionStatus(
+                      block.id,
+                      isInProgress || isDone ? "done" : "in_progress",
+                    )
+                  }
+                  disabled={isDone}
+                  className="rounded-md border border-primary bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground disabled:opacity-60"
+                >
+                  {isDone ? "Complete" : isInProgress ? "Complete" : "Start"}
+                </button>
+                <details className="relative">
+                  <summary className="cursor-pointer list-none rounded-md border border-border bg-card px-2.5 py-1 text-xs text-foreground hover:bg-muted/70">
+                    More
+                  </summary>
+                  <div className="absolute right-0 z-10 mt-1 min-w-40 rounded-md border border-border bg-popover p-1 text-xs shadow-md">
+                    <button
+                      type="button"
+                      onClick={() => onUpdateExecutionStatus(block.id, "partial")}
+                      className="block w-full rounded px-2 py-1.5 text-left hover:bg-muted"
+                    >
+                      Partial
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onUpdateExecutionStatus(block.id, "missed")}
+                      className="block w-full rounded px-2 py-1.5 text-left hover:bg-muted"
+                    >
+                      Missed
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onUpdateExecutionStatus(block.id, "skipped")}
+                      className="block w-full rounded px-2 py-1.5 text-left hover:bg-muted"
+                    >
+                      Skip
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onUpdateExecutionStatus(block.id, "rescheduled")}
+                      className="block w-full rounded px-2 py-1.5 text-left hover:bg-muted"
+                    >
+                      Reschedule
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onRemove(block.id)}
+                      className="block w-full rounded px-2 py-1.5 text-left text-destructive hover:bg-muted"
+                    >
+                      Delete block only
+                    </button>
+                  </div>
+                </details>
+              </div>
             </div>
-            <div className="mt-2 flex flex-wrap gap-2 text-xs">
-              <button
-                onClick={() => onUpdateStatus(block.id, "complete")}
-                className="rounded-md border border-border bg-card px-2 py-1 hover:bg-muted/70"
-              >
-                Mark complete
-              </button>
-              <button
-                onClick={() => onUpdateStatus(block.id, "missed")}
-                className="rounded-md border border-border bg-card px-2 py-1 hover:bg-muted/70"
-              >
-                Mark missed
-              </button>
-              <span className="inline-flex items-center text-[11px] text-muted-foreground">
-                Missed reason and carry-forward hooks are scaffolded for shutdown.
-              </span>
-            </div>
+            <AdvancedOnly>
+              <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                <button
+                  onClick={() => onUpdateStatus(block.id, "complete")}
+                  className="rounded-md border border-border bg-card px-2 py-1 hover:bg-muted/70"
+                >
+                  Mark complete status
+                </button>
+                <button
+                  onClick={() => onUpdateStatus(block.id, "missed")}
+                  className="rounded-md border border-border bg-card px-2 py-1 hover:bg-muted/70"
+                >
+                  Mark missed status
+                </button>
+              </div>
+            </AdvancedOnly>
           </li>
         );
       })}
@@ -1857,73 +2148,83 @@ function AddAnchorPanel({
       <div className="flex items-center justify-between">
         <div className="text-sm font-semibold text-foreground">Add an anchor</div>
         <div className="text-xs text-muted-foreground">
-          Anchors are fixed events. Flexible work goes in Task Command.
+          Anchors are fixed events. Flexible work goes in Tasks.
         </div>
-      </div>
-      <div className="grid gap-2 md:grid-cols-3">
-        <input
-          placeholder="Title (e.g. Connex Zoom, Class, Work shift)"
-          value={draft.title}
-          onChange={(e) => update("title", e.target.value)}
-          className="rounded-md border border-border bg-card px-3 py-2 text-sm md:col-span-2"
-        />
-        <select
-          value={draft.category}
-          onChange={(e) => update("category", e.target.value as AnchorCategory)}
-          className="rounded-md border border-border bg-card px-3 py-2 text-sm"
-        >
-          {ANCHOR_CATEGORIES.map((c) => (
-            <option key={c} value={c}>
-              {c}
-            </option>
-          ))}
-        </select>
       </div>
       <div className="grid gap-2 md:grid-cols-5 text-xs">
+        <label className="flex flex-col text-[10px] uppercase tracking-wider text-muted-foreground md:col-span-2">
+          Title
+          <input
+            placeholder="Connex Zoom, class, work shift"
+            value={draft.title}
+            onChange={(e) => update("title", e.target.value)}
+            className="mt-1 rounded-md border border-border bg-card px-3 py-2 text-sm normal-case tracking-normal text-foreground"
+          />
+        </label>
+        <label className="flex flex-col text-[10px] uppercase tracking-wider text-muted-foreground">
+          Type
+          <select
+            value={draft.category}
+            onChange={(e) => update("category", e.target.value as AnchorCategory)}
+            className="mt-1 rounded-md border border-border bg-card px-3 py-2 text-sm normal-case tracking-normal text-foreground"
+          >
+            {ANCHOR_CATEGORIES.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        </label>
         <Field label="Date" type="date" value={draft.date} onChange={(v) => update("date", v)} />
         <Field label="Start" type="time" value={draft.start_time} onChange={onStartChange} />
+      </div>
+      <div className="grid gap-2 md:grid-cols-5 text-xs">
         <Field label="End" type="time" value={draft.end_time} onChange={(v) => update("end_time", v)} />
-        <Field label="Location" value={draft.location} onChange={(v) => update("location", v)} placeholder="Room, building, address" />
-        <Field label="Link" value={draft.link} onChange={(v) => update("link", v)} placeholder="Zoom or meeting URL" />
       </div>
-      <div className="grid gap-2 md:grid-cols-3 text-xs">
-        <Field label="People" value={draft.people} onChange={(v) => update("people", v)} placeholder="Who is involved" />
-        <Field label="Prep" value={draft.prep} onChange={(v) => update("prep", v)} placeholder="What to do before" />
-        <Field label="Follow up" value={draft.follow_up} onChange={(v) => update("follow_up", v)} placeholder="What to do after" />
-      </div>
-      <div className="grid gap-2 md:grid-cols-3 text-xs">
-        <Field
-          label="Notes"
-          value={draft.notes}
-          onChange={(v) => update("notes", v)}
-          placeholder="Anything to remember"
-          className="md:col-span-2"
-        />
-        <div className="flex items-end gap-3">
-          <label className="flex flex-col text-[10px] uppercase tracking-wider text-muted-foreground">
-            Privacy
-            <select
-              value={draft.privacy}
-              onChange={(e) => update("privacy", e.target.value as PrivacyLevel)}
-              className="mt-1 rounded-md border border-border bg-card px-2 py-1 text-sm normal-case tracking-normal"
-            >
-              {PRIVACY_LEVELS.map((p) => (
-                <option key={p} value={p}>
-                  {p}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex items-center gap-2 text-xs text-muted-foreground">
-            <input
-              type="checkbox"
-              checked={draft.recurring}
-              onChange={(e) => update("recurring", e.target.checked)}
+
+      <CollapsibleSection title="More details">
+        <div className="space-y-3">
+          <div className="grid gap-2 md:grid-cols-3 text-xs">
+            <Field label="Location" value={draft.location} onChange={(v) => update("location", v)} placeholder="Room, building, address" />
+            <Field label="Link" value={draft.link} onChange={(v) => update("link", v)} placeholder="Zoom or meeting URL" />
+            <Field label="People" value={draft.people} onChange={(v) => update("people", v)} placeholder="Who is involved" />
+          </div>
+          <div className="grid gap-2 md:grid-cols-3 text-xs">
+            <Field label="Prep" value={draft.prep} onChange={(v) => update("prep", v)} placeholder="What to do before" />
+            <Field label="Follow up" value={draft.follow_up} onChange={(v) => update("follow_up", v)} placeholder="What to do after" />
+            <Field
+              label="Notes"
+              value={draft.notes}
+              onChange={(v) => update("notes", v)}
+              placeholder="Anything to remember"
             />
-            Recurring <span className="uppercase tracking-wider">(Local draft only)</span>
-          </label>
+          </div>
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="flex flex-col text-[10px] uppercase tracking-wider text-muted-foreground">
+              Privacy
+              <select
+                value={draft.privacy}
+                onChange={(e) => update("privacy", e.target.value as PrivacyLevel)}
+                className="mt-1 rounded-md border border-border bg-card px-2 py-1 text-sm normal-case tracking-normal"
+              >
+                {PRIVACY_LEVELS.map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex items-center gap-2 text-xs text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={draft.recurring}
+                onChange={(e) => update("recurring", e.target.checked)}
+              />
+              Recurring <span className="uppercase tracking-wider">(Draft only)</span>
+            </label>
+          </div>
         </div>
-      </div>
+      </CollapsibleSection>
       <button
         onClick={onAdd}
         disabled={!draft.title.trim()}

@@ -305,11 +305,11 @@ export type SubstanceEntry = {
 export function getSyncLabel(status: LifeeeSyncStatus) {
   if (status === "loading") return "Loading Supabase";
   if (status === "saving") return "Saving";
-  if (status === "saved") return "Saved to Supabase";
-  if (status === "waiting") return "Waiting for login";
+  if (status === "saved") return "Saved";
+  if (status === "waiting") return "Needs login";
   if (status === "error") return "Sync failed";
   if (status === "placeholder") return "Placeholder only";
-  return "Local draft only";
+  return "Draft only";
 }
 
 export function getSyncTone(status: LifeeeSyncStatus) {

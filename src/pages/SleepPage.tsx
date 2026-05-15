@@ -28,6 +28,11 @@ import {
   fetchSleepLogs,
   upsertSleepLog,
 } from "@/lib/lifeee-persistence";
+import {
+  CollapsibleSection,
+  NextActionCard,
+  PageDecisionHeader,
+} from "@/components/ui-kit";
 
 type SleepForm = {
   bedtime: string;
@@ -184,7 +189,7 @@ export default function SleepPage() {
         setNotice(
           todayRow
             ? "Loaded from Supabase."
-            : "No Supabase sleep log exists for today yet. Local draft only until you save.",
+            : "No sleep log exists for today yet. Draft only until you save.",
         );
         setSyncStatus(todayRow ? "saved" : "local");
       } catch (loadError) {
@@ -224,8 +229,8 @@ export default function SleepPage() {
       setSyncStatus(supabaseConfigured ? "waiting" : "local");
       setNotice(
         supabaseConfigured
-          ? "Waiting for login. This is not saved to Supabase yet."
-          : "Local draft only. Supabase is not configured.",
+          ? "Needs login. This is not saved yet."
+          : "Draft only. Saves are not configured.",
       );
       return;
     }
@@ -263,6 +268,22 @@ export default function SleepPage() {
   };
 
   const readinessLabel = getStatusLabel(sleepReadiness);
+  const recoveryLabel =
+    sleepReadiness >= 8
+      ? "sharp"
+      : sleepReadiness >= 6.5
+        ? "good"
+        : sleepReadiness >= 5
+          ? "moderate"
+          : "low";
+  const mainLimiter =
+    sleepDebt > 1
+      ? "sleep debt"
+      : form.stressBeforeBed > 7
+        ? "stress before bed"
+        : form.wakeEnergy < 5
+          ? "low wake energy"
+          : "none";
   const weekDebt = history.reduce((sum, row) => sum + Number(row.sleep_debt ?? 0), 0);
   const recoveryTasks =
     sleepReadiness < 6.5
@@ -273,21 +294,23 @@ export default function SleepPage() {
 
   return (
     <div className="space-y-6">
-      <div className="border-b border-[#ddd4c6] pb-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold text-[#25313c]">Sleep</h1>
-            <p className="text-sm text-[#6f685f] mt-1">
-              Track sleep quality, debt, recovery, and whether your body is ready to
-              perform.
-            </p>
-          </div>
-          <SyncBadge status={syncStatus} />
-        </div>
-      </div>
+      <PageDecisionHeader
+        title="Sleep"
+        question="Can I realistically perform well today?"
+      >
+        <SyncBadge status={syncStatus} />
+      </PageDecisionHeader>
+
+      <NextActionCard
+        label="Recovery readiness"
+        title={`${recoveryLabel} · ${sleepReadiness.toFixed(1)} / 10`}
+        tone={sleepReadiness >= 6.5 ? "calm" : "warning"}
+        detail={`Main limiter: ${mainLimiter}. Next action: ${recoveryTasks[0]}`}
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="card-surface p-5 flex flex-col items-center">
+        <CollapsibleSection title="How this score is calculated">
+          <div className="flex flex-col items-center">
           <StatusRing score={sleepReadiness} size={120} strokeWidth={6} />
           <div className="mt-4 w-full space-y-2">
             <ScoreBreakdown
@@ -339,7 +362,8 @@ export default function SleepPage() {
           >
             {readinessLabel.toUpperCase()}
           </span>
-        </div>
+          </div>
+        </CollapsibleSection>
 
         <div className="card-surface p-5 lg:col-span-2">
           <h3 className="text-sm font-semibold text-[#25313c] mb-4">

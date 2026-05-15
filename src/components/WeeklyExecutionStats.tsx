@@ -125,7 +125,7 @@ export default function WeeklyExecutionStats({
     <section className="card-surface p-4 space-y-3">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <h2 className="text-sm font-semibold text-[#25313c]">
-          Execution Truth — this week
+          Execution summary — this week
         </h2>
         <div className="flex items-center gap-2">
           <SyncBadge status={status} />

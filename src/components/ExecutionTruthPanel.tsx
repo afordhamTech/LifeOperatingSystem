@@ -353,7 +353,7 @@ export default function ExecutionTruthPanel({ today, userId, hasSupabaseConfig }
         <div className="flex items-center gap-2">
           <div className="w-1.5 h-1.5 rounded-full bg-[#6b87ae]" />
           <h2 className="text-[10px] uppercase tracking-wider text-[#6b87ae] font-semibold">
-            Execution Truth
+            Today's Progress
           </h2>
         </div>
         <SyncBadge status={status} />
@@ -362,7 +362,7 @@ export default function ExecutionTruthPanel({ today, userId, hasSupabaseConfig }
       {error ? <p className="text-[11px] text-destructive">{error}</p> : null}
       {!loggedIn ? (
         <p className="text-xs text-[#8c8478]">
-          Local draft only — sign in to track execution against Supabase.
+          Draft only — sign in to track today's progress.
         </p>
       ) : null}
 

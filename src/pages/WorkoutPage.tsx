@@ -26,6 +26,11 @@ import {
   fetchWorkoutLogs,
   upsertWorkoutLog,
 } from "@/lib/lifeee-persistence";
+import {
+  CollapsibleSection,
+  NextActionCard,
+  PageDecisionHeader,
+} from "@/components/ui-kit";
 
 interface Exercise {
   name: string;
@@ -173,7 +178,7 @@ export default function WorkoutPage() {
         setNotice(
           todayWorkout
             ? "Loaded from Supabase."
-            : "No Supabase workout exists for today yet. Local draft only until you save.",
+            : "No workout exists for today yet. Draft only until you save.",
         );
         setSyncStatus(todayWorkout ? "saved" : "local");
       } catch (loadError) {
@@ -194,6 +199,14 @@ export default function WorkoutPage() {
 
   const readinessScore = computeReadiness(sleepReadiness, form);
   const decision = getWorkoutDecision(readinessScore, form.pain);
+  const limiter =
+    form.pain > 4
+      ? "pain"
+      : form.soreness > 7
+        ? "soreness"
+        : sleepReadiness < 6
+          ? "sleep"
+          : "none";
   const chartData = history.map((row) => ({
     day: new Date(row.date).toLocaleDateString("en-US", { weekday: "short" }),
     readiness: Number(row.training_readiness ?? 0),
@@ -289,20 +302,21 @@ export default function WorkoutPage() {
 
   return (
     <div className="space-y-6">
-      <div className="border-b border-[#ddd4c6] pb-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold text-[#25313c]">Workout</h1>
-            <p className="text-sm text-[#6f685f] mt-1">
-              Track training, athletic development, fatigue, progression, and injury
-              risk.
-            </p>
-          </div>
-          <SyncBadge status={syncStatus} />
-        </div>
-      </div>
+      <PageDecisionHeader
+        title="Workout"
+        question="How hard should I train today?"
+      >
+        <SyncBadge status={syncStatus} />
+      </PageDecisionHeader>
 
-      <div className="card-surface p-5">
+      <NextActionCard
+        label="Training state"
+        title={decision.label}
+        tone={form.pain > 4 || readinessScore < 6 ? "warning" : "calm"}
+        detail={`Readiness ${readinessScore.toFixed(1)} / 10. Limiter: ${limiter}. Next action: ${form.pain > 4 ? "modify or avoid painful movements" : "log the session after training"}.`}
+      />
+
+      <CollapsibleSection title="Why this recommendation">
         <div className="flex flex-wrap items-center gap-6">
           <StatusRing score={readinessScore} size={80} strokeWidth={5} />
           <div>
@@ -331,7 +345,7 @@ export default function WorkoutPage() {
             ))}
           </div>
         </div>
-      </div>
+      </CollapsibleSection>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div className="card-surface p-4">
@@ -487,8 +501,11 @@ export default function WorkoutPage() {
                   className="input-dark w-full"
                 >
                   <option value="Strength">Strength</option>
+                  <option value="Plyometrics">Plyometrics</option>
+                  <option value="Basketball Skill">Basketball skill</option>
+                  <option value="Boxing">Boxing</option>
                   <option value="Conditioning">Conditioning</option>
-                  <option value="Sport">Sport</option>
+                  <option value="Mobility">Mobility</option>
                   <option value="Recovery">Recovery</option>
                   <option value="Mixed">Mixed</option>
                 </select>

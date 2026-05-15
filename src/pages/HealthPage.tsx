@@ -13,6 +13,11 @@ import {
   upsertHealthEntry,
 } from "@/lib/lifeee-persistence";
 import { AlertTriangle, Shield } from "lucide-react";
+import {
+  CollapsibleSection,
+  NextActionCard,
+  PageDecisionHeader,
+} from "@/components/ui-kit";
 
 const STORAGE_KEY = "lifeee.health_logs.v1";
 
@@ -142,6 +147,18 @@ export default function HealthPage() {
   const riskScore = calcInjuryRisk(form.painScore, form.painTrend);
   const recommendations = getHealthRecommendations(form);
   const redFlags = getRedFlags(form);
+  const trainingDecision =
+    form.doctorVisitNeeded || form.painScore >= 8
+      ? "Consider medical evaluation"
+      : form.painScore >= 6 || form.painTrend === "increasing" || form.painType === "sharp"
+        ? "Modify training"
+        : form.painScore >= 3
+          ? "Train carefully"
+          : "Normal training";
+  const decisionReason =
+    form.painScore > 0
+      ? `Based on ${form.painArea || "reported pain"}, ${form.painType} pain, and a ${form.painTrend} trend.`
+      : "No pain signals logged today.";
 
   const handleSave = async () => {
     const entry = { ...form, date: today };
@@ -182,20 +199,22 @@ Help me decide whether to train, modify training, recover, or seek medical help.
 
   return (
     <div className="space-y-6">
-      <div className="border-b border-[#ddd4c6] pb-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold text-[#25313c]">Health & Injury</h1>
-            <p className="text-sm text-[#6f685f] mt-1">
-              Track pain, recurring issues, recovery, and whether you are ignoring warning signals.
-            </p>
-          </div>
-          <span className={`rounded-full border px-2.5 py-1 text-[11px] ${getSyncTone(syncStatus)}`}>
-            {getSyncLabel(syncStatus)}
-          </span>
-        </div>
-        {syncError && <p className="mt-2 text-xs text-destructive">{syncError}</p>}
-      </div>
+      <PageDecisionHeader
+        title="Health & Injury"
+        question="Should I train normally, modify, recover, or seek help?"
+      >
+        <span className={`rounded-full border px-2.5 py-1 text-[11px] ${getSyncTone(syncStatus)}`}>
+          {getSyncLabel(syncStatus)}
+        </span>
+      </PageDecisionHeader>
+      {syncError && <p className="text-xs text-destructive">{syncError}</p>}
+
+      <NextActionCard
+        label="Training decision"
+        title={trainingDecision}
+        tone={trainingDecision === "Normal training" ? "calm" : "warning"}
+        detail={`${decisionReason} Consider medical evaluation if symptoms persist or worsen.`}
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="card-surface p-4">
@@ -253,11 +272,11 @@ Help me decide whether to train, modify training, recover, or seek medical help.
               </select>
             </div>
             <div>
-              <label className="text-[10px] uppercase text-[#6f685f] block mb-1">Triggers</label>
+              <label className="text-[10px] uppercase text-[#6f685f] block mb-1">Movement-specific pain</label>
               <textarea
                 value={form.painTrigger}
                 onChange={(e) => setForm((p) => ({ ...p, painTrigger: e.target.value }))}
-                placeholder="What makes it worse?"
+                placeholder="Jumping, running, lifting, cutting, walking, after warmup better/same/worse"
                 className="input-dark w-full h-16 resize-none"
               />
             </div>
@@ -296,8 +315,9 @@ Help me decide whether to train, modify training, recover, or seek medical help.
           </div>
         </div>
 
-        <div className="card-surface p-4 flex flex-col items-center">
-          <h3 className="text-sm font-semibold text-[#25313c] mb-3 w-full">INJURY RISK</h3>
+        <CollapsibleSection title="Why this recommendation">
+          <div className="flex flex-col items-center">
+          <h3 className="text-sm font-semibold text-[#25313c] mb-3 w-full">Risk calculation</h3>
           <StatusRing score={riskScore} size={120} strokeWidth={6} />
           <div className="mt-4 w-full space-y-2">
             <FactorBar label="Pain Score" value={form.painScore} max={10} color="#c97a73" />
@@ -310,10 +330,11 @@ Help me decide whether to train, modify training, recover, or seek medical help.
             <FactorBar label="Training Load" value={5} max={10} color="#6b87ae" />
             <FactorBar label="Recovery Deficit" value={3} max={10} color="#9a7bbd" />
           </div>
-        </div>
+          </div>
+        </CollapsibleSection>
 
         <div className="card-surface p-4">
-          <h3 className="text-sm font-semibold text-[#25313c] mb-3">RECOMMENDATIONS</h3>
+          <h3 className="text-sm font-semibold text-[#25313c] mb-3">SAFE NEXT STEPS</h3>
           {recommendations.length > 0 ? (
             <div className="space-y-2">
               {recommendations.map((rec, i) => (

@@ -29,6 +29,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { useState, useCallback } from "react";
+import { useUIMode } from "@/providers/UIModeContext";
 
 type NavItem = { path: string; label: string; icon: React.ComponentType<{ size?: number; className?: string }> };
 type NavSection = { heading: string; items: NavItem[] };
@@ -38,10 +39,10 @@ const navSections: NavSection[] = [
     heading: "Command",
     items: [
       { path: "/", label: "Daily OS", icon: LayoutDashboard },
-      { path: "/tasks", label: "Task Command", icon: ListChecks },
+      { path: "/tasks", label: "Tasks", icon: ListChecks },
       { path: "/calendar", label: "Calendar", icon: CalendarDays },
       { path: "/weekly-review", label: "Weekly Review", icon: BarChart3 },
-      { path: "/archive", label: "Archive", icon: Archive },
+      { path: "/archive", label: "History", icon: Archive },
     ],
   },
   {
@@ -57,7 +58,7 @@ const navSections: NavSection[] = [
       { path: "/money", label: "Money", icon: Wallet },
       { path: "/faith", label: "Faith", icon: BookOpen },
       { path: "/relationships", label: "Relationships", icon: Users },
-      { path: "/substance", label: "Substance", icon: Brain },
+      { path: "/substance", label: "Depth & Learning", icon: Brain },
     ],
   },
 ];
@@ -67,6 +68,38 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     <PromptContextProvider>
       <AppLayoutInner>{children}</AppLayoutInner>
     </PromptContextProvider>
+  );
+}
+
+function ModeToggle({ collapsed }: { collapsed: boolean }) {
+  const { mode, setMode, toggleMode } = useUIMode();
+  if (collapsed) {
+    return (
+      <button
+        onClick={toggleMode}
+        title={`Mode: ${mode === "simple" ? "Simple" : "Advanced"} (click to switch)`}
+        className="flex w-full items-center justify-center rounded-lg p-1.5 text-[10px] font-semibold uppercase text-muted-foreground hover:bg-muted hover:text-foreground"
+      >
+        {mode === "simple" ? "S" : "A"}
+      </button>
+    );
+  }
+  return (
+    <div className="inline-flex w-full items-center gap-1 rounded-lg border border-border bg-muted/40 p-1">
+      {(["simple", "advanced"] as const).map((m) => (
+        <button
+          key={m}
+          onClick={() => setMode(m)}
+          className={`flex-1 rounded-md px-2 py-1 text-[11px] font-medium capitalize transition-colors ${
+            mode === m
+              ? "bg-card text-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          {m}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -172,6 +205,11 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
             </div>
           ))}
         </nav>
+
+        {/* Simple / Advanced mode toggle */}
+        <div className="border-t border-border/80 px-3 py-3">
+          <ModeToggle collapsed={collapsed} />
+        </div>
 
         {/* User section */}
         <div className="border-t border-border/80 px-3 py-3">

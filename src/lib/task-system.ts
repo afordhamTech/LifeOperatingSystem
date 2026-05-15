@@ -565,7 +565,7 @@ export function isActiveTask(task: Task) {
 
 export function isIgnoredTodayTask(task: Task, today = toDashedDateKey()) {
   if (!isActiveTask(task)) return false;
-  if (task.status !== "ignored_today") return false;
+  if (task.status !== "ignored_today" && task.daily_role !== "Ignore Today") return false;
   return !task.ignored_until || task.ignored_until >= today;
 }
 

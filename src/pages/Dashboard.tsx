@@ -115,6 +115,16 @@ import {
   loadTimeBlocks,
   saveTimeBlocks,
 } from "@/lib/calendar-system";
+import {
+  AdvancedOnly,
+  AIActionButton,
+  CollapsibleSection,
+  EmptyStateCard,
+  InsightCard,
+  NextActionCard,
+  PageDecisionHeader,
+  PrimaryActionBar,
+} from "@/components/ui-kit";
 
 type DashboardState = {
   dailyLog: DailyLogRow | null;
@@ -883,18 +893,279 @@ export default function Dashboard() {
     }
   };
 
+  // NOW / NEXT / LATER derivation from today's scheduled blocks.
+  const nowMinutes = useMemo(() => {
+    const d = new Date();
+    return d.getHours() * 60 + d.getMinutes();
+  }, []);
+  const nowNextLater = useMemo(() => {
+    const isDone = (b: TimeBlock) =>
+      b.execution_status === "done" || b.execution_status === "skipped";
+    const withTimes = todayTimeBlocks.map((b) => ({
+      block: b,
+      start: parseTimeToMinutes(b.start_time),
+      end: parseTimeToMinutes(b.end_time),
+    }));
+    const active = withTimes.find(
+      (b) => b.start <= nowMinutes && b.end > nowMinutes && !isDone(b.block),
+    );
+    const upcoming = withTimes
+      .filter((b) => b.start > nowMinutes && !isDone(b.block))
+      .sort((a, b) => a.start - b.start);
+    const now = active ?? upcoming[0] ?? null;
+    const next = (active ? upcoming[0] : upcoming[1]) ?? null;
+    const laterStart = active ? upcoming.slice(1) : upcoming.slice(2);
+    return {
+      now,
+      next,
+      later: laterStart.map((b) => b.block),
+      nowIsActive: Boolean(active),
+    };
+  }, [todayTimeBlocks, nowMinutes]);
+
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <div className="border-b border-[#ddd4c6] pb-4">
-        <h1 className="text-2xl font-semibold text-[#25313c]">
-          Daily Operating System
-        </h1>
-        <div className="mt-2 flex flex-wrap items-center gap-2">
-          <DailyOpModeChip mode={operatingMode} />
-          <SyncBadge status={planSyncStatus} />
-          {planSyncError ? <span className="text-xs text-destructive">{planSyncError}</span> : null}
+      <PageDecisionHeader
+        title="Daily OS"
+        question="What is the one thing to do right now?"
+      >
+        <DailyOpModeChip mode={operatingMode} />
+        <SyncBadge status={planSyncStatus} />
+        {planSyncError ? (
+          <span className="text-xs text-destructive">{planSyncError}</span>
+        ) : null}
+      </PageDecisionHeader>
+
+      {error ? (
+        <div className="rounded border border-[#c97a73]/30 bg-[#c97a73]/10 px-3 py-2 text-xs text-[#c97a73]">
+          {error}
         </div>
+      ) : null}
+
+      {/* 1. NOW / NEXT / LATER */}
+      <div className="grid gap-3 md:grid-cols-3">
+        {nowNextLater.now ? (
+          <NextActionCard
+            label={nowNextLater.nowIsActive ? "Now · active block" : "Now · next block"}
+            title={nowNextLater.now.block.title}
+            detail={
+              <span>
+                {nowNextLater.now.block.start_time}–{nowNextLater.now.block.end_time}
+                {nowNextLater.now.block.reason ? ` · ${nowNextLater.now.block.reason}` : ""}
+              </span>
+            }
+            tone={nowNextLater.nowIsActive ? "primary" : "calm"}
+            action={
+              <a
+                href="#today-progress"
+                className="inline-flex items-center rounded-md border border-primary/40 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20"
+              >
+                {nowNextLater.nowIsActive ? "Start / Complete" : "Open block"}
+              </a>
+            }
+          />
+        ) : (
+          <EmptyStateCard
+            missing="No scheduled block right now"
+            nextAction="Plan your day with the AI calendar prompt below."
+            why="A scheduled NOW keeps the day on rails."
+          />
+        )}
+        {nowNextLater.next ? (
+          <InsightCard
+            label="Next"
+            value={`${nowNextLater.next.block.start_time}`}
+            interpretation={nowNextLater.next.block.title}
+            reason={`${nowNextLater.next.block.start_time}–${nowNextLater.next.block.end_time}`}
+          />
+        ) : (
+          <InsightCard label="Next" interpretation="Nothing else scheduled." />
+        )}
+        <InsightCard
+          label="Later"
+          value={nowNextLater.later.length ? `${nowNextLater.later.length} items` : undefined}
+          interpretation={
+            nowNextLater.later.length ? (
+              <ul className="space-y-0.5">
+                {nowNextLater.later.slice(0, 3).map((b) => (
+                  <li key={b.id} className="truncate">
+                    {b.start_time} · {b.title}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              "Nothing queued for later today."
+            )
+          }
+        />
       </div>
+
+      {/* 2. Today's Focus */}
+      <TodayDecisionLoop
+        today={today}
+        tasks={taskList}
+        anchors={anchorList}
+        currentEnergy={currentEnergy}
+        userId={userId}
+        hasSupabaseConfig={hasSupabaseConfig}
+        sessionLoading={isLoading}
+        remoteLoaded={remoteTasksLoaded}
+        onTaskCreated={handleTaskCreated}
+        onTaskUpserted={handleTaskUpserted}
+        planNotes={planNotes}
+        onPlanNotesChange={setPlanNotes}
+        planNotesSyncStatus={planSyncStatus}
+        planNotesError={planSyncError}
+        onLogIgnoreDecision={logIgnoreDecision}
+        outcomeMatches={outcomeMatches}
+        decisions={decisionLogs}
+      />
+
+      {/* 4. Risk / Drift — only when relevant */}
+      {weeklyBottleneckDiagnosis.bottleneckKind !== "insufficient-evidence" ? (
+        <NextActionCard
+          label="Needs Attention"
+          title={weeklyBottleneckDiagnosis.bottleneckLabel}
+          tone="warning"
+          detail={
+            <span>
+              {weeklyBottleneckDiagnosis.confidence} confidence ·{" "}
+              {weeklyBottleneckDiagnosis.suggestedFix}
+            </span>
+          }
+        />
+      ) : null}
+
+      {/* 3. Capture + 5. Today's Progress / Shutdown */}
+      <div id="today-progress">
+        <ExecutionTruthPanel
+          today={today}
+          userId={userId}
+          hasSupabaseConfig={hasSupabaseConfig}
+        />
+      </div>
+
+      {/* This week's one move — kept visible, compact */}
+      {activeOneMove ? (
+        <div className="rounded-lg border border-[#6b87ae]/30 bg-[#6b87ae]/10 px-3 py-2 text-xs text-[#25313c] flex flex-wrap items-center gap-2">
+          <span className="text-[10px] uppercase tracking-wider text-[#6b87ae] font-semibold">
+            This week's one move
+          </span>
+          <span className="font-medium">{activeOneMove}</span>
+          {activeOneMoveVerdict.outcome ? (
+            <span
+              className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${
+                activeOneMoveVerdict.outcome === "worked"
+                  ? "border-emerald-200 bg-emerald-100 text-emerald-700"
+                  : activeOneMoveVerdict.outcome === "partial"
+                    ? "border-amber-200 bg-amber-100 text-amber-700"
+                    : activeOneMoveVerdict.outcome === "missed"
+                      ? "border-rose-200 bg-rose-100 text-rose-700"
+                      : "border-stone-200 bg-stone-100 text-stone-700"
+              }`}
+              title={activeOneMoveVerdict.note || undefined}
+            >
+              Last verdict: {activeOneMoveVerdict.outcome}
+            </span>
+          ) : null}
+          {feedbackHistory && feedbackHistory.currentStreak > 0 ? (
+            <span className="rounded-full border border-[#6b87ae]/30 bg-white px-2 py-0.5 text-[10px] font-medium text-[#25313c]">
+              Verdict streak: {feedbackHistory.currentStreak}
+            </span>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => void copyWeeklyBrief()}
+            disabled={briefStatus === "copied" || briefStatus === "saved"}
+            className="ml-auto inline-flex items-center gap-1 rounded-md border border-[#ddd4c6] bg-white px-2 py-0.5 text-[10px] font-medium text-[#25313c] hover:bg-[#f7f3ec] disabled:opacity-70"
+            title="Copies a Weekly Strategy Brief prompt to clipboard"
+          >
+            <Copy size={10} />
+            {briefStatus === "saved"
+              ? "Copied + saved"
+              : briefStatus === "copied"
+                ? "Copied"
+                : briefStatus === "error"
+                  ? "Retry copy"
+                  : "Copy weekly brief"}
+          </button>
+          {briefError ? (
+            <span className="text-[10px] text-destructive">{briefError}</span>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* Plan with AI */}
+      <PrimaryActionBar>
+        <AIActionButton onClick={copyCalendarPrompt}>
+          {calendarPromptCopied ? "Copied" : "Plan with AI"}
+        </AIActionButton>
+        <Link
+          to="/calendar"
+          className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-1.5 text-xs hover:bg-muted/70"
+        >
+          Open Calendar →
+        </Link>
+        <Link
+          to="/tasks"
+          className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-1.5 text-xs hover:bg-muted/70"
+        >
+          Open Tasks →
+        </Link>
+        <span className="text-xs text-muted-foreground">
+          {todayAnchors.length} anchors · {todayTimeBlocks.length} blocks ·{" "}
+          {availableTime.totalOpenMinutes} min open · shutdown{" "}
+          {availableTime.bestShutdownTarget}
+        </span>
+      </PrimaryActionBar>
+
+      {/* Notices — advanced / debug language only in Advanced mode */}
+      <AdvancedOnly>
+        {notice ? (
+          <div className="rounded border border-[#ddd4c6] bg-[#fdfaf4] px-3 py-2 text-xs text-[#6f685f]">
+            {notice}
+          </div>
+        ) : null}
+        {hasSupabaseConfig && !userId ? (
+          <div className="rounded border border-[#6b87ae]/30 bg-[#6b87ae]/10 px-3 py-2 text-xs text-[#6b87ae]">
+            Supabase is configured, but there is no session yet. The dashboard is
+            still usable in draft mode.
+          </div>
+        ) : null}
+        {!hasSupabaseConfig ? (
+          <div className="rounded border border-[#c39a4e]/30 bg-[#c39a4e]/10 px-3 py-2 text-xs text-[#c39a4e]">
+            Supabase env vars are missing. The dashboard still works locally.
+          </div>
+        ) : null}
+      </AdvancedOnly>
+
+      {/* 6. Review & Reflection — everything else collapsed */}
+      <CollapsibleSection
+        title="Review & Reflection"
+        subtitle="Decision log, daily log, plan detail, domain summaries"
+      >
+        <div className="space-y-4">
+          <DecisionsDueReviewPanel
+            today={today}
+            weekStart={weekStart}
+            weekEnd={weekEnd}
+            decisions={decisionLogs}
+            userId={userId}
+            hasSupabaseConfig={hasSupabaseConfig}
+            sessionLoading={isLoading}
+            remoteLoaded={remoteTasksLoaded}
+            onDecisionReviewed={handleDecisionSaved}
+          />
+
+          <DecisionLogCard
+            today={today}
+            decisions={decisionLogs}
+            userId={userId}
+            hasSupabaseConfig={hasSupabaseConfig}
+            sessionLoading={isLoading}
+            remoteLoaded={remoteTasksLoaded}
+            onDecisionSaved={handleDecisionSaved}
+          />
 
       <div className="card-surface p-4 flex flex-wrap items-center justify-between gap-4">
         <StatusRing score={sleepScore} label="Sleep" size={60} />
@@ -1175,14 +1446,14 @@ export default function Dashboard() {
               Today's Plan
             </div>
             <div className="text-sm text-[#25313c]">
-              Saved to daily_plans from Task Command, Calendar, and energy. Energy: {currentEnergy}/10.
+              Saved daily plan from Tasks, Calendar, and energy. Energy: {currentEnergy}/10.
             </div>
           </div>
           <Link
             to="/tasks"
             className="rounded-md border border-[#ddd4c6] bg-white px-3 py-1.5 text-xs hover:bg-[#f7f3ec]"
           >
-            Open Task Command →
+            Open Tasks →
           </Link>
         </div>
         <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-4">
@@ -1282,7 +1553,7 @@ export default function Dashboard() {
               className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-xs hover:bg-muted/70"
             >
               {calendarPromptCopied ? <CheckCheck size={12} /> : <Copy size={12} />}
-              {calendarPromptCopied ? "Copied" : "Copy Calendar Planning Prompt"}
+              {calendarPromptCopied ? "Copied" : "Plan with AI"}
             </button>
             <Link
               to="/calendar"
@@ -1401,7 +1672,7 @@ export default function Dashboard() {
             <div className="grid grid-cols-2 gap-2 text-xs">
               <div className="rounded-lg border border-border bg-card/60 p-2">
                 <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                  Best deep work
+                  Best focus window
                 </div>
                 <div className="text-foreground">
                   {availableTime.bestDeepWork
@@ -1635,7 +1906,7 @@ export default function Dashboard() {
                         : "text-[#c97a73]"
                   }
                 >
-                  {nutritionStatus?.status.toUpperCase() ?? "RED"}
+                  {nutritionStatus ? nutritionStatus.status.toUpperCase() : "Not logged yet"}
                 </span>
               </div>
             </div>
@@ -1764,7 +2035,9 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <DailyLogPanel />
+          <DailyLogPanel />
+        </div>
+      </CollapsibleSection>
     </div>
   );
 }

@@ -810,7 +810,7 @@ export default function McatFoundationPage() {
 
               <div className="mt-4">
                 <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  Top study queue
+                  Review Queue
                 </h3>
                 <div className="space-y-2">
                   {studyQueue.slice(0, 4).map(({ topic, studyDecision }) => (
@@ -827,8 +827,8 @@ export default function McatFoundationPage() {
                         <span className={cn("rounded-full border px-2 py-0.5 text-[10px]", priorityClass(topic.priorityLabel))}>
                           {topic.priorityLabel}
                         </span>
-                        <span className="font-mono-data text-xs text-muted-foreground">
-                          {studyDecision.toFixed(1)}
+                        <span className="text-xs text-muted-foreground">
+                          {studyDecision >= 7 ? "Highest leverage now" : "Useful next"}
                         </span>
                       </div>
                     </button>
@@ -930,7 +930,8 @@ export default function McatFoundationPage() {
                     >
                       <div className="truncate text-sm font-semibold text-foreground">{topic.title}</div>
                       <div className="mt-0.5 truncate text-xs text-muted-foreground">
-                        Priority {retestPriority.toFixed(1)} · last reviewed {topic.lastReviewed ?? "never"}
+                        {retestPriority >= 7 ? "Needs reinforcement" : "Keep warm"} · last reviewed{" "}
+                        {topic.lastReviewed ?? "never"}
                       </div>
                     </button>
                     <button

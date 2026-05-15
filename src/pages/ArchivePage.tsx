@@ -289,9 +289,9 @@ export default function ArchivePage() {
       <div className="border-b border-[#ddd4c6] pb-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-semibold text-[#25313c]">Archive</h1>
+            <h1 className="text-2xl font-semibold text-[#25313c]">History</h1>
             <p className="text-sm text-[#6f685f] mt-1">
-              Historical data from all life modules. Browse and review past entries.
+              Patterns, evidence, and things worth remembering.
             </p>
           </div>
           <SyncBadge status={syncStatus} />
@@ -305,7 +305,6 @@ export default function ArchivePage() {
             <Brain size={16} className="text-[#6b87ae]" />
             <h2 className="text-sm font-semibold text-[#25313c]">Decision Log</h2>
           </div>
-          <span className="text-xs text-[#6f685f]">Writes to decision_logs</span>
         </div>
 
         <div className="grid gap-3 lg:grid-cols-[0.9fr_1.1fr]">
@@ -315,7 +314,7 @@ export default function ArchivePage() {
               onChange={(event) =>
                 setDecisionDraft((draft) => ({ ...draft, decision: event.target.value }))
               }
-              placeholder="Decision"
+              placeholder="Decision made"
               className="input-dark w-full"
             />
             <textarea
@@ -331,7 +330,7 @@ export default function ArchivePage() {
               onChange={(event) =>
                 setDecisionDraft((draft) => ({ ...draft, reason_chosen: event.target.value }))
               }
-              placeholder="Reason chosen"
+              placeholder="Why I chose it"
               className="input-dark w-full"
             />
             <div className="grid grid-cols-2 gap-2">
@@ -360,7 +359,7 @@ export default function ArchivePage() {
               onChange={(event) =>
                 setDecisionDraft((draft) => ({ ...draft, notes: event.target.value }))
               }
-              placeholder="Notes"
+              placeholder="Expected outcome, actual outcome later, and lesson"
               className="input-dark min-h-[80px] w-full"
             />
           </div>
@@ -368,7 +367,7 @@ export default function ArchivePage() {
           <div>
             {decisionLogs.length === 0 ? (
               <EmptyState
-                title={userId ? "No decisions saved yet" : "Waiting for login"}
+                title={userId ? "No decisions saved yet" : "Needs login"}
                 description={
                   userId
                     ? "Save a decision to create an audit trail."
