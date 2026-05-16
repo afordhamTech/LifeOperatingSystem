@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router";
 import {
   AlertCircle,
   BookOpenCheck,
@@ -74,6 +75,20 @@ import {
   type McatSrsRating,
   type McatTopicStatus,
 } from "@/lib/mcat-foundation";
+import {
+  MCAT_PHASE_0_TEMPLATE,
+  MCAT_PHASE_0_TEMPLATE_KEY,
+  MCAT_PHASE_0_SOURCE,
+  getMcatPhase0TaskForDate,
+  summarizeMcatPhase0SeedStatus,
+  getMissingMcatPhase0Tasks,
+  type McatPhase0SeedSummary,
+} from "@/lib/mcat-phase-0-template";
+import {
+  fetchUniversalTasksByTemplate,
+  upsertUniversalTask,
+} from "@/lib/lifeee-persistence";
+import { loadTasks, makeTask, saveTasks, type Task } from "@/lib/task-system";
 import { supabase } from "@/lib/supabase-client";
 import { useSupabaseSession } from "@/hooks/useSupabaseSession";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -185,6 +200,7 @@ const CHART_COLORS = ["#6b87ae", "#9a7bbd", "#c39a4e", "#6a9a74", "#c97a73", "#8
 const MCAT_SYNC_DEBOUNCE_MS = 700;
 
 type McatSyncStatus = "local" | "loading" | "saving" | "synced" | "error";
+type McatPhaseSeedStatus = "idle" | "loading" | "seeding" | "saved" | "error";
 
 type McatRemoteRow = {
   state: unknown;
@@ -226,6 +242,32 @@ function syncClass(status: McatSyncStatus, userId: string | null) {
   return "border-primary/25 bg-primary/10 text-primary";
 }
 
+function mergeTasksIntoLocalCache(tasks: Task[]) {
+  if (tasks.length === 0) return;
+  const localTasks = loadTasks();
+  const savedIds = new Set(tasks.map((task) => task.id));
+  saveTasks([...tasks, ...localTasks.filter((task) => !savedIds.has(task.id))]);
+}
+
+function sortTemplateTasks(tasks: Task[]) {
+  return [...tasks].sort(
+    (a, b) => (a.template_day_index ?? 999) - (b.template_day_index ?? 999),
+  );
+}
+
+function readErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error) return error.message;
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "message" in error &&
+    typeof error.message === "string"
+  ) {
+    return error.message;
+  }
+  return fallback;
+}
+
 function topicRecommendationReason(topic: McatTopic | null) {
   if (!topic) return "Start with one foundation topic so the study queue has real data.";
   if (topic.title === "Acid base chemistry") {
@@ -246,12 +288,164 @@ function topicRecommendationReason(topic: McatTopic | null) {
   return `${topic.unit} is useful enough to keep warm without overbuilding analytics.`;
 }
 
+function McatPhase0ScheduleCard({
+  summary,
+  seedStatus,
+  seedMessage,
+  seedError,
+  hasSupabaseConfig,
+  userId,
+  sessionLoading,
+  todayPreviewTitle,
+  todaySeededTask,
+  onSeed,
+}: {
+  summary: McatPhase0SeedSummary;
+  seedStatus: McatPhaseSeedStatus;
+  seedMessage: string | null;
+  seedError: string | null;
+  hasSupabaseConfig: boolean;
+  userId: string | null;
+  sessionLoading: boolean;
+  todayPreviewTitle: string | null;
+  todaySeededTask: Task | null;
+  onSeed: () => void;
+}) {
+  const authMessage = !hasSupabaseConfig
+    ? "Supabase is not configured for saved MCAT task seeding."
+    : !userId
+      ? "Log in to seed MCAT tasks to your plan."
+      : null;
+  const canSeed =
+    Boolean(userId) &&
+    hasSupabaseConfig &&
+    !sessionLoading &&
+    !summary.isFullySeeded &&
+    seedStatus !== "loading" &&
+    seedStatus !== "seeding" &&
+    seedStatus !== "error";
+  const seedButtonLabel =
+    seedStatus === "error"
+      ? "Seed unavailable"
+      : summary.hasPartialSeed
+        ? "Seed missing tasks"
+        : "Seed Phase 0 Tasks";
+  const remainingHours = Math.round((summary.remainingPlannedMinutes / 60) * 10) / 10;
+
+  return (
+    <section className="card-surface p-4">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <BookOpenCheck size={16} className="text-primary" />
+            <h2 className="text-sm font-semibold text-foreground">MCAT Phase 0 Schedule</h2>
+            <span className="rounded-full border border-border bg-muted/40 px-2 py-0.5 text-[11px] text-muted-foreground">
+              {summary.statusLabel}
+            </span>
+          </div>
+          <p className="mt-2 text-sm text-muted-foreground">
+            May 4 → July 12 · 78 total hours · {MCAT_PHASE_0_TEMPLATE.phase_name}
+          </p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+            <MiniMetric
+              label="Current week"
+              value={
+                summary.currentWeekTargetMinutes
+                  ? `Week ${summary.currentWeekIndex}: ${summary.currentWeekTargetMinutes / 60}h`
+                  : "Outside phase"
+              }
+            />
+            <MiniMetric
+              label="Generated"
+              value={`${summary.seededTaskCount}/${summary.totalTaskCount}`}
+            />
+            <MiniMetric label="Completed" value={`${summary.completedTaskCount}`} />
+            <MiniMetric label="Remaining" value={`${summary.remainingPlannedMinutes}m`} />
+            <MiniMetric label="Hours left" value={`${remainingHours}h`} />
+          </div>
+          <div className="mt-3 text-xs text-muted-foreground">
+            {todaySeededTask
+              ? `Today's seeded task: ${todaySeededTask.task_code} · ${todaySeededTask.title}`
+              : todayPreviewTitle
+                ? `Today's planned task: ${todayPreviewTitle}`
+                : "No Phase 0 task is due today."}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2 lg:justify-end">
+          <button
+            type="button"
+            onClick={onSeed}
+            disabled={!canSeed}
+            className="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Plus size={14} />
+            {seedStatus === "seeding" ? "Seeding..." : seedButtonLabel}
+          </button>
+          <Link
+            to="/tasks"
+            className="inline-flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted"
+          >
+            <Clipboard size={14} />
+            View in Tasks
+          </Link>
+          <Link
+            to="/tasks"
+            aria-disabled={!todaySeededTask}
+            className={cn(
+              "inline-flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted",
+              !todaySeededTask && "pointer-events-none opacity-50",
+            )}
+          >
+            <CalendarClock size={14} />
+            View Today's MCAT Task
+          </Link>
+        </div>
+      </div>
+
+      {authMessage ? (
+        <div className="mt-3 rounded-md border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+          {authMessage}
+        </div>
+      ) : null}
+      {seedMessage ? (
+        <div className="mt-3 rounded-md border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-300">
+          {seedMessage}
+        </div>
+      ) : null}
+      {seedError ? (
+        <div className="mt-3 rounded-md border border-destructive/25 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          {seedError}
+        </div>
+      ) : null}
+      {summary.duplicateTemplateDayCount > 0 ? (
+        <div className="mt-3 rounded-md border border-destructive/25 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          {summary.duplicateTemplateDayCount} duplicate seeded day record(s) were detected. Existing tasks were not deleted or overwritten.
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function MiniMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border border-border bg-background/70 p-2">
+      <div className="text-[10px] uppercase text-muted-foreground">{label}</div>
+      <div className="mt-1 text-sm font-semibold text-foreground">{value}</div>
+    </div>
+  );
+}
+
 export default function McatFoundationPage() {
   const { hasSupabaseConfig, isLoading: sessionLoading, userId } = useSupabaseSession();
   const [state, setState] = useState<McatFoundationState>(() => loadMcatFoundationState());
   const [activeSession, setActiveSession] = useState<ActiveMcatSession | null>(() => loadActiveSession());
   const [syncStatus, setSyncStatus] = useState<McatSyncStatus>("local");
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [seededPhaseTasks, setSeededPhaseTasks] = useState<Task[]>([]);
+  const [phaseSeedStatus, setPhaseSeedStatus] = useState<McatPhaseSeedStatus>("idle");
+  const [phaseSeedMessage, setPhaseSeedMessage] = useState<string | null>(null);
+  const [phaseSeedError, setPhaseSeedError] = useState<string | null>(null);
   const stateRef = useRef(state);
   const activeSessionRef = useRef(activeSession);
   const remoteLoadedForUserRef = useRef<string | null>(null);
@@ -388,6 +582,43 @@ export default function McatFoundationPage() {
     }
 
     void loadRemoteSnapshot();
+
+    return () => {
+      active = false;
+    };
+  }, [hasSupabaseConfig, sessionLoading, userId]);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadSeededTasks = async () => {
+      if (sessionLoading) return;
+      if (!supabase || !hasSupabaseConfig || !userId) {
+        setSeededPhaseTasks([]);
+        setPhaseSeedStatus("idle");
+        setPhaseSeedError(null);
+        return;
+      }
+
+      setPhaseSeedStatus("loading");
+      setPhaseSeedError(null);
+      try {
+        const tasks = await fetchUniversalTasksByTemplate({
+          userId,
+          source: MCAT_PHASE_0_SOURCE,
+          templateKey: MCAT_PHASE_0_TEMPLATE_KEY,
+        });
+        if (!active) return;
+        setSeededPhaseTasks(sortTemplateTasks(tasks));
+        setPhaseSeedStatus("saved");
+      } catch (error) {
+        if (!active) return;
+        setPhaseSeedStatus("error");
+        setPhaseSeedError(readErrorMessage(error, "Unable to load MCAT Phase 0 tasks."));
+      }
+    };
+
+    void loadSeededTasks();
 
     return () => {
       active = false;
@@ -691,6 +922,65 @@ export default function McatFoundationPage() {
     });
   };
 
+  const phase0SeedSummary = useMemo(
+    () => summarizeMcatPhase0SeedStatus(seededPhaseTasks, { today: todayKey }),
+    [seededPhaseTasks],
+  );
+  const todayPhase0Preview = useMemo(
+    () => getMcatPhase0TaskForDate(todayKey, { today: todayKey }),
+    [],
+  );
+  const todaySeededTask = useMemo(
+    () => seededPhaseTasks.find((task) => task.due_date === todayKey) ?? null,
+    [seededPhaseTasks],
+  );
+
+  const handleSeedPhase0Tasks = async () => {
+    if (!hasSupabaseConfig || !userId) {
+      setPhaseSeedMessage(null);
+      setPhaseSeedError("Log in to seed MCAT tasks to your plan.");
+      return;
+    }
+
+    setPhaseSeedStatus("seeding");
+    setPhaseSeedMessage(null);
+    setPhaseSeedError(null);
+
+    try {
+      const existingTasks = await fetchUniversalTasksByTemplate({
+        userId,
+        source: MCAT_PHASE_0_SOURCE,
+        templateKey: MCAT_PHASE_0_TEMPLATE_KEY,
+      });
+      const missingPayloads = getMissingMcatPhase0Tasks(existingTasks, { today: todayKey });
+
+      if (missingPayloads.length === 0) {
+        setSeededPhaseTasks(sortTemplateTasks(existingTasks));
+        setPhaseSeedStatus("saved");
+        setPhaseSeedMessage("MCAT Phase 0 tasks already seeded.");
+        return;
+      }
+
+      const savedTasks = await Promise.all(
+        missingPayloads.map((payload) =>
+          upsertUniversalTask(userId, makeTask(payload), 6),
+        ),
+      );
+      const nextTasks = sortTemplateTasks([...existingTasks, ...savedTasks]);
+      setSeededPhaseTasks(nextTasks);
+      mergeTasksIntoLocalCache(savedTasks);
+      setPhaseSeedStatus("saved");
+      setPhaseSeedMessage(
+        savedTasks.length === 70
+          ? "Seeded 70 MCAT Phase 0 tasks into universal_tasks."
+          : `Seeded ${savedTasks.length} missing MCAT Phase 0 task(s).`,
+      );
+    } catch (error) {
+      setPhaseSeedStatus("error");
+      setPhaseSeedError(readErrorMessage(error, "Unable to seed MCAT Phase 0 tasks."));
+    }
+  };
+
   const carsAccuracy = useMemo(() => {
     const attempted = state.carsEntries.reduce((sum, e) => sum + e.questionsAttempted, 0);
     const correct = state.carsEntries.reduce((sum, e) => sum + e.questionsCorrect, 0);
@@ -730,6 +1020,19 @@ export default function McatFoundationPage() {
             {todayMove.detail} Why it matters: {todayMoveReason}
           </span>
         }
+      />
+
+      <McatPhase0ScheduleCard
+        summary={phase0SeedSummary}
+        seedStatus={phaseSeedStatus}
+        seedMessage={phaseSeedMessage}
+        seedError={phaseSeedError}
+        hasSupabaseConfig={hasSupabaseConfig}
+        userId={userId}
+        sessionLoading={sessionLoading}
+        todayPreviewTitle={todayPhase0Preview?.title ?? null}
+        todaySeededTask={todaySeededTask}
+        onSeed={handleSeedPhase0Tasks}
       />
 
       <ActiveSessionCard

@@ -62,6 +62,11 @@ export type UniversalTaskRow = {
   recurring: boolean | null;
   notes: string | null;
   source?: string | null;
+  template_key?: string | null;
+  template_day_index?: number | null;
+  template_week_index?: number | null;
+  template_phase?: string | null;
+  generated_from?: Record<string, unknown> | null;
   previous_status?: string | null;
   ignored_until?: string | null;
   ignored_count?: number | null;
@@ -752,6 +757,11 @@ export function taskToRow(userId: string, task: Task, currentEnergy: number) {
     recurring: task.recurring,
     notes: task.notes,
     source: task.source,
+    template_key: task.template_key,
+    template_day_index: task.template_day_index,
+    template_week_index: task.template_week_index,
+    template_phase: task.template_phase,
+    generated_from: task.generated_from,
     previous_status: task.previous_status,
     ignored_until: task.ignored_until,
     ignored_count: task.ignored_count,
@@ -797,6 +807,11 @@ export function rowToTask(row: UniversalTaskRow): Task {
     recurring: row.recurring ?? false,
     notes: row.notes ?? "",
     source: row.source ?? "manual",
+    template_key: row.template_key ?? null,
+    template_day_index: row.template_day_index ?? null,
+    template_week_index: row.template_week_index ?? null,
+    template_phase: row.template_phase ?? null,
+    generated_from: row.generated_from ?? null,
     previous_status: row.previous_status as Task["previous_status"],
     ignored_until: row.ignored_until ?? null,
     ignored_count: row.ignored_count ?? 0,
@@ -820,6 +835,24 @@ export async function fetchUniversalTasks(userId: string) {
     .select("*")
     .eq("user_id", userId)
     .order("created_at", { ascending: false });
+
+  if (error) throw error;
+  return ((data ?? []) as UniversalTaskRow[]).map(rowToTask);
+}
+
+export async function fetchUniversalTasksByTemplate(input: {
+  userId: string;
+  source: string;
+  templateKey: string;
+}) {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("universal_tasks")
+    .select("*")
+    .eq("user_id", input.userId)
+    .eq("source", input.source)
+    .eq("template_key", input.templateKey)
+    .order("template_day_index", { ascending: true });
 
   if (error) throw error;
   return ((data ?? []) as UniversalTaskRow[]).map(rowToTask);

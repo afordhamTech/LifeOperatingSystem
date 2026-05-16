@@ -11,6 +11,7 @@ export const TASK_TYPES = [
   "Health",
   "Workout",
   "Nutrition",
+  "MCAT",
   "Money",
   "Faith",
   "Relationship",
@@ -78,6 +79,11 @@ export type Task = {
   recurring: boolean;
   notes: string;
   source: string | null;
+  template_key: string | null;
+  template_day_index: number | null;
+  template_week_index: number | null;
+  template_phase: string | null;
+  generated_from: Record<string, unknown> | null;
   previous_status: TaskStatus | null;
   ignored_until: string | null;
   ignored_count: number;
@@ -288,6 +294,11 @@ export function normalizeTask(raw: Partial<Task>, index = 0): Task {
     recurring: raw.recurring ?? false,
     notes: raw.notes ?? "",
     source: raw.source ?? "manual",
+    template_key: raw.template_key ?? null,
+    template_day_index: normalizeNullableNumber(raw.template_day_index),
+    template_week_index: normalizeNullableNumber(raw.template_week_index),
+    template_phase: raw.template_phase ?? null,
+    generated_from: raw.generated_from ?? null,
     previous_status: raw.previous_status ? normalizeTaskStatus(raw.previous_status) : null,
     ignored_until: raw.ignored_until ?? null,
     ignored_count: normalizeNumber(raw.ignored_count, 0),
@@ -362,6 +373,11 @@ export function createTask(partial: Partial<Task> & { title: string }): Task {
     recurring: partial.recurring ?? false,
     notes: partial.notes ?? "",
     source: partial.source ?? "manual",
+    template_key: partial.template_key ?? null,
+    template_day_index: partial.template_day_index ?? null,
+    template_week_index: partial.template_week_index ?? null,
+    template_phase: partial.template_phase ?? null,
+    generated_from: partial.generated_from ?? null,
     previous_status: partial.previous_status ?? null,
     ignored_until: partial.ignored_until ?? null,
     ignored_count: partial.ignored_count ?? 0,
