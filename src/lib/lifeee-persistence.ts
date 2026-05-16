@@ -858,6 +858,58 @@ export async function fetchUniversalTasksByTemplate(input: {
   return ((data ?? []) as UniversalTaskRow[]).map(rowToTask);
 }
 
+export type McatPlanInstance = {
+  id: string;
+  user_id: string;
+  template_key: string;
+  phase_name: string;
+  seed_start_date: string;
+  seed_end_date: string;
+  total_planned_minutes: number;
+  status: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export async function fetchActiveMcatPlanInstance(input: { userId: string; templateKey: string }) {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("mcat_plan_instances")
+    .select("*")
+    .eq("user_id", input.userId)
+    .eq("template_key", input.templateKey)
+    .eq("status", "active")
+    .maybeSingle();
+  if (error) throw error;
+  return (data as McatPlanInstance | null) ?? null;
+}
+
+export async function createMcatPlanInstance(input: {
+  userId: string;
+  templateKey: string;
+  phaseName: string;
+  seedStartDate: string;
+  seedEndDate: string;
+  totalPlannedMinutes: number;
+}) {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("mcat_plan_instances")
+    .insert({
+      user_id: input.userId,
+      template_key: input.templateKey,
+      phase_name: input.phaseName,
+      seed_start_date: input.seedStartDate,
+      seed_end_date: input.seedEndDate,
+      total_planned_minutes: input.totalPlannedMinutes,
+      status: "active",
+    })
+    .select("*")
+    .single();
+  if (error) throw error;
+  return data as McatPlanInstance;
+}
+
 export async function upsertUniversalTask(userId: string, task: Task, currentEnergy: number) {
   const client = requireSupabase();
   const { data, error } = await client

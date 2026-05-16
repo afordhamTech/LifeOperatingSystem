@@ -85,8 +85,11 @@ import {
   type McatPhase0SeedSummary,
 } from "@/lib/mcat-phase-0-template";
 import {
+  createMcatPlanInstance,
+  fetchActiveMcatPlanInstance,
   fetchUniversalTasksByTemplate,
   upsertUniversalTask,
+  type McatPlanInstance,
 } from "@/lib/lifeee-persistence";
 import { loadTasks, makeTask, saveTasks, type Task } from "@/lib/task-system";
 import { supabase } from "@/lib/supabase-client";
@@ -298,6 +301,8 @@ function McatPhase0ScheduleCard({
   sessionLoading,
   todayPreviewTitle,
   todaySeededTask,
+  activePlan,
+  todayKey,
   onSeed,
 }: {
   summary: McatPhase0SeedSummary;
@@ -309,6 +314,8 @@ function McatPhase0ScheduleCard({
   sessionLoading: boolean;
   todayPreviewTitle: string | null;
   todaySeededTask: Task | null;
+  activePlan: McatPlanInstance | null;
+  todayKey: string;
   onSeed: () => void;
 }) {
   const authMessage = !hasSupabaseConfig
@@ -344,8 +351,15 @@ function McatPhase0ScheduleCard({
             </span>
           </div>
           <p className="mt-2 text-sm text-muted-foreground">
-            May 4 → July 12 · 78 total hours · {MCAT_PHASE_0_TEMPLATE.phase_name}
+            {activePlan
+              ? `${activePlan.seed_start_date} → ${activePlan.seed_end_date} · 78 total hours · ${activePlan.phase_name}`
+              : `Starts today when seeded · 70 days · 78 total hours · ${MCAT_PHASE_0_TEMPLATE.phase_name}`}
           </p>
+          {!activePlan ? (
+            <p className="mt-1 text-xs text-muted-foreground">
+              Week 1 begins on {todayKey}.
+            </p>
+          ) : null}
           <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
             <MiniMetric
               label="Current week"
@@ -366,9 +380,11 @@ function McatPhase0ScheduleCard({
           <div className="mt-3 text-xs text-muted-foreground">
             {todaySeededTask
               ? `Today's seeded task: ${todaySeededTask.task_code} · ${todaySeededTask.title}`
-              : todayPreviewTitle
-                ? `Today's planned task: ${todayPreviewTitle}`
-                : "No Phase 0 task is due today."}
+              : !activePlan && todayPreviewTitle
+                ? `Today's preview task if seeded now: ${todayPreviewTitle}`
+                : todayPreviewTitle
+                  ? `Today's planned task: ${todayPreviewTitle}`
+                  : "No Phase 0 task is due today."}
           </div>
         </div>
 
@@ -443,6 +459,7 @@ export default function McatFoundationPage() {
   const [syncStatus, setSyncStatus] = useState<McatSyncStatus>("local");
   const [syncError, setSyncError] = useState<string | null>(null);
   const [seededPhaseTasks, setSeededPhaseTasks] = useState<Task[]>([]);
+  const [activePhase0Plan, setActivePhase0Plan] = useState<McatPlanInstance | null>(null);
   const [phaseSeedStatus, setPhaseSeedStatus] = useState<McatPhaseSeedStatus>("idle");
   const [phaseSeedMessage, setPhaseSeedMessage] = useState<string | null>(null);
   const [phaseSeedError, setPhaseSeedError] = useState<string | null>(null);
@@ -595,6 +612,7 @@ export default function McatFoundationPage() {
       if (sessionLoading) return;
       if (!supabase || !hasSupabaseConfig || !userId) {
         setSeededPhaseTasks([]);
+        setActivePhase0Plan(null);
         setPhaseSeedStatus("idle");
         setPhaseSeedError(null);
         return;
@@ -603,13 +621,20 @@ export default function McatFoundationPage() {
       setPhaseSeedStatus("loading");
       setPhaseSeedError(null);
       try {
-        const tasks = await fetchUniversalTasksByTemplate({
-          userId,
-          source: MCAT_PHASE_0_SOURCE,
-          templateKey: MCAT_PHASE_0_TEMPLATE_KEY,
-        });
+        const [tasks, plan] = await Promise.all([
+          fetchUniversalTasksByTemplate({
+            userId,
+            source: MCAT_PHASE_0_SOURCE,
+            templateKey: MCAT_PHASE_0_TEMPLATE_KEY,
+          }),
+          fetchActiveMcatPlanInstance({
+            userId,
+            templateKey: MCAT_PHASE_0_TEMPLATE_KEY,
+          }),
+        ]);
         if (!active) return;
         setSeededPhaseTasks(sortTemplateTasks(tasks));
+        setActivePhase0Plan(plan);
         setPhaseSeedStatus("saved");
       } catch (error) {
         if (!active) return;
@@ -922,13 +947,18 @@ export default function McatFoundationPage() {
     });
   };
 
+  const effectiveSeedStartDate = activePhase0Plan?.seed_start_date ?? todayKey;
   const phase0SeedSummary = useMemo(
-    () => summarizeMcatPhase0SeedStatus(seededPhaseTasks, { today: todayKey }),
-    [seededPhaseTasks],
+    () =>
+      summarizeMcatPhase0SeedStatus(seededPhaseTasks, effectiveSeedStartDate, {
+        today: todayKey,
+      }),
+    [seededPhaseTasks, effectiveSeedStartDate],
   );
   const todayPhase0Preview = useMemo(
-    () => getMcatPhase0TaskForDate(todayKey, { today: todayKey }),
-    [],
+    () =>
+      getMcatPhase0TaskForDate(effectiveSeedStartDate, todayKey, { today: todayKey }),
+    [effectiveSeedStartDate],
   );
   const todaySeededTask = useMemo(
     () => seededPhaseTasks.find((task) => task.due_date === todayKey) ?? null,
@@ -947,12 +977,34 @@ export default function McatFoundationPage() {
     setPhaseSeedError(null);
 
     try {
+      let plan = activePhase0Plan;
+      if (!plan) {
+        const seedStartDate = todayKey;
+        const seedStart = new Date(`${seedStartDate}T00:00:00Z`);
+        const seedEnd = new Date(seedStart.getTime() + 69 * 24 * 60 * 60 * 1000);
+        const seedEndDate = `${seedEnd.getUTCFullYear()}-${String(
+          seedEnd.getUTCMonth() + 1,
+        ).padStart(2, "0")}-${String(seedEnd.getUTCDate()).padStart(2, "0")}`;
+        plan = await createMcatPlanInstance({
+          userId,
+          templateKey: MCAT_PHASE_0_TEMPLATE_KEY,
+          phaseName: MCAT_PHASE_0_TEMPLATE.phase_name,
+          seedStartDate,
+          seedEndDate,
+          totalPlannedMinutes: MCAT_PHASE_0_TEMPLATE.total_planned_minutes,
+        });
+        setActivePhase0Plan(plan);
+      }
+      const seedStartDate = plan.seed_start_date;
+
       const existingTasks = await fetchUniversalTasksByTemplate({
         userId,
         source: MCAT_PHASE_0_SOURCE,
         templateKey: MCAT_PHASE_0_TEMPLATE_KEY,
       });
-      const missingPayloads = getMissingMcatPhase0Tasks(existingTasks, { today: todayKey });
+      const missingPayloads = getMissingMcatPhase0Tasks(existingTasks, seedStartDate, {
+        today: todayKey,
+      });
 
       if (missingPayloads.length === 0) {
         setSeededPhaseTasks(sortTemplateTasks(existingTasks));
@@ -1032,6 +1084,8 @@ export default function McatFoundationPage() {
         sessionLoading={sessionLoading}
         todayPreviewTitle={todayPhase0Preview?.title ?? null}
         todaySeededTask={todaySeededTask}
+        activePlan={activePhase0Plan}
+        todayKey={todayKey}
         onSeed={handleSeedPhase0Tasks}
       />
 

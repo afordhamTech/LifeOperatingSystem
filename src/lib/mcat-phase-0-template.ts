@@ -7,7 +7,7 @@ import {
   type TaskPriority,
 } from "@/lib/task-system";
 
-export const MCAT_PHASE_0_TEMPLATE_KEY = "mcat_phase_0_summer_2026_v1";
+export const MCAT_PHASE_0_TEMPLATE_KEY = "mcat_phase_0_foundation_v1";
 export const MCAT_PHASE_0_SOURCE = "mcat_phase_0_seed";
 
 type WeekdayLabel = "Mon" | "Tue" | "Wed" | "Thu" | "Fri" | "Sat" | "Sun";
@@ -78,6 +78,7 @@ export type McatPhase0TaskPayload = Partial<Task> & {
 };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const TOTAL_DAYS = 70;
 
 const sixHourWeek: McatPhase0DayRule[] = [
   { weekday: "Mon", estimated_minutes: 60, daily_task_type: "foundation study", label: "foundation", topic_role: "primary" },
@@ -112,9 +113,7 @@ const tenHourWeek: McatPhase0DayRule[] = [
 export const MCAT_PHASE_0_TEMPLATE = {
   template_key: MCAT_PHASE_0_TEMPLATE_KEY,
   source: MCAT_PHASE_0_SOURCE,
-  phase_name: "Phase 0 Summer 2026 Foundation",
-  start_date: "2026-05-04",
-  end_date: "2026-07-12",
+  phase_name: "Phase 0 Foundation",
   total_planned_minutes: 4680,
   weekly_minute_targets: [360, 360, 360, 480, 480, 480, 480, 480, 600, 600],
   daily_distribution_rules: {
@@ -139,7 +138,7 @@ export const MCAT_PHASE_0_TEMPLATE = {
     status: "scheduled",
     source: MCAT_PHASE_0_SOURCE,
     template_key: MCAT_PHASE_0_TEMPLATE_KEY,
-    template_phase: "Phase 0 Summer 2026 Foundation",
+    template_phase: "Phase 0 Foundation",
     recurring: false,
   },
 } as const;
@@ -177,18 +176,22 @@ function startOfMondayWeek(dateKey: string) {
   return formatDateKey(new Date(date.getTime() + diff * DAY_MS));
 }
 
-function getWeekIndexForDate(dateKey: string) {
-  if (dateKey < MCAT_PHASE_0_TEMPLATE.start_date || dateKey > MCAT_PHASE_0_TEMPLATE.end_date) {
-    return null;
-  }
-  return Math.floor(daysBetween(MCAT_PHASE_0_TEMPLATE.start_date, dateKey) / 7) + 1;
+function getSeedEndDate(seedStartDate: string) {
+  return addDays(seedStartDate, TOTAL_DAYS - 1);
 }
 
-function getDayIndexForDate(dateKey: string) {
-  if (dateKey < MCAT_PHASE_0_TEMPLATE.start_date || dateKey > MCAT_PHASE_0_TEMPLATE.end_date) {
-    return null;
-  }
-  return daysBetween(MCAT_PHASE_0_TEMPLATE.start_date, dateKey) + 1;
+function getWeekIndexForDate(seedStartDate: string, dateKey: string) {
+  const seedEndDate = getSeedEndDate(seedStartDate);
+  if (dateKey < seedStartDate || dateKey > seedEndDate) return null;
+  const idx = Math.floor(daysBetween(seedStartDate, dateKey) / 7) + 1;
+  if (idx < 1 || idx > 10) return null;
+  return idx;
+}
+
+function getDayIndexForDate(seedStartDate: string, dateKey: string) {
+  const seedEndDate = getSeedEndDate(seedStartDate);
+  if (dateKey < seedStartDate || dateKey > seedEndDate) return null;
+  return daysBetween(seedStartDate, dateKey) + 1;
 }
 
 function titleCaseTopic(topic: string) {
@@ -311,12 +314,12 @@ function statusForDueDate(dueDate: string, today: string): CanonicalTaskStatus {
   return "scheduled";
 }
 
-function buildWeekPlan(weekIndex: number): McatPhase0WeekPlan | null {
+function buildWeekPlan(seedStartDate: string, weekIndex: number): McatPhase0WeekPlan | null {
   const target = MCAT_PHASE_0_TEMPLATE.weekly_minute_targets[weekIndex - 1];
   const topics = MCAT_PHASE_0_TEMPLATE.topic_rotation[weekIndex - 1];
   if (!target || !topics) return null;
 
-  const startDate = addDays(MCAT_PHASE_0_TEMPLATE.start_date, (weekIndex - 1) * 7);
+  const startDate = addDays(seedStartDate, (weekIndex - 1) * 7);
   const rules = MCAT_PHASE_0_TEMPLATE.daily_distribution_rules[target];
   const days = rules.map((rule, dayOffset) => ({
     ...rule,
@@ -335,12 +338,13 @@ function buildWeekPlan(weekIndex: number): McatPhase0WeekPlan | null {
 }
 
 function buildTaskForDay(
+  seedStartDate: string,
   dayIndex: number,
   options: { today?: string } = {},
 ): McatPhase0TaskPayload {
   const weekIndex = Math.floor((dayIndex - 1) / 7) + 1;
   const dayOffset = (dayIndex - 1) % 7;
-  const weekPlan = buildWeekPlan(weekIndex);
+  const weekPlan = buildWeekPlan(seedStartDate, weekIndex);
   if (!weekPlan) throw new Error(`Invalid MCAT Phase 0 week index: ${weekIndex}`);
   const rule = weekPlan.days[dayOffset];
   const topic = resolveTopic(rule, weekIndex, weekPlan.topics);
@@ -348,6 +352,7 @@ function buildTaskForDay(
   const today = options.today ?? localTodayKey();
   const title = buildTaskTitle(rule, topic, weekIndex);
   const description = buildTaskDescription(rule, topic);
+  const seedEndDate = getSeedEndDate(seedStartDate);
 
   return {
     title,
@@ -386,27 +391,39 @@ function buildTaskForDay(
       week_target_minutes: weekPlan.target_minutes,
       daily_task_type: rule.daily_task_type,
       topic_focus: topic,
-      topic_rotation: weekPlan.topics,
+      seed_start_date: seedStartDate,
+      seed_end_date: seedEndDate,
     },
   };
 }
 
-export function getMcatPhase0WeekPlan(input: number | string = localTodayKey()) {
-  const weekIndex = typeof input === "number" ? input : getWeekIndexForDate(input);
-  return weekIndex == null ? null : buildWeekPlan(weekIndex);
+export function getMcatPhase0WeekPlan(
+  seedStartDate: string,
+  input: number | string,
+): McatPhase0WeekPlan | null {
+  const weekIndex =
+    typeof input === "number" ? input : getWeekIndexForDate(seedStartDate, input);
+  if (weekIndex == null) return null;
+  if (weekIndex < 1 || weekIndex > 10) return null;
+  return buildWeekPlan(seedStartDate, weekIndex);
 }
 
 export function getMcatPhase0TaskForDate(
+  seedStartDate: string,
   dateKey: string,
   options: { today?: string } = {},
-) {
-  const dayIndex = getDayIndexForDate(dateKey);
-  return dayIndex == null ? null : buildTaskForDay(dayIndex, options);
+): McatPhase0TaskPayload | null {
+  const dayIndex = getDayIndexForDate(seedStartDate, dateKey);
+  return dayIndex == null ? null : buildTaskForDay(seedStartDate, dayIndex, options);
 }
 
-export function generateMcatPhase0Tasks(options: { today?: string } = {}) {
-  const totalDays = daysBetween(MCAT_PHASE_0_TEMPLATE.start_date, MCAT_PHASE_0_TEMPLATE.end_date) + 1;
-  return Array.from({ length: totalDays }, (_, index) => buildTaskForDay(index + 1, options));
+export function generateMcatPhase0Tasks(
+  seedStartDate: string,
+  options: { today?: string } = {},
+): McatPhase0TaskPayload[] {
+  return Array.from({ length: TOTAL_DAYS }, (_, index) =>
+    buildTaskForDay(seedStartDate, index + 1, options),
+  );
 }
 
 function isMcatPhase0Task(task: Task) {
@@ -415,6 +432,7 @@ function isMcatPhase0Task(task: Task) {
 
 export function getMissingMcatPhase0Tasks(
   existingTasks: Task[],
+  seedStartDate: string,
   options: { today?: string } = {},
 ) {
   const existingDayIndexes = new Set(
@@ -423,16 +441,17 @@ export function getMissingMcatPhase0Tasks(
       .map((task) => task.template_day_index)
       .filter((dayIndex): dayIndex is number => Number.isInteger(dayIndex)),
   );
-  return generateMcatPhase0Tasks(options).filter(
+  return generateMcatPhase0Tasks(seedStartDate, options).filter(
     (task) => !existingDayIndexes.has(task.template_day_index ?? -1),
   );
 }
 
 export function summarizeMcatPhase0SeedStatus(
   existingTasks: Task[],
+  seedStartDate: string,
   options: { today?: string } = {},
 ): McatPhase0SeedSummary {
-  const generatedTasks = generateMcatPhase0Tasks(options);
+  const generatedTasks = generateMcatPhase0Tasks(seedStartDate, options);
   const existingGeneratedTasks = existingTasks.filter(isMcatPhase0Task);
   const existingByDay = new Map<number, Task>();
   let duplicateTemplateDayCount = 0;
@@ -454,7 +473,8 @@ export function summarizeMcatPhase0SeedStatus(
     return sum + (task.estimated_minutes ?? 0);
   }, 0);
   const missingTaskCount = generatedTasks.length - existingByDay.size;
-  const currentWeekPlan = getMcatPhase0WeekPlan(options.today ?? localTodayKey());
+  const today = options.today ?? localTodayKey();
+  const currentWeekPlan = getMcatPhase0WeekPlan(seedStartDate, today);
   const isFullySeeded = missingTaskCount === 0;
   const hasPartialSeed = existingByDay.size > 0 && !isFullySeeded;
 
