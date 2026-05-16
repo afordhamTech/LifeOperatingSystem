@@ -21,8 +21,10 @@ import {
   deleteAcademicTask,
   fetchAcademicTasks,
   upsertAcademicTask,
+  upsertUniversalTask,
   type AcademicTaskPayload,
 } from "@/lib/lifeee-persistence";
+import { makeTask } from "@/lib/task-system";
 import {
   CollapsibleSection,
   EmptyStateCard,
@@ -122,6 +124,37 @@ function academicNotesFromForm(form: AcademicTaskForm) {
   const notes = form.notes.trim();
   const typeLine = `Type: ${form.itemType}`;
   return notes ? `${typeLine}\n${notes}` : typeLine;
+}
+
+// Bridge academic tasks into universal_tasks so they participate in the
+// canonical task system (smart views, Daily OS, Calendar Planning exports).
+// Identity is derived from the academic task id so re-saves update in place.
+function buildUniversalTaskFromAcademic(row: AcademicTaskRow) {
+  const due = row.due_date ? row.due_date.slice(0, 10) : null;
+  const estimatedMinutes = Math.max(15, Math.round((row.estimated_hours ?? 1) * 60));
+  const score = row.priority_score ?? 0;
+  const priority: "low" | "medium" | "high" | "critical" =
+    score >= 8 ? "critical" : score >= 6 ? "high" : score >= 4 ? "medium" : "low";
+  const status: "completed" | "today" | "inbox" =
+    row.status === "completed" ? "completed" : row.status === "in_progress" ? "today" : "inbox";
+  return makeTask({
+    id: `academic_${row.id}`,
+    title: row.task_name,
+    description: row.notes ?? "",
+    task_type: "Academic",
+    due_date: due,
+    estimated_minutes: estimatedMinutes,
+    priority,
+    status,
+    source: "academic",
+    generated_from: {
+      source: "academic",
+      academic_task_id: row.id,
+      class_name: row.class_name,
+      grade_impact: row.grade_impact,
+      difficulty: row.difficulty,
+    },
+  });
 }
 
 function taskPayloadFromRow(task: AcademicTaskRow): AcademicTaskPayload {
@@ -259,6 +292,10 @@ export default function AcademicsPage() {
       setForm(createDefaultForm());
       setNotice("Task saved.");
       setSyncStatus(result.status);
+      // Bridge to canonical task system; best-effort, never blocks the user.
+      void upsertUniversalTask(userId, buildUniversalTaskFromAcademic(savedTask), 6).catch(
+        () => undefined,
+      );
     } else if (!result.ok) {
       setError(result.error);
       setSyncStatus(result.status);
@@ -291,6 +328,10 @@ export default function AcademicsPage() {
 
     if (result.ok) {
       setSyncStatus(result.status);
+      // Keep bridged universal_task in sync (status + metadata).
+      void upsertUniversalTask(userId, buildUniversalTaskFromAcademic(nextTask), 6).catch(
+        () => undefined,
+      );
     } else {
       setError(result.error);
       setSyncStatus(result.status);
@@ -383,7 +424,7 @@ export default function AcademicsPage() {
                 </datalist>
                 {form.className.trim() && !courseOptions.includes(form.className.trim()) ? (
                   <div className="mt-1 text-[10px] text-[#8c8478]">
-                    Quick-create course on save: {form.className.trim()}
+                    Class name will be saved on this item: {form.className.trim()}
                   </div>
                 ) : null}
               </div>
