@@ -10,13 +10,18 @@ import {
 export const MCAT_PHASE_0_TEMPLATE_KEY = "mcat_phase_0_foundation_v1";
 export const MCAT_PHASE_0_SOURCE = "mcat_phase_0_seed";
 
+export type McatPhaseStatus = "active" | "locked";
+
 export type McatPhaseDescriptor = {
   template_key: string;
   phase_name: string;
   short_label: string;
-  status: "active" | "future";
-  total_days: number;
-  total_planned_minutes: number;
+  status: McatPhaseStatus;
+  can_seed: boolean;
+  purpose: string;
+  unlock_hint?: string;
+  total_days?: number;
+  total_planned_minutes?: number;
 };
 
 export const MCAT_PHASE_REGISTRY: McatPhaseDescriptor[] = [
@@ -25,12 +30,63 @@ export const MCAT_PHASE_REGISTRY: McatPhaseDescriptor[] = [
     phase_name: "Phase 0 Foundation",
     short_label: "Phase 0",
     status: "active",
+    can_seed: true,
+    purpose:
+      "Build foundation, study infrastructure, CARS habit, error log, and flashcards.",
     total_days: 70,
     total_planned_minutes: 4680,
   },
-  // Future phases (Phase 1 Content, AAMC, UWorld, full-length, final review)
-  // will be added here as additional descriptors with their own template files.
+  {
+    template_key: "mcat_phase_1_content_completion_v1",
+    phase_name: "Phase 1 Content Completion",
+    short_label: "Phase 1",
+    status: "locked",
+    can_seed: false,
+    purpose:
+      "Content completion after Phase 0 checkpoint and more coursework.",
+    unlock_hint: "Locked until Phase 0 checkpoint.",
+  },
+  {
+    template_key: "mcat_phase_2_practice_repair_v1",
+    phase_name: "Phase 2 Practice + Weakness Repair",
+    short_label: "Phase 2",
+    status: "locked",
+    can_seed: false,
+    purpose: "Targeted practice and weakness repair once content exists.",
+    unlock_hint: "Locked until Phase 0 checkpoint.",
+  },
+  {
+    template_key: "mcat_phase_3_aamc_official_v1",
+    phase_name: "Phase 3 AAMC Official Prep",
+    short_label: "Phase 3",
+    status: "locked",
+    can_seed: false,
+    purpose: "Official AAMC material and timing work.",
+    unlock_hint: "Locked until Phase 0 checkpoint.",
+  },
+  {
+    template_key: "mcat_phase_4_full_length_readiness_v1",
+    phase_name: "Phase 4 Full-Length Readiness",
+    short_label: "Phase 4",
+    status: "locked",
+    can_seed: false,
+    purpose: "Endurance, full-length timing, and score readiness.",
+    unlock_hint: "Locked until Phase 0 checkpoint.",
+  },
+  {
+    template_key: "mcat_phase_5_final_review_v1",
+    phase_name: "Phase 5 Final Review / Taper",
+    short_label: "Phase 5",
+    status: "locked",
+    can_seed: false,
+    purpose: "Final review and taper close to test date.",
+    unlock_hint: "Locked until Phase 0 checkpoint.",
+  },
 ];
+
+export function getSeedableMcatPhases() {
+  return MCAT_PHASE_REGISTRY.filter((phase) => phase.can_seed);
+}
 
 export const MCAT_PREP_SYSTEM_TAGLINE =
   "AI tutor first · Khan as syllabus · dashboard always";

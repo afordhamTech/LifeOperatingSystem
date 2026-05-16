@@ -293,6 +293,66 @@ function topicRecommendationReason(topic: McatTopic | null) {
   return `${topic.unit} is useful enough to keep warm without overbuilding analytics.`;
 }
 
+function McatRoadmapCard() {
+  return (
+    <section className="card-surface p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 className="text-sm font-semibold text-foreground">MCAT Roadmap</h2>
+        <span className="rounded-full border border-border bg-muted/40 px-2 py-0.5 text-[11px] text-muted-foreground">
+          Phase 0 active · later phases locked
+        </span>
+      </div>
+      <p className="mt-2 text-xs text-muted-foreground">
+        Dedicated MCAT prep system. Phase 0 builds the foundation; later phases unlock
+        after the Phase 0 checkpoint.
+      </p>
+      <ul className="mt-3 grid gap-2 sm:grid-cols-2">
+        {MCAT_PHASE_REGISTRY.map((phase) => {
+          const isActive = phase.status === "active";
+          return (
+            <li
+              key={phase.template_key}
+              className={cn(
+                "rounded-md border p-3",
+                isActive
+                  ? "border-primary/40 bg-primary/5"
+                  : "border-border bg-muted/30",
+              )}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-sm font-semibold text-foreground">
+                  {phase.phase_name}
+                </div>
+                <span
+                  className={cn(
+                    "rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+                    isActive
+                      ? "bg-primary text-primary-foreground"
+                      : "border border-border bg-background text-muted-foreground",
+                  )}
+                >
+                  {isActive ? "Active · Seedable" : "Locked"}
+                </span>
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">{phase.purpose}</p>
+              {!phase.can_seed ? (
+                <p className="mt-1 text-[11px] italic text-muted-foreground">
+                  {phase.unlock_hint ?? "Locked until Phase 0 checkpoint."}
+                </p>
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
+      <div className="mt-3 rounded-md border border-dashed border-border bg-background/40 p-3 text-xs text-muted-foreground">
+        Phase 0 checkpoint unlocks next-phase planning. Lifeee will use completed hours,
+        CARS passages, error-log entries, flashcards, and topic status to recommend the
+        next phase — not implemented yet.
+      </div>
+    </section>
+  );
+}
+
 function McatPhase0ScheduleCard({
   summary,
   seedStatus,
@@ -1083,6 +1143,8 @@ export default function McatFoundationPage() {
           </span>
         }
       />
+
+      <McatRoadmapCard />
 
       <McatPhase0ScheduleCard
         summary={phase0SeedSummary}

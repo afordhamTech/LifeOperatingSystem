@@ -178,6 +178,25 @@ describe("MCAT Phase 0 template generator", () => {
     ).toBe(true);
   });
 
+  it("registry includes Phase 0 through Phase 5 with only Phase 0 seedable", () => {
+    expect(MCAT_PHASE_REGISTRY).toHaveLength(6);
+    expect(MCAT_PHASE_REGISTRY.map((p) => p.short_label)).toEqual([
+      "Phase 0",
+      "Phase 1",
+      "Phase 2",
+      "Phase 3",
+      "Phase 4",
+      "Phase 5",
+    ]);
+    const seedable = MCAT_PHASE_REGISTRY.filter((p) => p.can_seed);
+    expect(seedable).toHaveLength(1);
+    expect(seedable[0].template_key).toBe(MCAT_PHASE_0_TEMPLATE_KEY);
+    const locked = MCAT_PHASE_REGISTRY.filter((p) => p.status === "locked");
+    expect(locked).toHaveLength(5);
+    expect(locked.every((p) => !p.can_seed)).toBe(true);
+    expect(locked.every((p) => p.unlock_hint?.includes("Phase 0 checkpoint"))).toBe(true);
+  });
+
   it("reports fully seeded when all 70 days are present", () => {
     const existing = Array.from({ length: 70 }, (_, index) => materialize(index + 1));
     const summary = summarizeMcatPhase0SeedStatus(existing, SEED, { today: TODAY });
