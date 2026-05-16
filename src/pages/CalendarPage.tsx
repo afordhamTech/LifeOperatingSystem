@@ -56,7 +56,8 @@ import ExecutionTruthPanel from "@/components/ExecutionTruthPanel";
 import CapacityTimeline from "@/components/CapacityTimeline";
 import {
   buildPlanningSnapshot,
-  validateImportRealism,
+  evaluateImportRealism,
+  type RealismReport,
   type PlanningSnapshot,
 } from "@/lib/planning-engine";
 import {
@@ -929,6 +930,9 @@ export default function CalendarPage() {
             onApplyNonConflicting={() => void applyScheduleImport("non-conflicting")}
             onApplyWithSoftConflicts={() => void applyScheduleImport("include-soft-conflicts")}
             onCancel={clearScheduleImport}
+            planningSnapshot={planningSnapshot}
+            anchors={onDayAnchors}
+            dayDate={activeDate}
           />
         </div>
       ) : null}
@@ -1224,6 +1228,9 @@ function ScheduleImportPanel({
   onApplyNonConflicting,
   onApplyWithSoftConflicts,
   onCancel,
+  planningSnapshot,
+  anchors,
+  dayDate,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -1237,6 +1244,9 @@ function ScheduleImportPanel({
   onApplyNonConflicting: () => void;
   onApplyWithSoftConflicts: () => void;
   onCancel: () => void;
+  planningSnapshot: PlanningSnapshot;
+  anchors: CalendarAnchor[];
+  dayDate: string;
 }) {
   const hasConflicts = preview?.rows.some((row) => row.status === "conflict") ?? false;
   return (
@@ -1308,7 +1318,14 @@ function ScheduleImportPanel({
       </div>
       {notice ? <div className="notice-warning">{notice}</div> : null}
       {preview ? <SchedulePreviewTable rows={preview.rows} /> : null}
-      {preview ? <ImportRealismNotes rows={preview.rows} /> : null}
+      {preview ? (
+        <ImportRealismNotes
+          rows={preview.rows}
+          planningSnapshot={planningSnapshot}
+          anchors={anchors}
+          dayDate={dayDate}
+        />
+      ) : null}
       {preview && (preview.unscheduled.length > 0 || preview.risks.length > 0 || preview.firstAction) ? (
         <div className="grid gap-3 md:grid-cols-3 text-xs">
           <ImportNoteList title="Unscheduled" items={preview.unscheduled} />
@@ -1333,44 +1350,77 @@ function ScheduleImportPanel({
 
 function ImportRealismNotes({
   rows,
+  planningSnapshot,
+  anchors,
+  dayDate,
 }: {
   rows: { start: string; end: string; imported_title: string; block_type: string }[];
+  planningSnapshot: PlanningSnapshot;
+  anchors: CalendarAnchor[];
+  dayDate: string;
 }) {
-  const issues = validateImportRealism(
-    rows.map((row) => ({
-      start_time: row.start,
-      end_time: row.end,
-      title: row.imported_title || "Untitled block",
-      block_type: row.block_type,
-    })),
-  );
-  if (issues.length === 0) return null;
-  const blocking = issues.filter((issue) => issue.severity === "block");
-  const soft = issues.filter((issue) => issue.severity === "warn");
+  const report: RealismReport = evaluateImportRealism({
+    blocks: rows
+      .filter((row) => row.start && row.end)
+      .map((row) => ({
+        start_time: row.start,
+        end_time: row.end,
+        title: row.imported_title || "Untitled block",
+        block_type: row.block_type,
+      })),
+    snapshot: planningSnapshot,
+    anchors,
+    dayDate,
+  });
+  const blocking = report.issues.filter((issue) => issue.severity === "block");
+  const soft = report.issues.filter((issue) => issue.severity === "warn");
+  const scoreColor =
+    report.score >= 8
+      ? "text-emerald-700"
+      : report.score >= 5
+        ? "text-amber-700"
+        : "text-rose-700";
   return (
     <div className="mt-3 rounded-lg border border-border bg-card/60 p-3 text-xs">
-      <div className="font-semibold text-foreground mb-1">Schedule realism check</div>
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <div className="font-semibold text-foreground">Schedule realism check</div>
+        <div className={`font-mono-data ${scoreColor}`}>
+          Realism: {report.score}/10
+        </div>
+      </div>
+      <div className="text-muted-foreground">
+        <span className="font-medium text-foreground">Bottleneck:</span> {report.bottleneck}
+      </div>
+      <div className="text-muted-foreground">
+        <span className="font-medium text-foreground">Correction:</span> {report.correction}
+      </div>
       {blocking.length > 0 ? (
-        <ul className="space-y-0.5 text-rose-700">
+        <ul className="mt-2 space-y-0.5 text-rose-700">
           {blocking.map((issue, i) => (
-            <li key={`block-${i}`}>⛔ {issue.message}</li>
+            <li key={`block-${i}`}>
+              ⛔ <span className="opacity-70">[{issue.category}]</span> {issue.message}
+            </li>
           ))}
         </ul>
       ) : null}
       {soft.length > 0 ? (
         <ul className="mt-1 space-y-0.5 text-amber-700">
           {soft.map((issue, i) => (
-            <li key={`warn-${i}`}>⚠ {issue.message}</li>
+            <li key={`warn-${i}`}>
+              ⚠ <span className="opacity-70">[{issue.category}]</span> {issue.message}
+            </li>
           ))}
         </ul>
       ) : null}
-      {blocking.length === 0 ? (
-        <div className="mt-1 text-muted-foreground">
+      {report.issues.length === 0 ? (
+        <div className="mt-2 text-emerald-700">No realism issues detected.</div>
+      ) : blocking.length === 0 ? (
+        <div className="mt-2 text-muted-foreground">
           Soft issues only — you can still apply, but review them first.
         </div>
       ) : (
-        <div className="mt-1 text-rose-700">
-          Impossible overlaps detected — fix these before applying.
+        <div className="mt-2 text-rose-700">
+          Blocking issues detected — fix these before applying.
         </div>
       )}
     </div>
