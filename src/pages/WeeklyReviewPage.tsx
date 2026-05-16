@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Frown, Loader2, Save, Sparkles, Trophy, TrendingDown } from "lucide-react";
+import { Loader2, Save, Sparkles, Trophy, TrendingDown } from "lucide-react";
 import StatusRing, { getStatusColor } from "@/components/StatusRing";
 import { SyncBadge } from "@/components/SyncBadge";
 import type {
@@ -707,12 +707,18 @@ export default function WeeklyReviewPage() {
               ))}
             </ul>
           ) : null}
-          <div className="mt-2 text-xs text-[#25313c]">
-            <span className="text-[10px] uppercase tracking-wider text-[#c39a4e] font-semibold">
-              Suggested fix
-            </span>{" "}
-            {bottleneckDiagnosis.suggestedFix}
-          </div>
+          {bottleneckDiagnosis.bottleneckKind === "insufficient-evidence" ? (
+            <p className="mt-2 text-xs italic text-[#8c8478]">
+              Log more daily data to unlock bottleneck diagnosis.
+            </p>
+          ) : (
+            <div className="mt-2 text-xs text-[#25313c]">
+              <span className="text-[10px] uppercase tracking-wider text-[#c39a4e] font-semibold">
+                Suggested fix
+              </span>{" "}
+              {bottleneckDiagnosis.suggestedFix}
+            </div>
+          )}
         </div>
 
         <WeeklyExecutionStats
@@ -885,7 +891,10 @@ export default function WeeklyReviewPage() {
             </button>
             <button
               type="button"
-              onClick={() => setOneMoveDraft(oneMoveSuggestion)}
+              onClick={() => {
+                setOneMoveDraft(oneMoveSuggestion);
+                setNotice("Local deterministic suggestion applied. AI generation requires API configuration.");
+              }}
               disabled={!oneMoveSuggestion}
               className="inline-flex items-center gap-2 rounded-md border border-[#ddd4c6] bg-white px-3 py-2 text-sm hover:bg-[#f7f3ec] disabled:opacity-50"
             >
@@ -899,23 +908,9 @@ export default function WeeklyReviewPage() {
           ) : null}
         </div>
 
-        <ReviewTextCard
-          title="NEXT WEEK BIG 3"
-          icon={<Frown size={14} className="text-[#c39a4e]" />}
-          accent="text-[#c39a4e]"
-          value={form.nextWeekBig3.join("\n")}
-          onChange={(value) =>
-            setForm((p) => ({
-              ...p,
-              nextWeekBig3: value
-                .split("\n")
-                .map((line) => line.trim())
-                .filter(Boolean)
-                .slice(0, 3) as WeeklyReviewForm["nextWeekBig3"],
-            }))
-          }
-          placeholder={"1. ...\n2. ...\n3. ..."}
-          textarea
+        <BigThreeEditor
+          values={form.nextWeekBig3}
+          onChange={(nextWeekBig3) => setForm((p) => ({ ...p, nextWeekBig3 }))}
         />
 
         {/* Correction rule — last week's One Move verdict. */}
@@ -1095,14 +1090,6 @@ export default function WeeklyReviewPage() {
 
         <PrimaryActionBar>
           <button
-            onClick={handleUseSnapshot}
-            className="btn-primary inline-flex items-center gap-2"
-            type="button"
-          >
-            <Sparkles size={14} />
-            Use Current Snapshot
-          </button>
-          <button
             onClick={handleSave}
             className="btn-primary inline-flex items-center gap-2"
             disabled={isSaving || isLoading || sessionLoading}
@@ -1110,6 +1097,14 @@ export default function WeeklyReviewPage() {
           >
             {isSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
             {isSaving ? "Saving..." : "Save Weekly Review"}
+          </button>
+          <button
+            onClick={handleUseSnapshot}
+            className="btn-secondary inline-flex items-center gap-2"
+            type="button"
+          >
+            <Sparkles size={14} />
+            Use Current Snapshot
           </button>
         </PrimaryActionBar>
       </section>
@@ -1310,23 +1305,9 @@ export default function WeeklyReviewPage() {
           onChange={(value) => setForm((p) => ({ ...p, biggestLeak: value }))}
           placeholder="Where did energy go to waste?"
         />
-        <ReviewTextCard
-          title="NEXT WEEK BIG 3"
-          icon={<Frown size={14} className="text-[#c39a4e]" />}
-          accent="text-[#c39a4e]"
-          value={form.nextWeekBig3.join("\n")}
-          onChange={(value) =>
-            setForm((p) => ({
-              ...p,
-              nextWeekBig3: value
-                .split("\n")
-                .map((line) => line.trim())
-                .filter(Boolean)
-                .slice(0, 3) as WeeklyReviewForm["nextWeekBig3"],
-            }))
-          }
-          placeholder={"1. ...\n2. ...\n3. ..."}
-          textarea
+        <BigThreeEditor
+          values={form.nextWeekBig3}
+          onChange={(nextWeekBig3) => setForm((p) => ({ ...p, nextWeekBig3 }))}
         />
       </div>
 
@@ -1358,6 +1339,50 @@ export default function WeeklyReviewPage() {
   );
 }
 
+function BigThreeEditor({
+  values,
+  onChange,
+}: {
+  values: [string, string, string];
+  onChange: (values: [string, string, string]) => void;
+}) {
+  const setValue = (index: number, value: string) => {
+    const next: [string, string, string] = [
+      values[0] ?? "",
+      values[1] ?? "",
+      values[2] ?? "",
+    ];
+    next[index] = value;
+    onChange(next);
+  };
+
+  return (
+    <div className="card-surface p-4">
+      <h3 className="mb-3 text-sm font-semibold text-[#25313c]">NEXT WEEK BIG 3</h3>
+      <div className="space-y-2">
+        {[0, 1, 2].map((index) => (
+          <label key={index} className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={Boolean(values[index]?.trim())}
+              readOnly
+              className="rounded accent-[#6a9a74]"
+              aria-label={`Priority ${index + 1} has text`}
+            />
+            <input
+              type="text"
+              value={values[index] ?? ""}
+              onChange={(event) => setValue(index, event.target.value)}
+              placeholder={`Priority ${index + 1}`}
+              className="input-dark flex-1"
+            />
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function ScoreSlider({
   label,
   value,
@@ -1379,9 +1404,9 @@ function ScoreSlider({
       </div>
       <input
         type="range"
-        min={0}
+        min={1}
         max={10}
-        step={0.1}
+        step={0.5}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
         className="slider-dark"
@@ -1400,8 +1425,11 @@ function StepHeading({
   subtitle: string;
 }) {
   return (
-    <div className="flex items-center gap-3">
-      <div className="flex h-7 w-7 items-center justify-center rounded-full bg-[#25313c] text-xs font-semibold text-white">
+    <div className="relative flex items-start gap-3">
+      {n < 4 ? (
+        <div className="absolute left-[13px] top-7 h-10 border-l border-[#ddd4c6]" />
+      ) : null}
+      <div className="relative z-10 flex h-7 w-7 items-center justify-center rounded-full bg-[#25313c] text-xs font-semibold text-white">
         {n}
       </div>
       <div>

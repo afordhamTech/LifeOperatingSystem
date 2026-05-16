@@ -35,6 +35,23 @@ function writeLocalRelationships(entries: RelationshipEntry[]) {
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
 }
 
+function relationshipQualityLabel(value: number) {
+  if (value <= 3) return "Disconnected / Tense";
+  if (value <= 7) return "Standard / Good";
+  return "Deeply Connected";
+}
+
+function relationshipQualityColor(value: number) {
+  if (value <= 3) return "#c97a73";
+  if (value <= 7) return "#c39a4e";
+  return "#6a9a74";
+}
+
+function nextActionFromNotes(notes: string) {
+  const match = notes.match(/Next action:\s*(.+)$/im);
+  return match?.[1]?.trim() ?? "";
+}
+
 export default function RelationshipsPage() {
   const today = new Date().toISOString().split("T")[0];
   const { hasSupabaseConfig, isLoading: sessionLoading, userId } = useSupabaseSession();
@@ -107,6 +124,7 @@ export default function RelationshipsPage() {
     }, new Map<string, RelationshipEntry>()),
   ).map(([, entry]) => entry);
   const followUps = entries.filter((entry) => entry.followUpNeeded);
+  const personNames = people.map((person) => person.personName).sort();
 
   const handleLog = async () => {
     if (!form.personName.trim()) return;
@@ -150,6 +168,26 @@ export default function RelationshipsPage() {
       notes: "",
       nextAction: "",
     });
+  };
+
+  const resolveFollowUp = async (entry: RelationshipEntry) => {
+    const updated = { ...entry, followUpNeeded: false };
+    const next = entries.map((item) => (item.id === entry.id ? updated : item));
+    setEntries(next);
+    writeLocalRelationships(next);
+    if (hasSupabaseConfig && userId && remoteLoadedRef.current) {
+      try {
+        setSyncStatus("saving");
+        const saved = await upsertRelationshipEntry(userId, updated);
+        const savedEntries = entries.map((item) => (item.id === entry.id ? saved : item));
+        setEntries(savedEntries);
+        writeLocalRelationships(savedEntries);
+        setSyncStatus("saved");
+      } catch (error) {
+        setSyncError(error instanceof Error ? error.message : "Could not resolve follow-up.");
+        setSyncStatus("error");
+      }
+    }
   };
 
   const unresolved = entries.filter((entry) => entry.unresolvedIssue.trim());
@@ -196,7 +234,7 @@ Help me understand who needs attention and give me mature next messages or actio
           title={radarTitle}
           detail={
             followUps.length > 0
-              ? `Needs follow-up: ${followUps.length}. Next mature action: follow through on the specific thing already noted.`
+              ? `Text ${followUps[0].personName}: ${nextActionFromNotes(followUps[0].notes) || followUps[0].unresolvedIssue || "follow through on the noted next action"}.`
               : unresolved.length > 0
                 ? `Unresolved tension: ${unresolved.length}. Next mature action: repair simply before making it a bigger conversation.`
                 : needsSpace.length > 0
@@ -224,13 +262,16 @@ Help me understand who needs attention and give me mature next messages or actio
             <Users size={14} />
             PEOPLE REMEMBERED
           </h3>
-          <div className="space-y-2">
+          <div className="grid gap-2 sm:grid-cols-2">
             {people.map((person) => (
-              <div key={person.id} className="flex items-center justify-between p-2 bg-[#f0ebe2] rounded">
+              <div key={person.id} className="flex items-center justify-between p-3 bg-[#f0ebe2] rounded">
                 <div>
                   <div className="text-sm text-[#25313c]">{person.personName}</div>
                   <div className="text-[10px] text-[#6f685f]">
                     Last: {person.lastContact ?? "—"} | Connection: {person.conversationQuality ?? "—"}/10
+                  </div>
+                  <div className="mt-1 text-[11px] text-[#6f685f]">
+                    {person.notes.split("\n")[0] || "No detail saved yet."}
                   </div>
                 </div>
                 {person.followUpNeeded && <Bell size={14} className="text-[#c39a4e]" />}
@@ -252,17 +293,28 @@ Help me understand who needs attention and give me mature next messages or actio
             <label className="block">
               <span className="mb-1 block text-[10px] uppercase text-[#6f685f]">Person</span>
               <input
+                list="relationship-person-options"
                 type="text"
                 placeholder="Person name"
                 value={form.personName}
                 onChange={(e) => setForm((p) => ({ ...p, personName: e.target.value }))}
                 className="input-dark w-full"
               />
+              <datalist id="relationship-person-options">
+                {personNames.map((name) => (
+                  <option key={name} value={name} />
+                ))}
+              </datalist>
             </label>
             <div>
               <div className="flex items-center justify-between mb-1">
                 <label className="text-[10px] uppercase text-[#6f685f]">Connection Quality</label>
-                <span className="font-mono-data text-[10px] text-[#6b87ae]">{form.conversationQuality}/10</span>
+                <span
+                  className="font-mono-data text-[10px]"
+                  style={{ color: relationshipQualityColor(form.conversationQuality) }}
+                >
+                  {form.conversationQuality}/10
+                </span>
               </div>
               <input
                 type="range"
@@ -271,7 +323,11 @@ Help me understand who needs attention and give me mature next messages or actio
                 value={form.conversationQuality}
                 onChange={(e) => setForm((p) => ({ ...p, conversationQuality: Number(e.target.value) }))}
                 className="slider-dark"
+                style={{ accentColor: relationshipQualityColor(form.conversationQuality) }}
               />
+              <div className="mt-1 text-xs text-[#6f685f]">
+                {relationshipQualityLabel(form.conversationQuality)}
+              </div>
             </div>
             <label className="block">
               <span className="mb-1 block text-[10px] uppercase text-[#6f685f]">What happened?</span>
@@ -324,10 +380,20 @@ Help me understand who needs attention and give me mature next messages or actio
           <h3 className="text-sm font-semibold text-[#c39a4e] mb-3">FOLLOW-UPS NEEDED</h3>
           <div className="space-y-2">
             {followUps.map((f) => (
-              <div key={f.id} className="flex items-center gap-2 text-sm">
-                <Bell size={12} className="text-[#c39a4e]" />
-                <span className="text-[#25313c]">{f.personName}</span>
-                <span className="text-[#6f685f]">{f.unresolvedIssue}</span>
+              <div key={f.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-[#e3d8c9] bg-[#fdfaf4] px-3 py-2 text-sm">
+                <div className="flex items-center gap-2">
+                  <Bell size={12} className="text-[#c39a4e]" />
+                  <span className="text-[#25313c]">
+                    Text {f.personName}: {nextActionFromNotes(f.notes) || f.unresolvedIssue || "follow up"}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void resolveFollowUp(f)}
+                  className="rounded-md border border-[#ddd4c6] bg-white px-2 py-1 text-xs text-[#25313c] hover:bg-[#f7f3ec]"
+                >
+                  Resolve
+                </button>
               </div>
             ))}
           </div>

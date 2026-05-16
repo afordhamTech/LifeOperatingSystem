@@ -16,7 +16,6 @@ import {
   Pause,
   Play,
   Plus,
-  RotateCcw,
   Search,
   Square,
   Target,
@@ -44,8 +43,11 @@ import {
   MCAT_TUTOR_PROMPT,
   MCAT_WEEKLY_REVIEW_PROMPT,
   activeSessionElapsedMs,
+  applyMcatSrsReview,
+  getFoundationProgress,
   getDailyMinutes,
   getDailyMinutesSeries,
+  getHighLeverageQueue,
   getMcatDailyNextMove,
   getMcatSummary,
   getMistakeBreakdown,
@@ -69,6 +71,7 @@ import {
   type McatFoundationState,
   type McatPriorityLabel,
   type McatTopic,
+  type McatSrsRating,
   type McatTopicStatus,
 } from "@/lib/mcat-foundation";
 import { supabase } from "@/lib/supabase-client";
@@ -477,13 +480,12 @@ export default function McatFoundationPage() {
     () => state.carsEntries.filter((e) => e.date === todayKey),
     [state.carsEntries],
   );
-  const studyQueue = summary.scoredTopics
-    .filter(({ topic }) => topic.priorityLabel !== "Delay Until Coursework")
-    .slice(0, 8);
   const retestQueue = [...summary.scoredTopics]
     .filter(({ topic }) => topic.priorityLabel !== "Delay Until Coursework")
     .sort((a, b) => b.retestPriority - a.retestPriority)
     .slice(0, 8);
+  const highLeverageQueue = useMemo(() => getHighLeverageQueue(state).slice(0, 8), [state]);
+  const foundationProgress = useMemo(() => getFoundationProgress(state), [state]);
 
   const elapsedMs = activeSession ? activeSessionElapsedMs(activeSession) : 0;
   const activeTopic = activeSession ? topicById.get(activeSession.topicId) ?? null : null;
@@ -676,18 +678,10 @@ export default function McatFoundationPage() {
     }));
   };
 
-  const markRetested = (topicId: string) => {
+  const markRetested = (topicId: string, rating: McatSrsRating) => {
     const topic = topicById.get(topicId);
     if (!topic) return;
-    updateTopic(topicId, {
-      status: "Stable",
-      lastRetested: todayKey,
-      lastReviewed: todayKey,
-      retestSuccess: 8,
-      retestUrgency: 2,
-      weakness: Math.max(1, topic.weakness - 1),
-      flashcardsDue: Math.max(0, topic.flashcardsDue - 5),
-    });
+    updateTopic(topicId, applyMcatSrsReview(topic, rating, todayKey));
   };
 
   const handleCopy = (kind: "tutor" | "weekly", text: string) => {
@@ -735,18 +729,6 @@ export default function McatFoundationPage() {
           <span>
             {todayMove.detail} Why it matters: {todayMoveReason}
           </span>
-        }
-        action={
-          todayMoveTopic ? (
-            <button
-              className="btn-primary px-3 py-1.5"
-              onClick={() => startSession(todayMoveTopic.id)}
-              disabled={Boolean(activeSession)}
-            >
-              <Play size={14} className="mr-1.5" />
-              Start session
-            </button>
-          ) : null
         }
       />
 
@@ -805,6 +787,18 @@ export default function McatFoundationPage() {
             value={`${summary.flashcardsDue}`}
           />
         </section>
+        <div className="mt-4">
+          <div className="mb-1 flex items-center justify-between text-xs text-muted-foreground">
+            <span>Foundation</span>
+            <span>{foundationProgress}% complete</span>
+          </div>
+          <div className="h-2 overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full rounded-full bg-primary transition-all duration-500"
+              style={{ width: `${foundationProgress}%` }}
+            />
+          </div>
+        </div>
       </CollapsibleSection>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
@@ -824,7 +818,7 @@ export default function McatFoundationPage() {
                 <h2 className="text-sm font-semibold text-foreground">Review Queue</h2>
               </div>
               <div className="space-y-2">
-                {studyQueue.slice(0, 4).map(({ topic, studyDecision }) => (
+                {highLeverageQueue.slice(0, 4).map(({ topic, leverage }) => (
                   <button
                     key={topic.id}
                     onClick={() => setTopicDetailId(topic.id)}
@@ -841,9 +835,7 @@ export default function McatFoundationPage() {
                         {topic.priorityLabel}
                       </span>
                       <span className="text-xs text-muted-foreground">
-                        {studyDecision >= 7
-                          ? "High leverage"
-                          : "Keep warm"}
+                        Leverage {leverage.toFixed(2)}
                       </span>
                     </div>
                   </button>
@@ -948,13 +940,17 @@ export default function McatFoundationPage() {
                         {topic.lastReviewed ? `last revisited ${topic.lastReviewed}` : "never revisited"}
                       </div>
                     </button>
-                    <button
-                      className="btn-secondary whitespace-nowrap px-2.5 py-1 text-xs"
-                      onClick={() => markRetested(topic.id)}
-                    >
-                      <RotateCcw size={12} className="mr-1" />
-                      Retested
-                    </button>
+                    <div className="flex flex-wrap justify-end gap-1">
+                      {([1, 2, 3, 4] as const).map((rating) => (
+                        <button
+                          key={rating}
+                          className="rounded-md border border-border bg-muted/40 px-2 py-1 text-[10px] text-foreground hover:bg-muted"
+                          onClick={() => markRetested(topic.id, rating)}
+                        >
+                          {rating}-{rating === 1 ? "Again" : rating === 2 ? "Hard" : rating === 3 ? "Good" : "Easy"}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -1191,7 +1187,7 @@ export default function McatFoundationPage() {
           setTopicDetailId(null);
           startSession(id);
         }}
-        onRetest={(id) => markRetested(id)}
+        onRetest={(id, rating) => markRetested(id, rating)}
         onUpdateStatus={(id, status) => updateTopic(id, { status })}
       />
     </div>
@@ -1389,7 +1385,7 @@ function IdleStartCard({
           disabled={!pickerTopicId}
         >
           <Play size={15} className="mr-1.5" />
-          Start session
+          Study Now
         </button>
       </div>
       <CollapsibleSection title="Browse all topics" className="mt-3">
@@ -2137,7 +2133,7 @@ function TopicDetailDialog({
   state: McatFoundationState;
   onClose: () => void;
   onStart: (id: string) => void;
-  onRetest: (id: string) => void;
+  onRetest: (id: string, rating: McatSrsRating) => void;
   onUpdateStatus: (id: string, status: McatTopicStatus) => void;
 }) {
   const topic = topicId ? state.topics.find((t) => t.id === topicId) ?? null : null;
@@ -2182,10 +2178,17 @@ function TopicDetailDialog({
                   <Play size={13} className="mr-1.5" />
                   Start session
                 </button>
-                <button className="btn-secondary px-3 py-1.5 text-xs" onClick={() => onRetest(topic.id)}>
-                  <RotateCcw size={13} className="mr-1.5" />
-                  Mark retested
-                </button>
+                <div className="flex flex-wrap gap-1">
+                  {([1, 2, 3, 4] as const).map((rating) => (
+                    <button
+                      key={rating}
+                      className="btn-secondary px-2 py-1.5 text-xs"
+                      onClick={() => onRetest(topic.id, rating)}
+                    >
+                      {rating}-{rating === 1 ? "Again" : rating === 2 ? "Hard" : rating === 3 ? "Good" : "Easy"}
+                    </button>
+                  ))}
+                </div>
                 <select
                   className="input-dark h-9 w-[200px] text-xs"
                   value={topic.status}

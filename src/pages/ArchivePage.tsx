@@ -46,16 +46,22 @@ type DecisionDraft = {
   decision: string;
   reason_chosen: string;
   review_date: string;
-  notes: string;
-  options_text: string;
+  expected_outcome: string;
+  actual_outcome: string;
+  lesson_learned: string;
+  option_input: string;
+  options: string[];
 };
 
 const emptyDecisionDraft: DecisionDraft = {
   decision: "",
   reason_chosen: "",
   review_date: "",
-  notes: "",
-  options_text: "",
+  expected_outcome: "",
+  actual_outcome: "",
+  lesson_learned: "",
+  option_input: "",
+  options: [],
 };
 
 type ArchiveData = {
@@ -82,6 +88,12 @@ function addDays(date: Date, days: number) {
   return next.toISOString().split("T")[0] ?? "";
 }
 
+function addMonths(date: Date, months: number) {
+  const next = new Date(date);
+  next.setMonth(next.getMonth() + months);
+  return next.toISOString().split("T")[0] ?? "";
+}
+
 export default function ArchivePage() {
   const today = new Date().toISOString().split("T")[0] ?? "";
   const archiveStart = addDays(new Date(), -90);
@@ -92,6 +104,8 @@ export default function ArchivePage() {
   const [syncStatus, setSyncStatus] = useState<LifeeeSyncStatus>("waiting");
   const [syncError, setSyncError] = useState<string | null>(null);
   const [tab, setTab] = useState<"patterns" | "evidence" | "archive">("patterns");
+  const outcomesUnlocked =
+    !decisionDraft.review_date || decisionDraft.review_date <= today;
 
   useEffect(() => {
     let active = true;
@@ -170,13 +184,13 @@ export default function ArchivePage() {
       const saved = (await upsertDecisionLog(userId, {
         decision: decisionDraft.decision.trim(),
         decision_date: today,
-        options_considered: decisionDraft.options_text
-          .split(/\n/)
-          .map((option) => option.trim())
-          .filter(Boolean),
+        options_considered: decisionDraft.options,
         reason_chosen: decisionDraft.reason_chosen.trim() || null,
         review_date: decisionDraft.review_date || null,
-        notes: decisionDraft.notes.trim() || null,
+        expected_outcome: decisionDraft.expected_outcome.trim() || null,
+        actual_outcome: outcomesUnlocked ? decisionDraft.actual_outcome.trim() || null : null,
+        lesson_learned: outcomesUnlocked ? decisionDraft.lesson_learned.trim() || null : null,
+        notes: null,
       })) as DecisionLog;
       setDecisionLogs((current) => [saved, ...current.filter((row) => row.id !== saved.id)]);
       setDecisionDraft(emptyDecisionDraft);
@@ -185,6 +199,16 @@ export default function ArchivePage() {
       setSyncStatus("error");
       setSyncError(error instanceof Error ? error.message : "Could not save decision.");
     }
+  };
+
+  const addDecisionOption = () => {
+    const option = decisionDraft.option_input.trim();
+    if (!option) return;
+    setDecisionDraft((draft) => ({
+      ...draft,
+      option_input: "",
+      options: draft.options.includes(option) ? draft.options : [...draft.options, option],
+    }));
   };
 
   const removeDecision = async (id: string) => {
@@ -321,8 +345,8 @@ export default function ArchivePage() {
           </div>
         </div>
 
-        <div className="grid gap-3 lg:grid-cols-[0.9fr_1.1fr]">
-          <div className="space-y-2">
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,48rem)_1fr]">
+          <div className="max-w-3xl space-y-3">
             <input
               value={decisionDraft.decision}
               onChange={(event) =>
@@ -331,14 +355,41 @@ export default function ArchivePage() {
               placeholder="Decision made"
               className="input-dark w-full"
             />
-            <textarea
-              value={decisionDraft.options_text}
-              onChange={(event) =>
-                setDecisionDraft((draft) => ({ ...draft, options_text: event.target.value }))
-              }
-              placeholder="Options considered, one per line"
-              className="input-dark min-h-[80px] w-full"
-            />
+            <div>
+              <input
+                value={decisionDraft.option_input}
+                onChange={(event) =>
+                  setDecisionDraft((draft) => ({ ...draft, option_input: event.target.value }))
+                }
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    addDecisionOption();
+                  }
+                }}
+                placeholder="Option considered, then press Enter"
+                className="input-dark w-full"
+              />
+              {decisionDraft.options.length > 0 ? (
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {decisionDraft.options.map((option) => (
+                    <button
+                      key={option}
+                      type="button"
+                      onClick={() =>
+                        setDecisionDraft((draft) => ({
+                          ...draft,
+                          options: draft.options.filter((item) => item !== option),
+                        }))
+                      }
+                      className="rounded-full border border-[#ddd4c6] bg-white px-2 py-0.5 text-xs text-[#25313c] hover:bg-[#f7f3ec]"
+                    >
+                      {option} ×
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
             <input
               value={decisionDraft.reason_chosen}
               onChange={(event) =>
@@ -347,7 +398,15 @@ export default function ArchivePage() {
               placeholder="Why I chose it"
               className="input-dark w-full"
             />
-            <div className="grid grid-cols-2 gap-2">
+            <textarea
+              value={decisionDraft.expected_outcome}
+              onChange={(event) =>
+                setDecisionDraft((draft) => ({ ...draft, expected_outcome: event.target.value }))
+              }
+              placeholder="Expected outcome"
+              className="input-dark min-h-[80px] w-full"
+            />
+            <div className="grid gap-2 sm:grid-cols-2">
               <label className="text-[10px] uppercase text-[#6f685f]">
                 Review date — when to revisit
                 <input
@@ -359,37 +418,67 @@ export default function ArchivePage() {
                   className="input-dark mt-1 w-full"
                 />
               </label>
+              <div className="flex flex-wrap items-end gap-1">
+                {[1, 3, 6].map((months) => (
+                  <button
+                    key={months}
+                    type="button"
+                    onClick={() =>
+                      setDecisionDraft((draft) => ({
+                        ...draft,
+                        review_date: addMonths(new Date(), months),
+                      }))
+                    }
+                    className="rounded-md border border-[#ddd4c6] bg-white px-2 py-1.5 text-xs text-[#25313c] hover:bg-[#f7f3ec]"
+                  >
+                    +{months} Month{months === 1 ? "" : "s"}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <label className="block text-[10px] uppercase text-[#6f685f]">
+                Actual outcome
+                <textarea
+                  value={decisionDraft.actual_outcome}
+                  onChange={(event) =>
+                    setDecisionDraft((draft) => ({ ...draft, actual_outcome: event.target.value }))
+                  }
+                  disabled={!outcomesUnlocked}
+                  placeholder={outcomesUnlocked ? "What actually happened?" : "Unlocks on review date."}
+                  className="input-dark mt-1 min-h-[80px] w-full disabled:opacity-60"
+                />
+              </label>
+              <label className="block text-[10px] uppercase text-[#6f685f]">
+                Lesson learned
+                <textarea
+                  value={decisionDraft.lesson_learned}
+                  onChange={(event) =>
+                    setDecisionDraft((draft) => ({ ...draft, lesson_learned: event.target.value }))
+                  }
+                  disabled={!outcomesUnlocked}
+                  placeholder={outcomesUnlocked ? "What will you do differently?" : "Unlocks on review date."}
+                  className="input-dark mt-1 min-h-[80px] w-full disabled:opacity-60"
+                />
+              </label>
+            </div>
+            <div className="flex justify-end">
               <button
                 onClick={() => void saveDecision()}
-                className="btn-primary mt-4 inline-flex items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-50"
+                className="btn-primary inline-flex items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-50"
                 disabled={!decisionDraft.decision.trim()}
               >
                 <Plus size={14} />
                 Add Decision
               </button>
             </div>
-            <label className="block text-[10px] uppercase text-[#6f685f]">
-              Expected outcome · Actual outcome · Lesson
-              <textarea
-                value={decisionDraft.notes}
-                onChange={(event) =>
-                  setDecisionDraft((draft) => ({ ...draft, notes: event.target.value }))
-                }
-                placeholder="Expected outcome now; come back to add the actual outcome and the lesson"
-                className="input-dark mt-1 min-h-[80px] w-full"
-              />
-            </label>
           </div>
 
           <div>
             {decisionLogs.length === 0 ? (
               <EmptyState
-                title={userId ? "No decisions saved yet" : "Needs login"}
-                description={
-                  userId
-                    ? "Save a decision to create an audit trail."
-                    : "Decision logs are Supabase-only in this implementation."
-                }
+                title="No decisions saved yet"
+                description="Save a decision to create an audit trail. Draft mode is shown globally when you are logged out."
               />
             ) : (
               <ul className="divide-y divide-[#ddd4c6]">
@@ -422,12 +511,36 @@ export default function ArchivePage() {
                         {row.reason_chosen}
                       </div>
                     ) : null}
-                    {row.notes ? (
+                    {Array.isArray(row.options_considered) && row.options_considered.length > 0 ? (
                       <div className="mt-1 text-xs text-[#6f685f]">
                         <span className="text-[10px] uppercase tracking-wider text-[#9b938a]">
-                          Expected outcome · Actual outcome · Lesson:{" "}
+                          Options:{" "}
                         </span>
-                        {row.notes}
+                        {row.options_considered.join(", ")}
+                      </div>
+                    ) : null}
+                    {row.expected_outcome || row.notes ? (
+                      <div className="mt-1 text-xs text-[#6f685f]">
+                        <span className="text-[10px] uppercase tracking-wider text-[#9b938a]">
+                          Expected outcome:{" "}
+                        </span>
+                        {row.expected_outcome ?? row.notes}
+                      </div>
+                    ) : null}
+                    {row.actual_outcome ? (
+                      <div className="mt-1 text-xs text-[#6f685f]">
+                        <span className="text-[10px] uppercase tracking-wider text-[#9b938a]">
+                          Actual outcome:{" "}
+                        </span>
+                        {row.actual_outcome}
+                      </div>
+                    ) : null}
+                    {row.lesson_learned ? (
+                      <div className="mt-1 text-xs text-[#6f685f]">
+                        <span className="text-[10px] uppercase tracking-wider text-[#9b938a]">
+                          Lesson learned:{" "}
+                        </span>
+                        {row.lesson_learned}
                       </div>
                     ) : null}
                   </li>

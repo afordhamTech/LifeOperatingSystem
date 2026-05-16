@@ -218,6 +218,8 @@ export type ProofItem = {
   mentorContact: string;
   skillPracticed: string;
   privacyLayer: string;
+  leverageChecklist?: Record<string, boolean>;
+  leverageDrafts?: Record<string, string>;
   created_at?: string;
   updated_at?: string;
 };
@@ -296,6 +298,11 @@ export type SubstanceEntry = {
   flashcardsMade: number;
   conversationPractice: boolean;
   newConcept: string;
+  whyItMatters?: string;
+  example?: string;
+  myOpinion?: string;
+  conversationAngle?: string;
+  connectionToAnotherField?: string;
   questionOfDay: string;
   writingPractice: boolean;
   speakingPractice: boolean;
@@ -306,7 +313,7 @@ export function getSyncLabel(status: LifeeeSyncStatus) {
   if (status === "loading") return "Loading Supabase";
   if (status === "saving") return "Saving";
   if (status === "saved") return "Saved";
-  if (status === "waiting") return "Needs login";
+  if (status === "waiting") return "Draft only";
   if (status === "error") return "Sync failed";
   if (status === "placeholder") return "Placeholder only";
   return "Draft only";
@@ -317,7 +324,7 @@ export function getSyncTone(status: LifeeeSyncStatus) {
   if (status === "saving" || status === "loading") return "border-primary/25 bg-primary/10 text-primary";
   if (status === "error") return "border-destructive/25 bg-destructive/10 text-destructive";
   if (status === "placeholder") return "border-slate-500/25 bg-slate-500/10 text-slate-700";
-  return "border-amber-500/25 bg-amber-500/10 text-amber-700";
+  return "border-border bg-muted/40 text-muted-foreground";
 }
 
 function requireSupabase() {
@@ -394,6 +401,8 @@ export type DecisionLogPayload = {
   options_considered?: unknown[];
   reason_chosen?: string | null;
   expected_outcome?: string | null;
+  actual_outcome?: string | null;
+  lesson_learned?: string | null;
   risk?: string | null;
   review_date?: string | null;
   result_later?: string | null;
@@ -1393,6 +1402,14 @@ export async function fetchProofItems(userId: string) {
       mentorContact: row.mentor_contact ?? "",
       skillPracticed: row.skill_used ?? "",
       privacyLayer: row.privacy_layer ?? "Private",
+      leverageChecklist:
+        row.leverage_checklist && typeof row.leverage_checklist === "object"
+          ? (row.leverage_checklist as Record<string, boolean>)
+          : undefined,
+      leverageDrafts:
+        row.leverage_drafts && typeof row.leverage_drafts === "object"
+          ? (row.leverage_drafts as Record<string, string>)
+          : undefined,
       created_at: row.created_at,
       updated_at: row.updated_at,
     } satisfies ProofItem;
@@ -1424,6 +1441,8 @@ export async function upsertProofItem(userId: string, item: ProofItem) {
         mentor_contact: item.mentorContact,
         skill_used: item.skillPracticed,
         privacy_layer: item.privacyLayer,
+        leverage_checklist: item.leverageChecklist ?? {},
+        leverage_drafts: item.leverageDrafts ?? {},
       },
       { onConflict: "id" },
     )
@@ -1740,6 +1759,11 @@ export async function fetchSubstanceEntry(userId: string, date: string) {
     flashcardsMade: numberOrDefault(data.flashcards_made),
     conversationPractice: Boolean(data.conversation_practice),
     newConcept: data.concept_learned ?? "",
+    whyItMatters: data.why_it_matters ?? "",
+    example: data.example ?? "",
+    myOpinion: data.my_opinion ?? "",
+    conversationAngle: data.conversation_angle ?? "",
+    connectionToAnotherField: data.connection_to_another_field ?? "",
     questionOfDay: data.question_of_day ?? data.question ?? "",
     writingPractice: Boolean(data.writing_practice),
     speakingPractice: Boolean(data.speaking_practice_done),
@@ -1765,13 +1789,15 @@ export async function fetchSubstanceWeek(userId: string, startDate: string) {
 
 export async function upsertSubstanceEntry(userId: string, entry: SubstanceEntry) {
   const client = requireSupabase();
-  const substanceScore = calcSubstanceScore(
-    entry.readingDone,
-    entry.notesTaken,
-    entry.writingPractice,
-    entry.speakingPractice,
-    entry.newConcept,
-  );
+  const substanceScore =
+    entry.substanceScore ??
+    calcSubstanceScore(
+      entry.readingDone,
+      entry.notesTaken,
+      entry.writingPractice,
+      entry.speakingPractice,
+      entry.newConcept,
+    );
 
   const payload = {
     user_id: userId,
@@ -1784,6 +1810,11 @@ export async function upsertSubstanceEntry(userId: string, entry: SubstanceEntry
     conversation_practice: entry.conversationPractice,
     conversation_topic: entry.topicStudied,
     concept_learned: entry.newConcept,
+    why_it_matters: entry.whyItMatters ?? "",
+    example: entry.example ?? "",
+    my_opinion: entry.myOpinion ?? "",
+    conversation_angle: entry.conversationAngle ?? "",
+    connection_to_another_field: entry.connectionToAnotherField ?? "",
     question: entry.questionOfDay,
     question_of_day: entry.questionOfDay,
     writing: entry.writingPractice ? "Completed" : "",

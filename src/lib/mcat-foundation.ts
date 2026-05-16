@@ -63,6 +63,10 @@ export type McatTopic = {
   flashcardsDue: number;
   lastReviewed: string | null;
   lastRetested: string | null;
+  nextReviewDate: string | null;
+  intervalDays: number;
+  easeFactor: number;
+  lastReviewedAt: string | null;
 };
 
 export type McatSession = {
@@ -482,6 +486,10 @@ function buildTopic(unit: string, title: string): McatTopic {
     flashcardsDue: 0,
     lastReviewed: null,
     lastRetested: null,
+    nextReviewDate: null,
+    intervalDays: 0,
+    easeFactor: 2.5,
+    lastReviewedAt: null,
   };
 }
 
@@ -527,6 +535,10 @@ export function normalizeMcatFoundationState(value: unknown): McatFoundationStat
       flashcardsDue: existing.flashcardsDue ?? topic.flashcardsDue,
       lastReviewed: existing.lastReviewed ?? topic.lastReviewed,
       lastRetested: existing.lastRetested ?? topic.lastRetested,
+      nextReviewDate: existing.nextReviewDate ?? topic.nextReviewDate,
+      intervalDays: existing.intervalDays ?? topic.intervalDays,
+      easeFactor: existing.easeFactor ?? topic.easeFactor,
+      lastReviewedAt: existing.lastReviewedAt ?? topic.lastReviewedAt,
     };
   });
   return {
@@ -554,6 +566,75 @@ export function hasMcatFoundationProgress(state: McatFoundationState) {
         Boolean(topic.lastRetested),
     )
   );
+}
+
+export type McatSrsRating = 1 | 2 | 3 | 4;
+
+function addDateDays(dateKey: string, days: number) {
+  const date = new Date(`${dateKey}T00:00:00`);
+  date.setDate(date.getDate() + days);
+  return toDateKey(date);
+}
+
+export function applyMcatSrsReview(
+  topic: McatTopic,
+  rating: McatSrsRating,
+  todayKey = toDateKey(new Date()),
+): McatTopic {
+  const previousInterval = Math.max(0, topic.intervalDays ?? 0);
+  const previousEase = topic.easeFactor ?? 2.5;
+  const easeDelta = rating === 1 ? -0.2 : rating === 2 ? -0.1 : rating === 4 ? 0.15 : 0;
+  const easeFactor = Math.max(1.3, Math.round((previousEase + easeDelta) * 100) / 100);
+  const intervalDays =
+    rating === 1
+      ? 1
+      : rating === 2
+        ? Math.max(1, Math.round(Math.max(1, previousInterval) * 1.2))
+        : rating === 3
+          ? previousInterval <= 1
+            ? 3
+            : Math.round(previousInterval * easeFactor)
+          : previousInterval <= 1
+            ? 5
+            : Math.round(previousInterval * (easeFactor + 0.25));
+
+  return {
+    ...topic,
+    status: rating >= 3 ? "Stable" : "Reviewed",
+    lastRetested: todayKey,
+    lastReviewed: todayKey,
+    lastReviewedAt: new Date(`${todayKey}T12:00:00`).toISOString(),
+    nextReviewDate: addDateDays(todayKey, intervalDays),
+    intervalDays,
+    easeFactor,
+    retestSuccess: rating * 2.5,
+    retestUrgency: rating === 1 ? 8 : rating === 2 ? 5 : 2,
+    weakness: Math.max(1, topic.weakness + (rating <= 2 ? 1 : -1)),
+    flashcardsDue: Math.max(0, topic.flashcardsDue - (rating >= 3 ? 5 : 1)),
+  };
+}
+
+export function getHighLeverageQueue(state: McatFoundationState, today = new Date()) {
+  return state.topics
+    .filter((topic) => topic.priorityLabel !== "Delay Until Coursework")
+    .map((topic) => {
+      const days = daysSince(topic.lastReviewed, today);
+      const accuracy =
+        topic.questionsAttempted > 0
+          ? Math.max(35, (topic.questionsCorrect / topic.questionsAttempted) * 100)
+          : 35;
+      return {
+        topic,
+        leverage: round((topic.yieldScore * Math.max(1, days)) / accuracy),
+      };
+    })
+    .sort((a, b) => b.leverage - a.leverage);
+}
+
+export function getFoundationProgress(state: McatFoundationState) {
+  const total = state.topics.length;
+  const complete = state.topics.filter((topic) => topic.status !== "Not learned yet").length;
+  return total === 0 ? 0 : Math.round((complete / total) * 100);
 }
 
 export function loadMcatFoundationState(): McatFoundationState {

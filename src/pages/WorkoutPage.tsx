@@ -235,9 +235,39 @@ export default function WorkoutPage() {
     energy: Number(row.energy ?? 0),
     pain: Number(row.pain ?? 0),
   }));
+  const supportsExerciseLogging = ["Strength", "Plyometrics"].includes(form.workoutType);
+
+  const findPreviousExercise = (name: string) => {
+    if (!name || name === "Custom") return null;
+    const rows = [...history].sort((a, b) => String(b.date).localeCompare(String(a.date)));
+    for (const row of rows) {
+      const match = rowToExercises(row.exercises).find(
+        (exercise) => exercise.name.toLowerCase() === name.toLowerCase(),
+      );
+      if (match) return { ...match, date: row.date };
+    }
+    return null;
+  };
+
+  const selectExerciseName = (name: string) => {
+    const previous = findPreviousExercise(name);
+    setNewExercise((current) =>
+      previous
+        ? {
+            name,
+            sets: previous.sets,
+            reps: previous.reps,
+            weight: previous.weight,
+            rpe: previous.rpe,
+          }
+        : { ...current, name },
+    );
+  };
+
+  const previousExercise = findPreviousExercise(newExercise.name);
 
   const handleAddExercise = () => {
-    if (!newExercise.name) return;
+    if (!supportsExerciseLogging || !newExercise.name) return;
     setExercises((current) => [...current, newExercise]);
     setNewExercise({ name: "", sets: 3, reps: 8, weight: 0, rpe: 7 });
   };
@@ -315,13 +345,6 @@ export default function WorkoutPage() {
     setExercises((current) => current.filter((_, i) => i !== idx));
   };
 
-  const recoveryFactors = [
-    { label: "Sleep Readiness", value: sleepReadiness },
-    { label: "Energy", value: form.energy },
-    { label: "Soreness Recovery", value: 10 - form.soreness },
-    { label: "Pain Safety", value: 10 - form.pain },
-  ];
-
   return (
     <div className="space-y-6">
       <PageDecisionHeader
@@ -355,47 +378,31 @@ export default function WorkoutPage() {
               Training Readiness: {readinessScore.toFixed(1)}/10
             </div>
           </div>
-          <div className="flex-1 space-y-2 min-w-[200px]">
-            {recoveryFactors.map((factor) => (
-              <FactorBar
-                key={factor.label}
-                label={factor.label}
-                value={factor.value}
-                max={10}
-                color="#6b87ae"
-              />
-            ))}
+          <div className="flex-1 space-y-3 min-w-[220px]">
+            <FactorBar label="Sleep Readiness" value={sleepReadiness} max={10} color="#6b87ae" />
+            <SliderInput label="Energy" value={form.energy} onChange={(value) => setForm((p) => ({ ...p, energy: value }))} />
+            <SliderInput
+              label="Soreness"
+              value={form.soreness}
+              onChange={(value) => setForm((p) => ({ ...p, soreness: value }))}
+            />
+            <SliderInput
+              label="Pain"
+              value={form.pain}
+              onChange={(value) => setForm((p) => ({ ...p, pain: value }))}
+            />
+            {form.pain > 4 ? (
+              <div className="flex items-center gap-1 text-[10px] text-[#c97a73]">
+                <AlertTriangle size={10} />
+                Pain above 4 - consider modifying training
+              </div>
+            ) : null}
           </div>
         </div>
       </CollapsibleSection>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <div className="card-surface p-4">
-          <SliderInput label="Energy" value={form.energy} onChange={(value) => setForm((p) => ({ ...p, energy: value }))} />
-        </div>
-        <div className="card-surface p-4">
-          <SliderInput
-            label="Soreness"
-            value={form.soreness}
-            onChange={(value) => setForm((p) => ({ ...p, soreness: value }))}
-          />
-        </div>
-        <div className="card-surface p-4">
-          <SliderInput
-            label="Pain"
-            value={form.pain}
-            onChange={(value) => setForm((p) => ({ ...p, pain: value }))}
-          />
-          {form.pain > 4 ? (
-            <div className="mt-2 flex items-center gap-1 text-[10px] text-[#c97a73]">
-              <AlertTriangle size={10} />
-              Pain above 4 - consider modifying training
-            </div>
-          ) : null}
-        </div>
-      </div>
-
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {supportsExerciseLogging ? (
         <div className="card-surface p-4">
           <h3 className="text-sm font-semibold text-[#25313c] mb-3">
             ADD EXERCISE
@@ -404,7 +411,7 @@ export default function WorkoutPage() {
             <select
               value={newExercise.name}
               onChange={(e) =>
-                setNewExercise((p) => ({ ...p, name: e.target.value }))
+                selectExerciseName(e.target.value)
               }
               className="input-dark col-span-2"
             >
@@ -421,7 +428,7 @@ export default function WorkoutPage() {
                 type="text"
                 placeholder="Exercise name"
                 onChange={(e) =>
-                  setNewExercise((p) => ({ ...p, name: e.target.value }))
+                  selectExerciseName(e.target.value)
                 }
                 className="input-dark col-span-2"
               />
@@ -495,6 +502,14 @@ export default function WorkoutPage() {
                 {newExercise.rpe}/10
               </span>
             </div>
+            {previousExercise ? (
+              <div className="col-span-2 rounded-md border border-[#ddd4c6] bg-[#fdfaf4] px-3 py-2 text-xs text-[#6f685f]">
+                Last logged: {previousExercise.date} · {previousExercise.sets}x{previousExercise.reps} @{" "}
+                {previousExercise.weight} lbs
+              </div>
+            ) : newExercise.name && newExercise.name !== "Custom" ? (
+              <div className="col-span-2 text-xs text-[#8c8478]">No previous matching exercise found.</div>
+            ) : null}
           </div>
           <button
             onClick={handleAddExercise}
@@ -504,6 +519,14 @@ export default function WorkoutPage() {
             Add to Workout
           </button>
         </div>
+        ) : (
+          <div className="card-surface p-4">
+            <h3 className="text-sm font-semibold text-[#25313c] mb-3">SESSION LOGGING</h3>
+            <p className="text-sm text-[#6f685f]">
+              {form.workoutType} uses duration, RPE, readiness, and notes. Exercise rows are shown for Strength and Plyometrics only.
+            </p>
+          </div>
+        )}
 
         <div className="card-surface p-4">
           <h3 className="text-sm font-semibold text-[#25313c] mb-3">

@@ -12,7 +12,7 @@ import {
   type SubscriptionItem,
   upsertMoneyLog,
 } from "@/lib/lifeee-persistence";
-import { Wallet, TrendingUp, TrendingDown, Plus } from "lucide-react";
+import { Wallet, TrendingUp, TrendingDown, Plus, Trash2 } from "lucide-react";
 import {
   AdvancedDetails,
   CollapsibleSection,
@@ -21,6 +21,7 @@ import {
   SimpleOnly,
 } from "@/components/ui-kit";
 import { useUIMode } from "@/providers/UIModeContext";
+import { formatCurrencyInput, parseCurrencyInput } from "@/lib/money-format";
 
 const STORAGE_KEY = "lifeee.money_logs.v1";
 const WEEKLY_KEY = "lifeee.money.weekly";
@@ -235,6 +236,14 @@ export default function MoneyPage() {
     await handleSave(next);
   };
 
+  const removeSubscription = async (id: string) => {
+    const next = {
+      ...form,
+      subscriptionItems: form.subscriptionItems.filter((item) => item.id !== id),
+    };
+    await handleSave(next);
+  };
+
   const totalIncome = monthLogs.reduce((sum, row) => sum + row.income, 0);
   const totalSpending = monthLogs.reduce((sum, row) => sum + row.spending, 0);
   const totalSavings = monthLogs.reduce((sum, row) => sum + row.savings, 0);
@@ -312,9 +321,9 @@ Calculate my cash flow, savings rate, biggest leak, and give me a simple money s
 
       <InsightCard
         label="Safe to spend this week"
-        value={`$${safeToSpend}`}
+        value={formatCurrencyInput(safeToSpend)}
         interpretation={interpretation.line}
-        reason={`current cash $${weekly.currentCash} + expected income $${weekly.expectedIncome} − required $${weekly.requiredExpenses} − savings $${weekly.savingsCommitment} − buffer $${weekly.minimumBuffer}`}
+        reason={`current cash ${formatCurrencyInput(weekly.currentCash)} + expected income ${formatCurrencyInput(weekly.expectedIncome)} - required ${formatCurrencyInput(weekly.requiredExpenses)} - savings ${formatCurrencyInput(weekly.savingsCommitment)} - buffer ${formatCurrencyInput(weekly.minimumBuffer)}`}
         nextAction={`This week's money move: ${interpretation.move}`}
       />
 
@@ -328,51 +337,49 @@ Calculate my cash flow, savings rate, biggest leak, and give me a simple money s
         </p>
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
           <div>
-            <label className="text-[10px] uppercase text-muted-foreground block mb-1">Current cash</label>
-            <input type="number" value={weekly.currentCash} onChange={(e) => updateWeekly({ currentCash: Number(e.target.value) })} className="input-dark w-full" />
+            <CurrencyInput label="Current cash" value={weekly.currentCash} onChange={(value) => updateWeekly({ currentCash: value })} />
           </div>
           <div>
-            <label className="text-[10px] uppercase text-muted-foreground block mb-1">Expected income (week)</label>
-            <input type="number" value={weekly.expectedIncome} onChange={(e) => updateWeekly({ expectedIncome: Number(e.target.value) })} className="input-dark w-full" />
+            <CurrencyInput label="Expected income (week)" value={weekly.expectedIncome} onChange={(value) => updateWeekly({ expectedIncome: value })} />
           </div>
           <div>
-            <label className="text-[10px] uppercase text-muted-foreground block mb-1">Required expenses (week)</label>
-            <input type="number" value={weekly.requiredExpenses} onChange={(e) => updateWeekly({ requiredExpenses: Number(e.target.value) })} className="input-dark w-full" />
+            <CurrencyInput label="Required expenses (week)" value={weekly.requiredExpenses} onChange={(value) => updateWeekly({ requiredExpenses: value })} />
           </div>
           <div>
-            <label className="text-[10px] uppercase text-muted-foreground block mb-1">Savings commitment (week)</label>
-            <input type="number" value={weekly.savingsCommitment} onChange={(e) => updateWeekly({ savingsCommitment: Number(e.target.value) })} className="input-dark w-full" />
+            <CurrencyInput label="Savings commitment (week)" value={weekly.savingsCommitment} onChange={(value) => updateWeekly({ savingsCommitment: value })} />
           </div>
           <div>
-            <label className="text-[10px] uppercase text-muted-foreground block mb-1">Minimum buffer</label>
-            <input type="number" value={weekly.minimumBuffer} onChange={(e) => updateWeekly({ minimumBuffer: Number(e.target.value) })} className="input-dark w-full" />
+            <CurrencyInput label="Minimum buffer" value={weekly.minimumBuffer} onChange={(value) => updateWeekly({ minimumBuffer: value })} />
           </div>
         </div>
+        <button onClick={() => void handleSave()} className="btn-primary mt-3 w-full">
+          {syncStatus === "saving" ? "Saving..." : "Save Log"}
+        </button>
       </CollapsibleSection>
 
       <CollapsibleSection title="Cash Flow" subtitle={`Week: $${cashFlowWeek}`}>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <div className="card-surface p-4 text-center">
             <Wallet size={18} className="text-[#6b87ae] mx-auto mb-2" />
-            <div className="text-xl font-bold text-[#25313c]">${weekly.currentCash + weekly.expectedIncome}</div>
+            <div className="text-xl font-bold text-[#25313c]">{formatCurrencyInput(weekly.currentCash + weekly.expectedIncome)}</div>
             <div className="text-[10px] text-[#6f685f]">Cash + Income (wk)</div>
           </div>
           <div className="card-surface p-4 text-center">
             <TrendingDown size={18} className="text-[#c97a73] mx-auto mb-2" />
-            <div className="text-xl font-bold text-[#25313c]">${weekly.requiredExpenses}</div>
+            <div className="text-xl font-bold text-[#25313c]">{formatCurrencyInput(weekly.requiredExpenses)}</div>
             <div className="text-[10px] text-[#6f685f]">Money Out (wk)</div>
           </div>
           <div className="card-surface p-4 text-center">
             <TrendingUp size={18} className="text-[#6a9a74] mx-auto mb-2" />
-            <div className="text-xl font-bold text-[#6a9a74]">${weekly.savingsCommitment}</div>
+            <div className="text-xl font-bold text-[#6a9a74]">{formatCurrencyInput(weekly.savingsCommitment)}</div>
             <div className="text-[10px] text-[#6f685f]">Savings (wk)</div>
           </div>
           <div className="card-surface p-4 text-center">
             <div className="text-xl font-bold" style={{ color: cashFlowWeek >= 0 ? "#6a9a74" : "#c97a73" }}>
-              ${cashFlowWeek}
+              {formatCurrencyInput(cashFlowWeek)}
             </div>
             <div className="text-[10px] text-[#6f685f]">Cash Flow (wk)</div>
-            <div className="text-[10px] text-[#6f685f]">MTD: ${netFlow}</div>
+            <div className="text-[10px] text-[#6f685f]">MTD: {formatCurrencyInput(netFlow)}</div>
           </div>
         </div>
       </CollapsibleSection>
@@ -381,9 +388,19 @@ Calculate my cash flow, savings rate, biggest leak, and give me a simple money s
         <h3 className="text-sm font-semibold text-[#25313c] mb-3">RECURRING LEAKS</h3>
         <div className="space-y-2 mb-3">
           {form.subscriptionItems.map((sub) => (
-            <div key={sub.id} className="flex items-center justify-between text-xs">
+            <div key={sub.id} className="flex items-center justify-between gap-3 rounded-md border border-[#e3d8c9] bg-[#fdfaf4] px-3 py-2 text-xs">
               <span className="text-[#25313c]">{sub.name}</span>
-              <span className="text-[#6f685f]">${sub.monthlyCost}/mo</span>
+              <div className="flex items-center gap-2">
+                <span className="text-[#6f685f]">{formatCurrencyInput(sub.monthlyCost)}/mo</span>
+                <button
+                  type="button"
+                  onClick={() => void removeSubscription(sub.id)}
+                  className="text-[#8c8478] hover:text-destructive"
+                  aria-label={`Remove ${sub.name}`}
+                >
+                  <Trash2 size={13} />
+                </button>
+              </div>
             </div>
           ))}
           {form.subscriptionItems.length === 0 && (
@@ -391,6 +408,12 @@ Calculate my cash flow, savings rate, biggest leak, and give me a simple money s
               No recurring leaks tracked yet. Add recurring costs so the leak is visible.
             </div>
           )}
+        </div>
+        <div className="mb-3 text-xs text-[#6f685f]">
+          Total monthly recurring cost:{" "}
+          <span className="font-semibold text-[#25313c]">
+            {formatCurrencyInput(form.subscriptionItems.reduce((sum, item) => sum + item.monthlyCost, 0))}
+          </span>
         </div>
         <div className="flex items-end gap-2">
           <div className="flex-1">
@@ -412,10 +435,11 @@ Calculate my cash flow, savings rate, biggest leak, and give me a simple money s
             </label>
             <input
               id="leak-cost"
-              type="number"
+              type="text"
+              inputMode="numeric"
               placeholder="$/mo"
-              value={subCost}
-              onChange={(e) => setSubCost(Number(e.target.value))}
+              value={subCost ? formatCurrencyInput(subCost) : ""}
+              onChange={(e) => setSubCost(parseCurrencyInput(e.target.value))}
               className="input-dark w-full"
             />
           </div>
@@ -425,29 +449,21 @@ Calculate my cash flow, savings rate, biggest leak, and give me a simple money s
         </div>
       </div>
 
-      <CollapsibleSection title="Upcoming Obligations" subtitle={`$${form.upcomingExpenses}`}>
+      <CollapsibleSection title="Upcoming Obligations" subtitle={formatCurrencyInput(form.upcomingExpenses)}>
         <label className="text-[10px] uppercase text-muted-foreground block mb-1">Total upcoming required expenses</label>
         <input
-          type="number"
-          value={form.upcomingExpenses}
-          onChange={(e) => setForm((p) => ({ ...p, upcomingExpenses: Number(e.target.value) }))}
+          type="text"
+          inputMode="numeric"
+          value={formatCurrencyInput(form.upcomingExpenses)}
+          onChange={(e) => setForm((p) => ({ ...p, upcomingExpenses: parseCurrencyInput(e.target.value) }))}
           className="input-dark w-full"
         />
-        <button onClick={() => void handleSave()} className="btn-primary w-full mt-3">
-          {syncStatus === "saving" ? "Saving..." : "Save Log"}
-        </button>
       </CollapsibleSection>
 
-      <CollapsibleSection title="Debt Pressure" subtitle={`${weekly.debtPressure}/10 — $${weekly.debtBalance}`}>
+      <CollapsibleSection title="Debt Pressure" subtitle={`${weekly.debtPressure}/10 - ${formatCurrencyInput(weekly.debtBalance)}`}>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="text-[10px] uppercase text-muted-foreground block mb-1">Debt balance</label>
-            <input
-              type="number"
-              value={weekly.debtBalance}
-              onChange={(e) => updateWeekly({ debtBalance: Number(e.target.value) })}
-              className="input-dark w-full"
-            />
+            <CurrencyInput label="Debt balance" value={weekly.debtBalance} onChange={(value) => updateWeekly({ debtBalance: value })} />
           </div>
           <div>
             <label className="text-[10px] uppercase text-muted-foreground block mb-1">
@@ -473,6 +489,10 @@ Calculate my cash flow, savings rate, biggest leak, and give me a simple money s
           className="input-dark w-full min-h-[80px]"
         />
       </CollapsibleSection>
+
+      <button onClick={() => void handleSave()} className="btn-primary w-full">
+        {syncStatus === "saving" ? "Saving..." : "Save Log"}
+      </button>
 
       {!isSimple && (
         <AdvancedDetails title="Money Strategy (detailed log)">
@@ -532,5 +552,28 @@ Calculate my cash flow, savings rate, biggest leak, and give me a simple money s
 
       <ChatGPTPrompt title="Money Strategy" promptText={promptText} />
     </div>
+  );
+}
+
+function CurrencyInput({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <label className="block">
+      <span className="text-[10px] uppercase text-muted-foreground block mb-1">{label}</span>
+      <input
+        type="text"
+        inputMode="numeric"
+        value={formatCurrencyInput(value)}
+        onChange={(event) => onChange(parseCurrencyInput(event.target.value))}
+        className="input-dark w-full"
+      />
+    </label>
   );
 }

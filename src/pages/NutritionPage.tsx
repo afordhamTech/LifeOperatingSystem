@@ -36,6 +36,11 @@ import {
   NextActionCard,
   PageDecisionHeader,
 } from "@/components/ui-kit";
+import {
+  DEFAULT_MEAL_TEMPLATES,
+  chooseNextFoodFix,
+  type MealTemplate,
+} from "@/lib/nutrition-helpers";
 
 type NutritionForm = {
   bodyweight: number;
@@ -191,23 +196,18 @@ export default function NutritionPage() {
   const hour = new Date().getHours();
   const isEndOfDay = hour >= 20;
 
+  const mealTemplates: MealTemplate[] = DEFAULT_MEAL_TEMPLATES;
+  const foodFix = chooseNextFoodFix(mealTemplates, {
+    calories: caloriesRemaining,
+    proteinG: proteinRemaining,
+  });
   const nextFoodFix = !hasNutritionLogged
-    ? "Start with a whey smoothie + bagel (~40g protein, 600 cal)."
+    ? `Start with ${foodFix.label}.`
     : isEndOfDay && caloriesRemaining < 200 && proteinRemaining < 20
       ? "On target — keep current pace."
-      : isEndOfDay && caloriesRemaining < 200
-        ? "Peanut butter smoothie (~700 cal, 30g protein)."
-        : proteinRemaining > 50
-          ? "Whey smoothie + bagel (~40g protein, 600 cal)."
-          : caloriesRemaining > 1000
-            ? "Rice + chicken meal (~800 cal, 50g protein)."
-            : waterGlassesRemaining > 3
-              ? "Refill water bottle (target ~3.5–4.5L)."
-              : proteinRemaining > 25
-                ? "Protein shake (~25–30g protein)."
-                : caloriesRemaining < 200 && proteinRemaining < 20
-                  ? "On target — keep current pace."
-                  : "Light snack to round out remaining macros.";
+      : waterGlassesRemaining > 3
+        ? "Refill water bottle (target ~3.5–4.5L)."
+        : foodFix.label;
 
   const weightTrend = history
     .filter((row) => row.bodyweight != null)
@@ -313,20 +313,6 @@ export default function NutritionPage() {
 
   const waterRemaining = Math.max(0, 8 - form.waterOz);
 
-  type MealTemplate = {
-    name: string;
-    calories: number;
-    proteinG: number;
-    carbsG: number;
-    fatG: number;
-  };
-  const mealTemplates: MealTemplate[] = [
-    { name: "Whey smoothie + bagel", calories: 600, proteinG: 40, carbsG: 80, fatG: 12 },
-    { name: "Rice/chicken meal", calories: 800, proteinG: 50, carbsG: 90, fatG: 18 },
-    { name: "Protein shake", calories: 180, proteinG: 28, carbsG: 8, fatG: 3 },
-    { name: "Dining hall meal", calories: 750, proteinG: 35, carbsG: 85, fatG: 22 },
-    { name: "Peanut butter smoothie", calories: 700, proteinG: 30, carbsG: 70, fatG: 28 },
-  ];
   const addMealTemplate = (m: MealTemplate) => {
     setForm((p) => ({
       ...p,
@@ -507,9 +493,9 @@ export default function NutritionPage() {
                   }
                   className="input-dark w-full"
                 />
-                <div className="mt-1 h-1 bg-[#ece5da] rounded-full overflow-hidden">
+                <div className="mt-1 h-2 bg-[#ece5da] rounded-full overflow-hidden">
                   <div
-                    className="h-full bg-[#c39a4e] rounded-full transition-all"
+                    className={`h-full rounded-full transition-all ${form.calories >= targetCalories ? "bg-[#6a9a74]" : "bg-[#c39a4e]"}`}
                     style={{
                       width: `${Math.min(100, (form.calories / targetCalories) * 100)}%`,
                     }}
@@ -534,9 +520,9 @@ export default function NutritionPage() {
                   }
                   className="input-dark w-full"
                 />
-                <div className="mt-1 h-1 bg-[#ece5da] rounded-full overflow-hidden">
+                <div className="mt-1 h-2 bg-[#ece5da] rounded-full overflow-hidden">
                   <div
-                    className="h-full bg-[#6a9a74] rounded-full transition-all"
+                    className={`h-full rounded-full transition-all ${form.proteinG >= proteinTarget ? "bg-[#6a9a74]" : "bg-[#6b87ae]"}`}
                     style={{
                       width: `${Math.min(100, (form.proteinG / proteinTarget) * 100)}%`,
                     }}
@@ -577,30 +563,21 @@ export default function NutritionPage() {
                 <label className="text-[10px] uppercase text-[#6f685f] block mb-2">
                   Water Glasses
                 </label>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setForm((p) => ({ ...p, waterOz: Math.max(0, p.waterOz - 1) }))}
-                    className="p-1 bg-[#f0ebe2] rounded hover:bg-[#ebe4da] transition-colors"
-                  >
-                    <Minus size={14} />
-                  </button>
-                  <div className="flex gap-1 flex-1 justify-center">
-                    {Array.from({ length: 8 }).map((_, i) => (
+                <div className="flex gap-1">
+                  {Array.from({ length: 8 }).map((_, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => setForm((p) => ({ ...p, waterOz: i + 1 }))}
+                      className="rounded p-1 hover:bg-[#f0ebe2]"
+                      aria-label={`Set water to ${i + 1} glasses`}
+                    >
                       <Droplets
-                        key={i}
-                        size={16}
-                        className={
-                          i < form.waterOz ? "text-[#6b87ae]" : "text-white/[0.06]"
-                        }
+                        size={18}
+                        className={i < form.waterOz ? "text-[#6b87ae]" : "text-[#d8cdbd]"}
                       />
-                    ))}
-                  </div>
-                  <button
-                    onClick={() => setForm((p) => ({ ...p, waterOz: Math.min(8, p.waterOz + 1) }))}
-                    className="p-1 bg-[#f0ebe2] rounded hover:bg-[#ebe4da] transition-colors"
-                  >
-                    <Plus size={14} />
-                  </button>
+                    </button>
+                  ))}
                 </div>
                 <div className="mt-1 text-[10px] text-[#6f685f] text-center">
                   {waterRemaining} more glasses to hit the target
@@ -664,38 +641,6 @@ export default function NutritionPage() {
         </div>
 
         <div className="space-y-4">
-          <div className="card-surface p-4">
-            <h3 className="text-sm font-semibold text-[#25313c] mb-3">
-              FUEL STATUS
-            </h3>
-            <div className="grid grid-cols-2 gap-3 text-xs">
-              <StatusChip label="Calories" ok={currentStatus.caloriesHit} />
-              <StatusChip label="Protein" ok={currentStatus.proteinHit} />
-              <StatusChip label="Water" ok={currentStatus.waterHit} />
-              <StatusChip label="Meals" ok={currentStatus.timingOk} />
-            </div>
-            <div className="mt-3 text-sm text-[#6f685f]">
-              Checks: <span className="text-[#25313c]">{currentStatus.checks}/4</span>
-            </div>
-            <div className="mt-2 text-sm">
-              Status:{" "}
-              <span
-                className={
-                  !hasNutritionLogged
-                    ? "text-[#6f685f]"
-                    :
-                  currentStatus.status === "green"
-                    ? "text-[#6a9a74]"
-                    : currentStatus.status === "yellow"
-                      ? "text-[#c39a4e]"
-                      : "text-[#c97a73]"
-                }
-              >
-                {hasNutritionLogged ? visibleFuelStatus : "Not logged yet"}
-              </span>
-            </div>
-          </div>
-
           <div className="card-surface p-4">
             <h3 className="text-sm font-semibold text-[#25313c] mb-3">
               SAVE NUTRITION
@@ -788,20 +733,6 @@ export default function NutritionPage() {
           </div>
         </div>
       </div>
-    </div>
-  );
-}
-
-function StatusChip({ label, ok }: { label: string; ok: boolean }) {
-  return (
-    <div
-      className="flex items-center justify-between rounded px-3 py-2"
-      style={{ backgroundColor: ok ? "rgba(34,197,94,0.08)" : "rgba(239,68,68,0.08)" }}
-    >
-      <span className="text-[#6f685f]">{label}</span>
-      <span className={ok ? "text-[#6a9a74]" : "text-[#c97a73]"}>
-        {ok ? "Hit" : "Miss"}
-      </span>
     </div>
   );
 }

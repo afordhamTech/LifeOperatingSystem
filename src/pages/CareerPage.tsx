@@ -40,7 +40,6 @@ type ProofChecklist = {
   linkedinPost: boolean;
   githubPolished: boolean;
   interviewStory: boolean;
-  publicDemo: boolean;
 };
 
 const emptyChecklist: ProofChecklist = {
@@ -48,7 +47,6 @@ const emptyChecklist: ProofChecklist = {
   linkedinPost: false,
   githubPolished: false,
   interviewStory: false,
-  publicDemo: false,
 };
 
 function readChecklistMap(): Record<string, ProofChecklist> {
@@ -127,18 +125,25 @@ export default function CareerPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [checklistMap, setChecklistMap] = useState<Record<string, ProofChecklist>>(() => readChecklistMap());
 
-  const getChecklist = (id: string): ProofChecklist => ({
+  const getChecklist = (item: ProofItem): ProofChecklist => ({
     ...emptyChecklist,
-    ...(checklistMap[id] ?? {}),
+    ...(checklistMap[item.id] ?? {}),
+    ...(item.leverageChecklist ?? {}),
   });
 
-  const toggleChecklist = (id: string, field: keyof ProofChecklist) => {
+  const toggleChecklist = (item: ProofItem, field: keyof ProofChecklist) => {
+    const current = getChecklist(item);
+    const nextChecklist = { ...current, [field]: !current[field] };
     setChecklistMap((prev) => {
-      const current = prev[id] ?? emptyChecklist;
-      const next = { ...prev, [id]: { ...current, [field]: !current[field] } };
+      const next = { ...prev, [item.id]: nextChecklist };
       writeChecklistMap(next);
       return next;
     });
+    const updated = { ...item, leverageChecklist: nextChecklist };
+    const nextItems = items.map((currentItem) => (currentItem.id === item.id ? updated : currentItem));
+    setItems(nextItems);
+    writeLocalProofItems(nextItems);
+    void persistProofItem(updated, "Could not update leverage checklist.");
   };
 
   useEffect(() => {
@@ -314,7 +319,7 @@ export default function CareerPage() {
       : linkedInUpdates > 0
         ? "Post LinkedIn update about recent work"
         : "Start a new project to build proof";
-  const strongestChecklist = strongestProof ? getChecklist(strongestProof.id) : emptyChecklist;
+  const strongestChecklist = strongestProof ? getChecklist(strongestProof) : emptyChecklist;
   const strongestOutputCount = Object.values(strongestChecklist).filter(Boolean).length;
   const strongestReadiness =
     strongestOutputCount >= 4
@@ -500,6 +505,31 @@ Tell me what proof is strongest, what I should polish, what I should add to my r
       </div>
 
       <div className="card-surface p-4">
+        <h3 className="text-sm font-semibold text-[#25313c] mb-3">ACTIVE LEVERAGE PIPELINE</h3>
+        {items.length === 0 ? (
+          <div className="text-sm text-[#8c8478]">Add proof to generate leverage actions.</div>
+        ) : (
+          <div className="space-y-2">
+            {items.flatMap((item) => {
+              const checklist = getChecklist(item);
+              const needed = [
+                !checklist.resumeBullet ? "resume bullet needed" : null,
+                !checklist.linkedinPost ? "LinkedIn post needed" : null,
+                !checklist.githubPolished ? "GitHub polish needed" : null,
+                !checklist.interviewStory ? "interview story needed" : null,
+              ].filter(Boolean) as string[];
+              return needed.map((need) => (
+                <div key={`${item.id}-${need}`} className="flex items-center justify-between gap-3 rounded-md border border-[#e3d8c9] bg-[#fdfaf4] px-3 py-2 text-xs">
+                  <span className="text-[#25313c]">{item.projectName}</span>
+                  <span className="text-[#6f685f]">{need}</span>
+                </div>
+              ));
+            })}
+          </div>
+        )}
+      </div>
+
+      <div className="card-surface p-4">
         <h3 className="text-sm font-semibold text-[#25313c] mb-3">PROOF LIBRARY</h3>
         <div className="space-y-3">
           {items.map((project) => (
@@ -556,18 +586,17 @@ Tell me what proof is strongest, what I should polish, what I should add to my r
                 );
               })()}
               {(() => {
-                const cl = getChecklist(project.id);
+                const cl = getChecklist(project);
                 const items: Array<{ key: keyof ProofChecklist; label: string }> = [
                   { key: "resumeBullet", label: "Resume bullet created" },
                   { key: "linkedinPost", label: "LinkedIn update posted" },
                   { key: "githubPolished", label: "GitHub/readme polished" },
                   { key: "interviewStory", label: "Interview story ready" },
-                  { key: "publicDemo", label: "Public demo / screenshot ready" },
                 ];
                 return (
                   <div className="mt-2">
                     <div className="mb-1 text-[10px] uppercase tracking-wider text-[#8c8478]">
-                      Output checklist · local only
+                      Output checklist
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
                       {items.map(({ key, label }) => (
@@ -578,7 +607,7 @@ Tell me what proof is strongest, what I should polish, what I should add to my r
                           <input
                             type="checkbox"
                             checked={cl[key]}
-                            onChange={() => toggleChecklist(project.id, key)}
+                            onChange={() => toggleChecklist(project, key)}
                             className="h-3 w-3 accent-[#6a9a74]"
                           />
                           <span className={cl[key] ? "line-through text-[#8c8478]" : ""}>{label}</span>
@@ -588,21 +617,24 @@ Tell me what proof is strongest, what I should polish, what I should add to my r
                   </div>
                 );
               })()}
-              <div className="grid grid-cols-4 gap-2 mt-2">
+              <div className="grid grid-cols-4 gap-2 mt-3">
                 {[
                   { label: "Showability", value: project.visibility ?? 0 },
                   { label: "Difficulty", value: project.difficulty ?? 0 },
                   { label: "Direction fit", value: project.relevance ?? 0 },
                   { label: "Completion", value: project.completion ?? 0 },
                 ].map((item) => (
-                  <div key={item.label}>
-                    <div className="text-[9px] text-[#6f685f]">{item.label}</div>
-                    <div className="h-1 bg-[#ece5da] rounded-full mt-0.5 overflow-hidden">
-                      <div
-                        className="h-full bg-[#9a7bbd] rounded-full"
-                        style={{ width: `${(item.value / 10) * 100}%` }}
-                      />
+                  <div key={item.label} className="text-center">
+                    <div
+                      className={`mx-auto flex h-10 w-10 items-center justify-center rounded-full border text-xs font-semibold ${
+                        item.value >= 8
+                          ? "border-[#6a9a74]/30 bg-[#6a9a74]/10 text-[#4f7f58]"
+                          : "border-[#ddd4c6] bg-white text-[#6f685f]"
+                      }`}
+                    >
+                      {item.value}
                     </div>
+                    <div className="mt-1 text-[9px] text-[#6f685f]">{item.label}</div>
                   </div>
                 ))}
               </div>

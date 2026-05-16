@@ -13,10 +13,10 @@ import {
 import { BookOpen, PenLine, MessageSquare, Lightbulb } from "lucide-react";
 import {
   CollapsibleSection,
-  NextActionCard,
   PageDecisionHeader,
   StatusPill,
 } from "@/components/ui-kit";
+import { calculateLearningDepthScore } from "@/lib/learning-depth";
 
 const STORAGE_KEY = "lifeee.substance_logs.v1";
 
@@ -29,6 +29,11 @@ function defaultSubstanceEntry(date: string): SubstanceEntry {
     flashcardsMade: 0,
     conversationPractice: false,
     newConcept: "",
+    whyItMatters: "",
+    example: "",
+    myOpinion: "",
+    conversationAngle: "",
+    connectionToAnotherField: "",
     questionOfDay: "",
     writingPractice: false,
     speakingPractice: false,
@@ -59,6 +64,11 @@ function serializeSubstanceEntry(entry: SubstanceEntry) {
     flashcardsMade: entry.flashcardsMade,
     conversationPractice: entry.conversationPractice,
     newConcept: entry.newConcept,
+    whyItMatters: entry.whyItMatters,
+    example: entry.example,
+    myOpinion: entry.myOpinion,
+    conversationAngle: entry.conversationAngle,
+    connectionToAnotherField: entry.connectionToAnotherField,
     questionOfDay: entry.questionOfDay,
     writingPractice: entry.writingPractice,
     speakingPractice: entry.speakingPractice,
@@ -73,6 +83,11 @@ function hasMeaningfulSubstanceDraft(entry: SubstanceEntry) {
     entry.flashcardsMade > 0 ||
     entry.conversationPractice ||
     Boolean(entry.newConcept.trim()) ||
+    Boolean(entry.whyItMatters?.trim()) ||
+    Boolean(entry.example?.trim()) ||
+    Boolean(entry.myOpinion?.trim()) ||
+    Boolean(entry.conversationAngle?.trim()) ||
+    Boolean(entry.connectionToAnotherField?.trim()) ||
     Boolean(entry.questionOfDay.trim()) ||
     entry.writingPractice ||
     entry.speakingPractice
@@ -178,13 +193,14 @@ export default function SubstancePage() {
     };
   }, [hasSupabaseConfig, sessionLoading, today, userId, weekStartKey]);
 
-  const score = calcSubstanceScore(
-    form.readingDone,
-    form.notesTaken,
-    form.writingPractice,
-    form.speakingPractice,
-    form.newConcept,
-  );
+  const depthScore = calculateLearningDepthScore({
+    coreIdea: form.newConcept,
+    question: form.questionOfDay,
+    writingPractice: form.writingPractice,
+    speakingPractice: form.speakingPractice,
+    conversationPractice: form.conversationPractice,
+  });
+  const score = depthScore / 100;
 
   const handleSave = async () => {
     if (conflict) {
@@ -256,6 +272,9 @@ Topic: ${form.topicStudied || "—"}
 Reading: ${form.readingDone || "—"}
 Notes: ${form.notesTaken || "—"}
 New concept: ${form.newConcept || "—"}
+Why it matters: ${form.whyItMatters || "—"}
+Example: ${form.example || "—"}
+My opinion: ${form.myOpinion || "—"}
 Question of the day: ${form.questionOfDay || "—"}
 Writing practice: ${form.writingPractice ? "Yes" : "No"}
 Speaking practice: ${form.speakingPractice ? "Yes" : "No"}
@@ -296,50 +315,19 @@ Turn this into a deeper explanation, 5 talking points, and 3 questions I could u
         ) : null}
       </div>
 
-      <div className="grid gap-3 md:grid-cols-4">
-        <NextActionCard
-          label="Topic"
-          title={form.topicStudied || "Choose one thing to understand"}
-          detail="Keep it narrow enough to explain today."
-          tone="calm"
-        />
-        <NextActionCard
-          label="One idea"
-          title={form.newConcept || "Capture the core idea"}
-          detail="One idea beats a pile of unprocessed notes."
-          tone="calm"
-        />
-        <NextActionCard
-          label="One question"
-          title={form.questionOfDay || "Ask the useful question"}
-          detail="Questions reveal whether the idea is actually understood."
-          tone="calm"
-        />
-        <NextActionCard
-          label="Conversation angle"
-          title={form.conversationPractice ? "Practice it out loud" : "Find a way to explain it"}
-          detail="If you can explain it, you can use it."
-          tone="calm"
-        />
-      </div>
-
-      <div className="card-surface p-4">
-        <h3 className="text-sm font-semibold text-[#25313c] mb-3">IDEA CARD</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-          <IdeaField label="Topic" value={form.topicStudied || "Choose one topic."} />
-          <IdeaField label="Core idea" value={form.newConcept || "Write the idea in one sentence."} />
-          <IdeaField label="Why it matters" value={form.notesTaken || "Connect it to a decision, problem, or person."} />
-          <IdeaField label="Example" value="Add one concrete example in Notes taken." />
-          <IdeaField label="My opinion" value="State whether you agree, doubt it, or need more evidence." />
-          <IdeaField label="Question" value={form.questionOfDay || "What would change your mind?"} />
-          <IdeaField label="Connection to another field" value="Link it to health, money, school, faith, or work." />
+      <CollapsibleSection title="Learning Principles">
+        <div className="grid gap-2 text-sm text-[#6f685f] md:grid-cols-2">
+          <div>Keep the topic narrow enough to explain today.</div>
+          <div>One core idea beats a pile of unprocessed notes.</div>
+          <div>Questions reveal whether the idea is actually understood.</div>
+          <div>If you can explain it, you can use it.</div>
         </div>
-      </div>
+      </CollapsibleSection>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 card-surface p-4">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <h3 className="text-sm font-semibold text-[#25313c]">LEARNING LOG</h3>
+            <h3 className="text-sm font-semibold text-[#25313c]">IDEA + LEARNING LOG</h3>
             <span className="text-[10px] text-[#6a9a74]">
               Topic studied and notes taken save.
             </span>
@@ -366,20 +354,38 @@ Turn this into a deeper explanation, 5 talking points, and 3 questions I could u
               />
             </label>
             <label className="block md:col-span-2">
-              <span className="mb-1 block text-[10px] uppercase text-[#6f685f]">Notes taken</span>
+              <span className="mb-1 block text-[10px] uppercase text-[#6f685f]">Core idea</span>
               <textarea
-                placeholder="What mattered?"
-                value={form.notesTaken}
-                onChange={(e) => setForm((p) => ({ ...p, notesTaken: e.target.value }))}
+                placeholder="Write the idea in one sentence"
+                value={form.newConcept}
+                onChange={(e) => setForm((p) => ({ ...p, newConcept: e.target.value }))}
                 className="input-dark h-16 resize-none w-full"
               />
             </label>
             <label className="block">
-              <span className="mb-1 block text-[10px] uppercase text-[#6f685f]">New concept learned</span>
+              <span className="mb-1 block text-[10px] uppercase text-[#6f685f]">Why it matters</span>
               <textarea
-                placeholder="Core idea"
-                value={form.newConcept}
-                onChange={(e) => setForm((p) => ({ ...p, newConcept: e.target.value }))}
+                placeholder="Connect it to a decision, problem, or person"
+                value={form.whyItMatters ?? ""}
+                onChange={(e) => setForm((p) => ({ ...p, whyItMatters: e.target.value }))}
+                className="input-dark h-16 resize-none w-full"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-[10px] uppercase text-[#6f685f]">Example</span>
+              <textarea
+                placeholder="Concrete example"
+                value={form.example ?? ""}
+                onChange={(e) => setForm((p) => ({ ...p, example: e.target.value }))}
+                className="input-dark h-16 resize-none w-full"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-[10px] uppercase text-[#6f685f]">My opinion</span>
+              <textarea
+                placeholder="Agree, doubt, or refine"
+                value={form.myOpinion ?? ""}
+                onChange={(e) => setForm((p) => ({ ...p, myOpinion: e.target.value }))}
                 className="input-dark h-16 resize-none w-full"
               />
             </label>
@@ -389,6 +395,33 @@ Turn this into a deeper explanation, 5 talking points, and 3 questions I could u
                 placeholder="Question worth asking"
                 value={form.questionOfDay}
                 onChange={(e) => setForm((p) => ({ ...p, questionOfDay: e.target.value }))}
+                className="input-dark h-16 resize-none w-full"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-[10px] uppercase text-[#6f685f]">Conversation angle</span>
+              <textarea
+                placeholder="How to bring this up naturally"
+                value={form.conversationAngle ?? ""}
+                onChange={(e) => setForm((p) => ({ ...p, conversationAngle: e.target.value }))}
+                className="input-dark h-16 resize-none w-full"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-[10px] uppercase text-[#6f685f]">Connection to another field</span>
+              <textarea
+                placeholder="Connect to health, school, faith, money, or work"
+                value={form.connectionToAnotherField ?? ""}
+                onChange={(e) => setForm((p) => ({ ...p, connectionToAnotherField: e.target.value }))}
+                className="input-dark h-16 resize-none w-full"
+              />
+            </label>
+            <label className="block md:col-span-2">
+              <span className="mb-1 block text-[10px] uppercase text-[#6f685f]">Notes / reading synthesis</span>
+              <textarea
+                placeholder="Useful context, quotes in your own words, or links"
+                value={form.notesTaken}
+                onChange={(e) => setForm((p) => ({ ...p, notesTaken: e.target.value }))}
                 className="input-dark h-16 resize-none w-full"
               />
             </label>
@@ -439,11 +472,16 @@ Turn this into a deeper explanation, 5 talking points, and 3 questions I could u
         <div className="space-y-4">
           <div className="card-surface p-4 text-center">
             <h3 className="text-sm font-semibold text-[#25313c] mb-3">LEARNING DEPTH</h3>
-            <div className="text-4xl font-bold text-[#c39a4e]">{(score * 100).toFixed(0)}%</div>
-            <div className="text-xs text-[#6f685f] mt-1">
-              {score >= 0.8 ? "Deep thinker" : score >= 0.5 ? "Building" : "Start reading"}
+            <div
+              className="text-4xl font-bold transition-colors"
+              style={{ color: depthScore >= 80 ? "#6a9a74" : depthScore >= 50 ? "#c39a4e" : "#c97a73" }}
+            >
+              {depthScore}%
             </div>
-            <StatusPill tone={score >= 0.8 ? "good" : score >= 0.5 ? "warning" : "neutral"} className="mt-2">
+            <div className="text-xs text-[#6f685f] mt-1">
+              {depthScore >= 80 ? "Deep thinker" : depthScore >= 50 ? "Building" : "Start reading"}
+            </div>
+            <StatusPill tone={depthScore >= 80 ? "good" : depthScore >= 50 ? "warning" : "neutral"} className="mt-2">
               Next: explain one idea
             </StatusPill>
           </div>
@@ -451,11 +489,11 @@ Turn this into a deeper explanation, 5 talking points, and 3 questions I could u
           <CollapsibleSection title="How this score is calculated">
             <h3 className="text-sm font-semibold text-[#25313c] mb-2">FACTORS</h3>
             <div className="space-y-2">
-              <FactorBar label="Reading" value={form.readingDone ? 25 : 0} max={25} icon={<BookOpen size={12} />} />
-              <FactorBar label="Reflection" value={form.notesTaken ? 25 : 0} max={25} icon={<Lightbulb size={12} />} />
+              <FactorBar label="Core idea" value={form.newConcept ? 20 : 0} max={20} icon={<BookOpen size={12} />} />
+              <FactorBar label="Question" value={form.questionOfDay ? 20 : 0} max={20} icon={<Lightbulb size={12} />} />
               <FactorBar label="Writing" value={form.writingPractice ? 20 : 0} max={20} icon={<PenLine size={12} />} />
               <FactorBar label="Speaking" value={form.speakingPractice ? 20 : 0} max={20} icon={<MessageSquare size={12} />} />
-              <FactorBar label="New Ideas" value={form.newConcept ? 10 : 0} max={10} icon={<Lightbulb size={12} />} />
+              <FactorBar label="Conversation" value={form.conversationPractice ? 20 : 0} max={20} icon={<MessageSquare size={12} />} />
             </div>
           </CollapsibleSection>
 
@@ -496,15 +534,6 @@ function FactorBar({ label, value, max, icon }: { label: string; value: number; 
         <div className="h-full bg-[#c39a4e] rounded-full" style={{ width: `${(value / max) * 100}%` }} />
       </div>
       <span className="font-mono-data text-[10px] text-[#6f685f] w-6">{value}%</span>
-    </div>
-  );
-}
-
-function IdeaField({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border border-[#e3d8c9] bg-[#fdfaf4] p-3">
-      <div className="text-[10px] uppercase tracking-wider text-[#6f685f]">{label}</div>
-      <div className="mt-1 text-sm text-[#25313c]">{value}</div>
     </div>
   );
 }

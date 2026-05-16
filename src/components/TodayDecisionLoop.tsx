@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   ArrowRight,
@@ -59,6 +59,29 @@ export type TodayDecisionLoopProps = {
 };
 
 const QUICK_TYPES: TaskType[] = ["Academic", "Career", "Household", "Personal"];
+const DASHBOARD_DRAFT_KEY = "lifeee.dashboard.draft.v1";
+
+function readDashboardDraft() {
+  if (typeof window === "undefined") return { captureTitle: "", captureType: "Personal" as TaskType, planNoteDraft: "" };
+  try {
+    const raw = window.localStorage.getItem(DASHBOARD_DRAFT_KEY);
+    if (!raw) return { captureTitle: "", captureType: "Personal" as TaskType, planNoteDraft: "" };
+    const parsed = JSON.parse(raw) as Partial<{
+      captureTitle: string;
+      captureType: TaskType;
+      planNoteDraft: string;
+    }>;
+    return {
+      captureTitle: parsed.captureTitle ?? "",
+      captureType: TASK_TYPES.includes(parsed.captureType as TaskType)
+        ? (parsed.captureType as TaskType)
+        : "Personal",
+      planNoteDraft: parsed.planNoteDraft ?? "",
+    };
+  } catch {
+    return { captureTitle: "", captureType: "Personal" as TaskType, planNoteDraft: "" };
+  }
+}
 
 const TRUST_KIND_STYLE: Record<TrustProtector["kind"], { label: string; color: string }> = {
   overdue: { label: "Overdue", color: "text-rose-700 bg-rose-100 border-rose-200" },
@@ -107,25 +130,41 @@ export default function TodayDecisionLoop({
     [tasks, anchors, today, currentEnergy, decisions],
   );
 
-  const [captureTitle, setCaptureTitle] = useState("");
-  const [captureType, setCaptureType] = useState<TaskType>("Personal");
+  const localDraft = useMemo(readDashboardDraft, []);
+  const [captureTitle, setCaptureTitle] = useState(localDraft.captureTitle);
+  const [captureType, setCaptureType] = useState<TaskType>(localDraft.captureType);
   const [captureSyncStatus, setCaptureSyncStatus] = useState<LifeeeSyncStatus>("local");
   const [captureError, setCaptureError] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const captureSeqRef = useRef(0);
   const draftPlanNoteRef = useRef(planNotes);
-  const [planNoteDraft, setPlanNoteDraft] = useState(planNotes);
+  const [planNoteDraft, setPlanNoteDraft] = useState(localDraft.planNoteDraft || planNotes);
   const [logFormTaskId, setLogFormTaskId] = useState<string | null>(null);
   const [logFormReviewDate, setLogFormReviewDate] = useState<string>("");
   const [loggedIgnoreIds, setLoggedIgnoreIds] = useState<Set<string>>(() => new Set());
   const [logSyncStatus, setLogSyncStatus] = useState<LifeeeSyncStatus>("local");
   const [logError, setLogError] = useState<string | null>(null);
+  const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
 
   if (draftPlanNoteRef.current !== planNotes) {
     draftPlanNoteRef.current = planNotes;
     // Stay in sync if the parent reloads notes from Supabase.
-    if (planNoteDraft !== planNotes) setPlanNoteDraft(planNotes);
+    if (planNotes && planNoteDraft !== planNotes) setPlanNoteDraft(planNotes);
   }
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(
+      DASHBOARD_DRAFT_KEY,
+      JSON.stringify({ captureTitle, captureType, planNoteDraft }),
+    );
+  }, [captureTitle, captureType, planNoteDraft]);
+
+  useEffect(() => {
+    const onEscape = () => setLogFormTaskId(null);
+    window.addEventListener("lifeee:escape", onEscape);
+    return () => window.removeEventListener("lifeee:escape", onEscape);
+  }, []);
 
   const visibleCaptureStatus: LifeeeSyncStatus = sessionLoading
     ? "loading"
@@ -184,6 +223,17 @@ export default function TodayDecisionLoop({
     await persistTask(task, "create");
   };
 
+  const handleCaptureKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Enter" && (event.metaKey || event.ctrlKey || !event.shiftKey)) {
+      event.preventDefault();
+      void captureNow();
+    }
+    if (event.key === "Escape") {
+      event.currentTarget.blur();
+      setLogFormTaskId(null);
+    }
+  };
+
   const moveTo = async (task: Task, target: "today" | "ignore" | "complete" | "this_week") => {
     let next: Task = task;
     if (target === "today") {
@@ -196,6 +246,13 @@ export default function TodayDecisionLoop({
       next = completeTask(task);
     }
     await persistTask(next, "update");
+  };
+
+  const dropTaskTo = (target: "today" | "ignore") => {
+    const task = tasks.find((item) => item.id === draggedTaskId);
+    setDraggedTaskId(null);
+    if (!task) return;
+    void moveTo(task, target);
   };
 
   const commitPlanNote = () => {
@@ -278,18 +335,14 @@ export default function TodayDecisionLoop({
         </div>
         <div className="flex flex-wrap gap-2">
           <input
+            data-lifeee-capture-input="true"
             value={captureTitle}
             onChange={(event) => setCaptureTitle(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                void captureNow();
-              }
-            }}
+            onKeyDown={handleCaptureKeyDown}
             placeholder={
               isAdvanced ? "What just came up? (saved to universal_tasks)" : "What just came up?"
             }
-            className="flex-1 min-w-[200px] rounded-md border border-[#ddd4c6] bg-white px-3 py-2 text-sm"
+            className="flex-1 min-w-[200px] rounded-md border border-[#b9a98f] bg-[#fffdf8] px-3 py-2 text-sm shadow-inner outline-none transition focus:border-[#6b87ae] focus:ring-2 focus:ring-[#6b87ae]/20"
           />
           <select
             value={captureType}
@@ -367,14 +420,20 @@ export default function TodayDecisionLoop({
         <DecisionListPanel
           icon={<Inbox size={12} className="text-[#c39a4e]" />}
           title="Inbox candidates"
-          emptyHint="Inbox is clear. Add anything new in the capture box above."
+          emptyHint="Inbox is clear. Press c to capture the next item."
         >
           {summary.inboxCandidates.length === 0 ? null : (
             <ul className="space-y-1.5">
               {summary.inboxCandidates.map((task) => (
                 <li
                   key={task.id}
-                  className="rounded-md border border-[#ece5da] bg-white/80 p-2 text-xs"
+                  draggable
+                  onDragStart={(event) => {
+                    event.dataTransfer.setData("text/plain", task.id);
+                    setDraggedTaskId(task.id);
+                  }}
+                  onDragEnd={() => setDraggedTaskId(null)}
+                  className="cursor-grab rounded-md border border-[#ece5da] bg-white/80 p-2 text-xs active:cursor-grabbing"
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="text-sm text-[#25313c] truncate">{task.title}</span>
@@ -424,6 +483,8 @@ export default function TodayDecisionLoop({
           icon={<CalendarClock size={12} className="text-[#6b87ae]" />}
           title="Committed today"
           emptyHint="Nothing committed for today yet. Move an inbox candidate into Today."
+          dropLabel="Drop inbox task here to commit it today."
+          onDropTask={() => dropTaskTo("today")}
         >
           {summary.todayCommitted.length === 0 ? null : (
             <ul className="space-y-1.5">
@@ -469,6 +530,8 @@ export default function TodayDecisionLoop({
               ? "Mark items as Ignore Today to clear noise without losing them."
               : "Hide items for today to clear noise without losing them."
           }
+          dropLabel="Drop inbox task here to hide it for today."
+          onDropTask={() => dropTaskTo("ignore")}
         >
           {summary.ignoredToday.length === 0 ? null : (
             <ul className="space-y-1.5">
@@ -599,22 +662,38 @@ function DecisionListPanel({
   icon,
   title,
   emptyHint,
+  dropLabel,
+  onDropTask,
   children,
 }: {
   icon: React.ReactNode;
   title: string;
   emptyHint: string;
+  dropLabel?: string;
+  onDropTask?: () => void;
   children: React.ReactNode;
 }) {
   const isEmpty = !children;
   return (
-    <div className="rounded-xl border border-[#ddd4c6] bg-white/60 p-3">
+    <div
+      onDragOver={(event) => {
+        if (!onDropTask) return;
+        event.preventDefault();
+      }}
+      onDrop={(event) => {
+        if (!onDropTask) return;
+        event.preventDefault();
+        onDropTask();
+      }}
+      className="rounded-xl border border-[#ddd4c6] bg-white/60 p-3 transition-colors hover:bg-white/75"
+    >
       <div className="flex items-center gap-2 mb-2">
         {icon}
         <div className="text-[11px] uppercase tracking-wider text-[#6f685f] font-semibold">
           {title}
         </div>
       </div>
+      {dropLabel ? <div className="mb-2 text-[10px] text-[#8c8478]">{dropLabel}</div> : null}
       {isEmpty ? <div className="text-xs text-[#9b938a]">{emptyHint}</div> : children}
     </div>
   );

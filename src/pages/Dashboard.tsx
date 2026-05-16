@@ -980,7 +980,11 @@ export default function Dashboard() {
             reason={`${nowNextLater.next.block.start_time}–${nowNextLater.next.block.end_time}`}
           />
         ) : (
-          <InsightCard label="Next" interpretation="Nothing else scheduled." />
+          <InsightCard
+            label="Next"
+            interpretation="No next block yet. Plan your day or import a schedule."
+            nextAction={<Link to="/calendar">Open Calendar</Link>}
+          />
         )}
         <InsightCard
           label="Later"
@@ -1330,7 +1334,9 @@ export default function Dashboard() {
           <DayPlanCard label="Should Do 2" tasks={dayPlan.shouldDo.slice(1, 2)} accent="#c39a4e" />
           <DayPlanCard label="Maintenance" tasks={dayPlan.maintenance} accent="#6f685f" />
           <DayPlanCard label="Quick Win" tasks={dayPlan.quickWins} accent="#6a9a74" />
-          <DayPlanCard label="Hidden for Today" tasks={dayPlan.ignoreToday} accent="#9b938a" muted />
+          {dayPlan.ignoreToday.length > 0 ? (
+            <DayPlanCard label="Hidden for Today" tasks={dayPlan.ignoreToday} accent="#9b938a" muted />
+          ) : null}
         </div>
       </div>
 
@@ -1933,7 +1939,9 @@ function DayPlanCard({
         {label}
       </div>
       {tasks.length === 0 ? (
-        <div className="mt-1 text-xs text-[#9b938a]">Empty.</div>
+        <div className="mt-1 text-xs text-[#9b938a]">
+          Add or move a task when this role matters today.
+        </div>
       ) : (
         <ul className="mt-1 space-y-1 text-sm text-[#25313c]">
           {tasks.slice(0, 3).map((t) => (
