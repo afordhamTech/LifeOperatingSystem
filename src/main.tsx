@@ -5,6 +5,7 @@ import './index.css'
 import { TRPCProvider } from "@/providers/trpc"
 import { ThemeProvider } from "@/components/theme-provider"
 import { UIModeProvider } from "@/providers/UIModeContext"
+import { Toaster } from "@/components/ui/sonner"
 import App from './App.tsx'
 
 createRoot(document.getElementById('root')!).render(
@@ -14,6 +15,7 @@ createRoot(document.getElementById('root')!).render(
         <BrowserRouter>
           <TRPCProvider>
             <App />
+            <Toaster />
           </TRPCProvider>
         </BrowserRouter>
       </UIModeProvider>

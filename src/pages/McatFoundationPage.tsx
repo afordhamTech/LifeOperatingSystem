@@ -1467,11 +1467,13 @@ export default function McatFoundationPage() {
                     setErrorForm((current) => ({ ...current, topicId: event.target.value }))
                   }
                 >
-                  {state.topics.map((topic) => (
-                    <option key={topic.id} value={topic.id}>
-                      {topic.title}
-                    </option>
-                  ))}
+                  {[...state.topics]
+                    .sort((a, b) => a.title.localeCompare(b.title))
+                    .map((topic) => (
+                      <option key={topic.id} value={topic.id}>
+                        {topic.title}
+                      </option>
+                    ))}
                 </select>
                 <select
                   className="input-dark w-full"
