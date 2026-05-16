@@ -78,6 +78,8 @@ import {
 import {
   MCAT_PHASE_0_TEMPLATE,
   MCAT_PHASE_0_TEMPLATE_KEY,
+  MCAT_PHASE_REGISTRY,
+  MCAT_PREP_SYSTEM_TAGLINE,
   MCAT_PHASE_0_SOURCE,
   getMcatPhase0TaskForDate,
   summarizeMcatPhase0SeedStatus,
@@ -85,8 +87,11 @@ import {
   type McatPhase0SeedSummary,
 } from "@/lib/mcat-phase-0-template";
 import {
+  createMcatPlanInstance,
+  fetchActiveMcatPlanInstance,
   fetchUniversalTasksByTemplate,
   upsertUniversalTask,
+  type McatPlanInstance,
 } from "@/lib/lifeee-persistence";
 import { loadTasks, makeTask, saveTasks, type Task } from "@/lib/task-system";
 import { supabase } from "@/lib/supabase-client";
@@ -288,6 +293,66 @@ function topicRecommendationReason(topic: McatTopic | null) {
   return `${topic.unit} is useful enough to keep warm without overbuilding analytics.`;
 }
 
+function McatRoadmapCard() {
+  return (
+    <section className="card-surface p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 className="text-sm font-semibold text-foreground">MCAT Roadmap</h2>
+        <span className="rounded-full border border-border bg-muted/40 px-2 py-0.5 text-[11px] text-muted-foreground">
+          Phase 0 active · later phases locked
+        </span>
+      </div>
+      <p className="mt-2 text-xs text-muted-foreground">
+        Dedicated MCAT prep system. Phase 0 builds the foundation; later phases unlock
+        after the Phase 0 checkpoint.
+      </p>
+      <ul className="mt-3 grid gap-2 sm:grid-cols-2">
+        {MCAT_PHASE_REGISTRY.map((phase) => {
+          const isActive = phase.status === "active";
+          return (
+            <li
+              key={phase.template_key}
+              className={cn(
+                "rounded-md border p-3",
+                isActive
+                  ? "border-primary/40 bg-primary/5"
+                  : "border-border bg-muted/30",
+              )}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-sm font-semibold text-foreground">
+                  {phase.phase_name}
+                </div>
+                <span
+                  className={cn(
+                    "rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+                    isActive
+                      ? "bg-primary text-primary-foreground"
+                      : "border border-border bg-background text-muted-foreground",
+                  )}
+                >
+                  {isActive ? "Active · Seedable" : "Locked"}
+                </span>
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">{phase.purpose}</p>
+              {!phase.can_seed ? (
+                <p className="mt-1 text-[11px] italic text-muted-foreground">
+                  {phase.unlock_hint ?? "Locked until Phase 0 checkpoint."}
+                </p>
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
+      <div className="mt-3 rounded-md border border-dashed border-border bg-background/40 p-3 text-xs text-muted-foreground">
+        Phase 0 checkpoint unlocks next-phase planning. Lifeee will use completed hours,
+        CARS passages, error-log entries, flashcards, and topic status to recommend the
+        next phase — not implemented yet.
+      </div>
+    </section>
+  );
+}
+
 function McatPhase0ScheduleCard({
   summary,
   seedStatus,
@@ -298,6 +363,8 @@ function McatPhase0ScheduleCard({
   sessionLoading,
   todayPreviewTitle,
   todaySeededTask,
+  activePlan,
+  todayKey,
   onSeed,
 }: {
   summary: McatPhase0SeedSummary;
@@ -309,6 +376,8 @@ function McatPhase0ScheduleCard({
   sessionLoading: boolean;
   todayPreviewTitle: string | null;
   todaySeededTask: Task | null;
+  activePlan: McatPlanInstance | null;
+  todayKey: string;
   onSeed: () => void;
 }) {
   const authMessage = !hasSupabaseConfig
@@ -343,9 +412,20 @@ function McatPhase0ScheduleCard({
               {summary.statusLabel}
             </span>
           </div>
-          <p className="mt-2 text-sm text-muted-foreground">
-            May 4 → July 12 · 78 total hours · {MCAT_PHASE_0_TEMPLATE.phase_name}
+          <p className="mt-1 text-xs text-muted-foreground" data-phase-count={MCAT_PHASE_REGISTRY.length}>
+            Phase 0 of the MCAT prep system · later phases add on top
           </p>
+          <p className="mt-2 text-sm text-muted-foreground">
+            {activePlan
+              ? `${activePlan.seed_start_date} → ${activePlan.seed_end_date} · 78 total hours · ${activePlan.phase_name}`
+              : `Starts today when seeded · 70 days · 78 total hours · ${MCAT_PHASE_0_TEMPLATE.phase_name}`}
+          </p>
+          <p className="mt-1 text-xs italic text-muted-foreground">{MCAT_PREP_SYSTEM_TAGLINE}</p>
+          {!activePlan ? (
+            <p className="mt-1 text-xs text-muted-foreground">
+              Week 1 begins on {todayKey}.
+            </p>
+          ) : null}
           <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
             <MiniMetric
               label="Current week"
@@ -366,9 +446,11 @@ function McatPhase0ScheduleCard({
           <div className="mt-3 text-xs text-muted-foreground">
             {todaySeededTask
               ? `Today's seeded task: ${todaySeededTask.task_code} · ${todaySeededTask.title}`
-              : todayPreviewTitle
-                ? `Today's planned task: ${todayPreviewTitle}`
-                : "No Phase 0 task is due today."}
+              : !activePlan && todayPreviewTitle
+                ? `Today's preview task if seeded now: ${todayPreviewTitle}`
+                : todayPreviewTitle
+                  ? `Today's planned task: ${todayPreviewTitle}`
+                  : "No Phase 0 task is due today."}
           </div>
         </div>
 
@@ -443,6 +525,7 @@ export default function McatFoundationPage() {
   const [syncStatus, setSyncStatus] = useState<McatSyncStatus>("local");
   const [syncError, setSyncError] = useState<string | null>(null);
   const [seededPhaseTasks, setSeededPhaseTasks] = useState<Task[]>([]);
+  const [activePhase0Plan, setActivePhase0Plan] = useState<McatPlanInstance | null>(null);
   const [phaseSeedStatus, setPhaseSeedStatus] = useState<McatPhaseSeedStatus>("idle");
   const [phaseSeedMessage, setPhaseSeedMessage] = useState<string | null>(null);
   const [phaseSeedError, setPhaseSeedError] = useState<string | null>(null);
@@ -595,6 +678,7 @@ export default function McatFoundationPage() {
       if (sessionLoading) return;
       if (!supabase || !hasSupabaseConfig || !userId) {
         setSeededPhaseTasks([]);
+        setActivePhase0Plan(null);
         setPhaseSeedStatus("idle");
         setPhaseSeedError(null);
         return;
@@ -603,13 +687,20 @@ export default function McatFoundationPage() {
       setPhaseSeedStatus("loading");
       setPhaseSeedError(null);
       try {
-        const tasks = await fetchUniversalTasksByTemplate({
-          userId,
-          source: MCAT_PHASE_0_SOURCE,
-          templateKey: MCAT_PHASE_0_TEMPLATE_KEY,
-        });
+        const [tasks, plan] = await Promise.all([
+          fetchUniversalTasksByTemplate({
+            userId,
+            source: MCAT_PHASE_0_SOURCE,
+            templateKey: MCAT_PHASE_0_TEMPLATE_KEY,
+          }),
+          fetchActiveMcatPlanInstance({
+            userId,
+            templateKey: MCAT_PHASE_0_TEMPLATE_KEY,
+          }),
+        ]);
         if (!active) return;
         setSeededPhaseTasks(sortTemplateTasks(tasks));
+        setActivePhase0Plan(plan);
         setPhaseSeedStatus("saved");
       } catch (error) {
         if (!active) return;
@@ -922,13 +1013,21 @@ export default function McatFoundationPage() {
     });
   };
 
+  const effectiveSeedStartDate = activePhase0Plan?.seed_start_date ?? todayKey;
   const phase0SeedSummary = useMemo(
-    () => summarizeMcatPhase0SeedStatus(seededPhaseTasks, { today: todayKey }),
-    [seededPhaseTasks],
+    () =>
+      summarizeMcatPhase0SeedStatus(seededPhaseTasks, effectiveSeedStartDate, {
+        today: todayKey,
+      }),
+    [seededPhaseTasks, effectiveSeedStartDate],
   );
   const todayPhase0Preview = useMemo(
-    () => getMcatPhase0TaskForDate(todayKey, { today: todayKey }),
-    [],
+    () =>
+      getMcatPhase0TaskForDate(effectiveSeedStartDate, todayKey, {
+        today: todayKey,
+        planInstanceId: activePhase0Plan?.id ?? null,
+      }),
+    [effectiveSeedStartDate, activePhase0Plan?.id],
   );
   const todaySeededTask = useMemo(
     () => seededPhaseTasks.find((task) => task.due_date === todayKey) ?? null,
@@ -947,12 +1046,35 @@ export default function McatFoundationPage() {
     setPhaseSeedError(null);
 
     try {
+      let plan = activePhase0Plan;
+      if (!plan) {
+        const seedStartDate = todayKey;
+        const seedStart = new Date(`${seedStartDate}T00:00:00Z`);
+        const seedEnd = new Date(seedStart.getTime() + 69 * 24 * 60 * 60 * 1000);
+        const seedEndDate = `${seedEnd.getUTCFullYear()}-${String(
+          seedEnd.getUTCMonth() + 1,
+        ).padStart(2, "0")}-${String(seedEnd.getUTCDate()).padStart(2, "0")}`;
+        plan = await createMcatPlanInstance({
+          userId,
+          templateKey: MCAT_PHASE_0_TEMPLATE_KEY,
+          phaseName: MCAT_PHASE_0_TEMPLATE.phase_name,
+          seedStartDate,
+          seedEndDate,
+          totalPlannedMinutes: MCAT_PHASE_0_TEMPLATE.total_planned_minutes,
+        });
+        setActivePhase0Plan(plan);
+      }
+      const seedStartDate = plan.seed_start_date;
+
       const existingTasks = await fetchUniversalTasksByTemplate({
         userId,
         source: MCAT_PHASE_0_SOURCE,
         templateKey: MCAT_PHASE_0_TEMPLATE_KEY,
       });
-      const missingPayloads = getMissingMcatPhase0Tasks(existingTasks, { today: todayKey });
+      const missingPayloads = getMissingMcatPhase0Tasks(existingTasks, seedStartDate, {
+        today: todayKey,
+        planInstanceId: plan.id,
+      });
 
       if (missingPayloads.length === 0) {
         setSeededPhaseTasks(sortTemplateTasks(existingTasks));
@@ -1022,6 +1144,8 @@ export default function McatFoundationPage() {
         }
       />
 
+      <McatRoadmapCard />
+
       <McatPhase0ScheduleCard
         summary={phase0SeedSummary}
         seedStatus={phaseSeedStatus}
@@ -1032,6 +1156,8 @@ export default function McatFoundationPage() {
         sessionLoading={sessionLoading}
         todayPreviewTitle={todayPhase0Preview?.title ?? null}
         todaySeededTask={todaySeededTask}
+        activePlan={activePhase0Plan}
+        todayKey={todayKey}
         onSeed={handleSeedPhase0Tasks}
       />
 
@@ -1341,11 +1467,13 @@ export default function McatFoundationPage() {
                     setErrorForm((current) => ({ ...current, topicId: event.target.value }))
                   }
                 >
-                  {state.topics.map((topic) => (
-                    <option key={topic.id} value={topic.id}>
-                      {topic.title}
-                    </option>
-                  ))}
+                  {[...state.topics]
+                    .sort((a, b) => a.title.localeCompare(b.title))
+                    .map((topic) => (
+                      <option key={topic.id} value={topic.id}>
+                        {topic.title}
+                      </option>
+                    ))}
                 </select>
                 <select
                   className="input-dark w-full"

@@ -2,8 +2,15 @@ import { describe, expect, it } from "vitest";
 import { makeAnchor, makeTimeBlock } from "@/lib/calendar-system";
 import { makeTask, type Task } from "@/lib/task-system";
 import {
+  buildPreviewFromEditableRows,
   buildScheduleImportPreview,
+  editableRowsFromParsed,
+  makeBlankEditableRow,
   parseScheduleImport,
+  resetEditableRow,
+  rowMatchesOriginal,
+  schedulePreviewRowsToApply,
+  serializeEditableRowsToScheduleText,
 } from "@/lib/schedule-import";
 
 const TODAY = "2026-05-14";
@@ -163,5 +170,146 @@ describe("schedule import preview", () => {
     expect(preview.rows[5]?.warnings).toContain("End time must be after start time");
     expect(preview.rows[6]?.raw).toBe("- unparseable line");
     expect(preview.hasBlockingIssues).toBe(true);
+  });
+});
+
+describe("editable schedule rows", () => {
+  const text = `SCHEDULE
+- 09:00-10:00 | TASK-A | Title A | deep_work | reason A
+- 10:00-11:00 | TASK-B | Title B | shallow | reason B
+- broken line that wont parse`;
+
+  function setup() {
+    const parsed = parseScheduleImport(text);
+    const rows = editableRowsFromParsed(parsed);
+    const tasks = [
+      task({ task_code: "TASK-A", title: "Real A" }),
+      task({ task_code: "TASK-B", title: "Real B" }),
+      task({ task_code: "TASK-C", title: "Real C" }),
+    ];
+    return { parsed, rows, tasks };
+  }
+
+  function previewFor(rows: ReturnType<typeof editableRowsFromParsed>, tasks: ReturnType<typeof setup>["tasks"]) {
+    return buildPreviewFromEditableRows({
+      date: TODAY,
+      rows,
+      tasks,
+      anchors: [],
+      existingTimeBlocks: [],
+    });
+  }
+
+  it("editableRowsFromParsed gives unique ids and marks unparsed rows", () => {
+    const { rows } = setup();
+    expect(rows).toHaveLength(3);
+    expect(new Set(rows.map((r) => r.id)).size).toBe(3);
+    expect(rows[2].isUnparsed).toBe(true);
+    expect(rows[0].edited).toBe(false);
+  });
+
+  it("editing start/end time flips warnings and marks row edited", () => {
+    const { rows, tasks } = setup();
+    // Make row[1] overlap row[0] by moving start earlier.
+    rows[1].start = "09:30";
+    rows[1].edited = !rowMatchesOriginal(rows[1]);
+    const preview = previewFor(rows, tasks);
+    expect(rows[1].edited).toBe(true);
+    expect(preview.rows[0].warnings.join(" ")).toMatch(/Overlaps imported block/);
+    expect(preview.rows[1].warnings.join(" ")).toMatch(/Overlaps imported block/);
+  });
+
+  it("changing task_code to a known task rematches matched_task_title", () => {
+    const { rows, tasks } = setup();
+    rows[0].task_code = "TASK-C";
+    rows[0].edited = !rowMatchesOriginal(rows[0]);
+    const preview = previewFor(rows, tasks);
+    expect(preview.rows[0].matched_task_title).toBe("Real C");
+    expect(preview.rows[0].status).toBe("matched");
+  });
+
+  it("apply payload uses edited values, not original parse", () => {
+    const { rows, tasks } = setup();
+    rows[0].start = "08:00";
+    rows[0].end = "08:45";
+    rows[0].imported_title = "Edited title";
+    rows[0].edited = !rowMatchesOriginal(rows[0]);
+    const preview = previewFor(rows, tasks);
+    const applyRows = schedulePreviewRowsToApply(preview, "non-conflicting");
+    const applied = applyRows.find((r) => r.task_code === "TASK-A");
+    expect(applied?.start).toBe("08:00");
+    expect(applied?.end).toBe("08:45");
+    expect(applied?.imported_title).toBe("Edited title");
+  });
+
+  it("deleting a row removes it from the apply payload", () => {
+    const { rows, tasks } = setup();
+    const remaining = rows.filter((r) => r.task_code !== "TASK-B");
+    const preview = previewFor(remaining, tasks);
+    const applyRows = schedulePreviewRowsToApply(preview, "non-conflicting");
+    expect(applyRows.find((r) => r.task_code === "TASK-B")).toBeUndefined();
+    expect(applyRows.some((r) => r.task_code === "TASK-A")).toBe(true);
+  });
+
+  it("duplicate produces a separate editable row with a fresh id", () => {
+    const { rows } = setup();
+    const copy = makeBlankEditableRow({
+      start: rows[0].start,
+      end: rows[0].end,
+      task_code: rows[0].task_code,
+      imported_title: rows[0].imported_title,
+      block_type: rows[0].block_type,
+      reason: rows[0].reason,
+    });
+    expect(copy.id).not.toBe(rows[0].id);
+    expect(copy.start).toBe(rows[0].start);
+    expect(copy.task_code).toBe(rows[0].task_code);
+  });
+
+  it("reset restores original parsed values and clears edited flag", () => {
+    const { rows } = setup();
+    rows[0].start = "06:00";
+    rows[0].imported_title = "Mangled";
+    rows[0].edited = !rowMatchesOriginal(rows[0]);
+    const restored = resetEditableRow(rows[0]);
+    expect(restored.start).toBe("09:00");
+    expect(restored.imported_title).toBe("Title A");
+    expect(restored.edited).toBe(false);
+  });
+
+  it("serializeEditableRowsToScheduleText round-trips edits back into parseable text", () => {
+    const { rows, tasks } = setup();
+    rows[0].start = "08:30";
+    rows[0].end = "09:15";
+    rows[0].imported_title = "Updated title";
+    rows[0].edited = !rowMatchesOriginal(rows[0]);
+    // Drop the unparsed row to keep the serialized text clean.
+    const cleanRows = rows.filter((r) => !r.isUnparsed);
+    const text2 = serializeEditableRowsToScheduleText(cleanRows);
+    expect(text2).toContain("- 08:30-09:15 | TASK-A | Updated title | deep_work | reason A");
+    const reparsed = parseScheduleImport(text2);
+    expect(reparsed.schedule[0].start).toBe("08:30");
+    expect(reparsed.schedule[0].imported_title).toBe("Updated title");
+    const preview = buildPreviewFromEditableRows({
+      date: TODAY,
+      rows: editableRowsFromParsed(reparsed),
+      tasks,
+      anchors: [],
+      existingTimeBlocks: [],
+    });
+    expect(preview.rows[0].start).toBe("08:30");
+    expect(preview.rows[0].status).toBe("matched");
+  });
+
+  it("raw text parse path still works (no editing required)", () => {
+    const preview = buildScheduleImportPreview({
+      date: TODAY,
+      parsed: parseScheduleImport(text),
+      tasks: [task({ task_code: "TASK-A", title: "Real A" })],
+      anchors: [],
+      existingTimeBlocks: [],
+    });
+    expect(preview.rows[0].task_code).toBe("TASK-A");
+    expect(preview.rows[0].matched_task_title).toBe("Real A");
   });
 });

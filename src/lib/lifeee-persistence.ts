@@ -81,6 +81,8 @@ export type UniversalTaskRow = {
   friction_type: string | null;
   privacy_layer: string | null;
   linked_anchor_id: string | null;
+  routine_instance_id?: string | null;
+  routine_occurrence_index?: number | null;
   created_at: string;
   updated_at: string;
 };
@@ -773,6 +775,8 @@ export function taskToRow(userId: string, task: Task, currentEnergy: number) {
     archived_at: task.archived_at,
     deleted_at: task.deleted_at,
     linked_anchor_id: task.linked_anchor_id ?? null,
+    routine_instance_id: task.routine_instance_id ?? null,
+    routine_occurrence_index: task.routine_occurrence_index ?? null,
   };
 }
 
@@ -823,6 +827,8 @@ export function rowToTask(row: UniversalTaskRow): Task {
     archived_at: row.archived_at ?? null,
     deleted_at: row.deleted_at ?? null,
     linked_anchor_id: row.linked_anchor_id ?? null,
+    routine_instance_id: row.routine_instance_id ?? null,
+    routine_occurrence_index: row.routine_occurrence_index ?? null,
     created_at: row.created_at,
     updated_at: row.updated_at,
   });
@@ -854,6 +860,159 @@ export async function fetchUniversalTasksByTemplate(input: {
     .eq("template_key", input.templateKey)
     .order("template_day_index", { ascending: true });
 
+  if (error) throw error;
+  return ((data ?? []) as UniversalTaskRow[]).map(rowToTask);
+}
+
+export type McatPlanInstance = {
+  id: string;
+  user_id: string;
+  template_key: string;
+  phase_name: string;
+  seed_start_date: string;
+  seed_end_date: string;
+  total_planned_minutes: number;
+  status: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export async function fetchActiveMcatPlanInstance(input: { userId: string; templateKey: string }) {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("mcat_plan_instances")
+    .select("*")
+    .eq("user_id", input.userId)
+    .eq("template_key", input.templateKey)
+    .eq("status", "active")
+    .maybeSingle();
+  if (error) throw error;
+  return (data as McatPlanInstance | null) ?? null;
+}
+
+export async function createMcatPlanInstance(input: {
+  userId: string;
+  templateKey: string;
+  phaseName: string;
+  seedStartDate: string;
+  seedEndDate: string;
+  totalPlannedMinutes: number;
+}) {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("mcat_plan_instances")
+    .insert({
+      user_id: input.userId,
+      template_key: input.templateKey,
+      phase_name: input.phaseName,
+      seed_start_date: input.seedStartDate,
+      seed_end_date: input.seedEndDate,
+      total_planned_minutes: input.totalPlannedMinutes,
+      status: "active",
+    })
+    .select("*")
+    .single();
+  if (error) throw error;
+  return data as McatPlanInstance;
+}
+
+export type UserRoutineInstance = {
+  id: string;
+  user_id: string;
+  template_key: string;
+  name: string;
+  domain: string;
+  cadence: string;
+  start_date: string;
+  end_date: string | null;
+  preferred_days: number[] | null;
+  preferred_time: string | null;
+  estimated_minutes: number | null;
+  status: "active" | "paused";
+  created_at: string;
+  updated_at: string;
+};
+
+export async function listUserRoutineInstances(userId: string): Promise<UserRoutineInstance[]> {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("user_routine_instances")
+    .select("*")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  return (data ?? []) as UserRoutineInstance[];
+}
+
+export async function fetchActiveRoutineInstance(input: {
+  userId: string;
+  templateKey: string;
+}): Promise<UserRoutineInstance | null> {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("user_routine_instances")
+    .select("*")
+    .eq("user_id", input.userId)
+    .eq("template_key", input.templateKey)
+    .eq("status", "active")
+    .maybeSingle();
+  if (error) throw error;
+  return (data as UserRoutineInstance | null) ?? null;
+}
+
+export async function createRoutineInstance(input: {
+  userId: string;
+  templateKey: string;
+  name: string;
+  domain: string;
+  cadence: string;
+  startDate: string;
+  preferredDays?: number[] | null;
+  preferredTime?: string | null;
+  estimatedMinutes?: number | null;
+}): Promise<UserRoutineInstance> {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("user_routine_instances")
+    .insert({
+      user_id: input.userId,
+      template_key: input.templateKey,
+      name: input.name,
+      domain: input.domain,
+      cadence: input.cadence,
+      start_date: input.startDate,
+      preferred_days: input.preferredDays ?? null,
+      preferred_time: input.preferredTime ?? null,
+      estimated_minutes: input.estimatedMinutes ?? null,
+      status: "active",
+    })
+    .select("*")
+    .single();
+  if (error) throw error;
+  return data as UserRoutineInstance;
+}
+
+export async function pauseRoutineInstance(id: string): Promise<void> {
+  const client = requireSupabase();
+  const { error } = await client
+    .from("user_routine_instances")
+    .update({ status: "paused", updated_at: new Date().toISOString() })
+    .eq("id", id);
+  if (error) throw error;
+}
+
+export async function fetchUniversalTasksByRoutineTemplate(input: {
+  userId: string;
+  templateKey: string;
+}): Promise<Task[]> {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("universal_tasks")
+    .select("*")
+    .eq("user_id", input.userId)
+    .eq("source", "life_routine_seed")
+    .eq("template_key", input.templateKey)
+    .order("due_date", { ascending: true });
   if (error) throw error;
   return ((data ?? []) as UniversalTaskRow[]).map(rowToTask);
 }

@@ -82,6 +82,7 @@ import {
   AIActionButton,
 } from "@/components/ui-kit";
 import { parseTaskTitleInput } from "@/lib/task-nlp-parser";
+import { toast } from "sonner";
 
 type PageMode = "capture" | "plan" | "review";
 
@@ -288,8 +289,14 @@ export default function TaskCommandPage() {
       });
   };
 
-  const completeTask = (id: string) =>
+  const completeTask = (id: string) => {
+    const current = tasks.find((task) => task.id === id);
+    if (!current || isDoneStatus(current.status)) return;
     applyTaskMutation(id, markTaskDone);
+    toast.success("Task done", {
+      description: current.title,
+    });
+  };
 
   const copyPrompt = async () => {
     const text = buildTriagePrompt(tasks, currentEnergy);

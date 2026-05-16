@@ -95,6 +95,8 @@ export type Task = {
   archived_at: string | null;
   deleted_at: string | null;
   linked_anchor_id?: string | null;
+  routine_instance_id?: string | null;
+  routine_occurrence_index?: number | null;
   created_at: string;
   updated_at: string;
 };
@@ -310,6 +312,8 @@ export function normalizeTask(raw: Partial<Task>, index = 0): Task {
     archived_at: raw.archived_at ?? null,
     deleted_at: raw.deleted_at ?? null,
     linked_anchor_id: raw.linked_anchor_id ?? null,
+    routine_instance_id: raw.routine_instance_id ?? null,
+    routine_occurrence_index: normalizeNullableNumber(raw.routine_occurrence_index),
     created_at: createdAt,
     updated_at: raw.updated_at ?? now,
   };
@@ -389,6 +393,8 @@ export function createTask(partial: Partial<Task> & { title: string }): Task {
     archived_at: partial.archived_at ?? null,
     deleted_at: partial.deleted_at ?? null,
     linked_anchor_id: partial.linked_anchor_id ?? null,
+    routine_instance_id: partial.routine_instance_id ?? null,
+    routine_occurrence_index: partial.routine_occurrence_index ?? null,
     created_at: partial.created_at ?? now,
     updated_at: partial.updated_at ?? now,
   });

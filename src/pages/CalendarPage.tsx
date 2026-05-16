@@ -56,7 +56,8 @@ import ExecutionTruthPanel from "@/components/ExecutionTruthPanel";
 import CapacityTimeline from "@/components/CapacityTimeline";
 import {
   buildPlanningSnapshot,
-  validateImportRealism,
+  evaluateImportRealism,
+  type RealismReport,
   type PlanningSnapshot,
 } from "@/lib/planning-engine";
 import {
@@ -79,13 +80,21 @@ import {
   upsertUniversalTask,
 } from "@/lib/lifeee-persistence";
 import {
-  buildScheduleImportPreview,
+  buildPreviewFromEditableRows,
+  editableRowsFromParsed,
+  makeBlankEditableRow,
   parseScheduleImport,
+  resetEditableRow,
+  rowMatchesOriginal,
+  SCHEDULE_BLOCK_TYPES,
   schedulePreviewRowsToApply,
+  serializeEditableRowsToScheduleText,
+  type EditableScheduleRow,
   type ScheduleImportParsed,
   type ScheduleImportPreview,
   type ScheduleImportPreviewRow,
 } from "@/lib/schedule-import";
+import { LifeRoutinesPanel } from "@/components/LifeRoutinesPanel";
 import {
   AdvancedOnly,
   AIActionButton,
@@ -161,6 +170,7 @@ export default function CalendarPage() {
   const [copied, setCopied] = useState<string | null>(null);
   const [scheduleImportText, setScheduleImportText] = useState("");
   const [scheduleParsed, setScheduleParsed] = useState<ScheduleImportParsed | null>(null);
+  const [scheduleEditableRows, setScheduleEditableRows] = useState<EditableScheduleRow[] | null>(null);
   const [schedulePreview, setSchedulePreview] = useState<ScheduleImportPreview | null>(null);
   const [replaceExistingImported, setReplaceExistingImported] = useState(false);
   const [importNotice, setImportNotice] = useState<string | null>(null);
@@ -536,29 +546,54 @@ export default function CalendarPage() {
     );
   };
 
-  const parseScheduleImportText = () => {
-    const parsed = parseScheduleImport(scheduleImportText);
-    setScheduleParsed(parsed);
-    setSchedulePreview(null);
-    setImportNotice(
-      parsed.unparsed.length > 0
-        ? `${parsed.unparsed.length} line${parsed.unparsed.length === 1 ? "" : "s"} could not be parsed.`
-        : "Schedule parsed. Preview before applying.",
-    );
-  };
-
-  const previewScheduleImport = () => {
-    const parsed = scheduleParsed ?? parseScheduleImport(scheduleImportText);
-    const preview = buildScheduleImportPreview({
+  const computePreviewForRows = (rows: EditableScheduleRow[], parsed: ScheduleImportParsed | null) => {
+    return buildPreviewFromEditableRows({
       date: activeDate,
-      parsed,
+      rows,
       tasks,
       anchors: onDayAnchors,
       existingTimeBlocks: replaceExistingImported
         ? onDayTimeBlocks.filter((block) => block.source !== "chatgpt_import")
         : onDayTimeBlocks,
+      unscheduled: parsed?.unscheduled,
+      risks: parsed?.risks,
+      firstAction: parsed?.firstAction,
+      planRealism: parsed?.planRealism,
     });
+  };
+
+  const parseScheduleImportText = () => {
+    if (scheduleEditableRows && scheduleEditableRows.some((row) => row.edited)) {
+      const ok =
+        typeof window === "undefined" ||
+        window.confirm(
+          "You have inline edits in the preview. Re-parsing will discard them. Continue?",
+        );
+      if (!ok) return;
+    }
+    const parsed = parseScheduleImport(scheduleImportText);
+    const rows = editableRowsFromParsed(parsed);
+    const preview = computePreviewForRows(rows, parsed);
     setScheduleParsed(parsed);
+    setScheduleEditableRows(rows);
+    setSchedulePreview(preview);
+    setImportNotice(
+      parsed.unparsed.length > 0
+        ? `${parsed.unparsed.length} line${parsed.unparsed.length === 1 ? "" : "s"} could not be parsed.`
+        : "Schedule parsed. Edit rows inline if needed, then Apply.",
+    );
+  };
+
+  const previewScheduleImport = () => {
+    let rows = scheduleEditableRows;
+    let parsed = scheduleParsed;
+    if (!rows) {
+      parsed = parseScheduleImport(scheduleImportText);
+      rows = editableRowsFromParsed(parsed);
+      setScheduleParsed(parsed);
+      setScheduleEditableRows(rows);
+    }
+    const preview = computePreviewForRows(rows, parsed);
     setSchedulePreview(preview);
     setImportNotice(
       preview.hasBlockingIssues
@@ -567,9 +602,68 @@ export default function CalendarPage() {
     );
   };
 
+  const updateScheduleRow = (id: string, patch: Partial<EditableScheduleRow>) => {
+    setScheduleEditableRows((current) => {
+      if (!current) return current;
+      const next = current.map((row) => {
+        if (row.id !== id) return row;
+        const merged: EditableScheduleRow = { ...row, ...patch };
+        merged.edited = !rowMatchesOriginal(merged);
+        return merged;
+      });
+      setSchedulePreview(computePreviewForRows(next, scheduleParsed));
+      return next;
+    });
+  };
+
+  const deleteScheduleRow = (id: string) => {
+    setScheduleEditableRows((current) => {
+      if (!current) return current;
+      const next = current.filter((row) => row.id !== id);
+      setSchedulePreview(computePreviewForRows(next, scheduleParsed));
+      return next;
+    });
+  };
+
+  const duplicateScheduleRow = (id: string) => {
+    setScheduleEditableRows((current) => {
+      if (!current) return current;
+      const sourceIndex = current.findIndex((row) => row.id === id);
+      if (sourceIndex === -1) return current;
+      const source = current[sourceIndex];
+      const copy = makeBlankEditableRow({
+        start: source.start,
+        end: source.end,
+        task_code: source.task_code,
+        imported_title: source.imported_title,
+        block_type: source.block_type,
+        reason: source.reason,
+      });
+      const next = [...current.slice(0, sourceIndex + 1), copy, ...current.slice(sourceIndex + 1)];
+      setSchedulePreview(computePreviewForRows(next, scheduleParsed));
+      return next;
+    });
+  };
+
+  const resetScheduleRow = (id: string) => {
+    setScheduleEditableRows((current) => {
+      if (!current) return current;
+      const next = current.map((row) => (row.id === id ? resetEditableRow(row) : row));
+      setSchedulePreview(computePreviewForRows(next, scheduleParsed));
+      return next;
+    });
+  };
+
+  const syncScheduleEditsToText = () => {
+    if (!scheduleEditableRows) return;
+    setScheduleImportText(serializeEditableRowsToScheduleText(scheduleEditableRows));
+    setImportNotice("Edited rows synced back to text. Re-parse to make the text the source of truth.");
+  };
+
   const clearScheduleImport = () => {
     setScheduleImportText("");
     setScheduleParsed(null);
+    setScheduleEditableRows(null);
     setSchedulePreview(null);
     setImportNotice(null);
   };
@@ -577,22 +671,18 @@ export default function CalendarPage() {
   const clearAppliedScheduleImport = () => {
     setScheduleImportText("");
     setScheduleParsed(null);
+    setScheduleEditableRows(null);
     setSchedulePreview(null);
   };
 
   const applyScheduleImport = async (mode: "non-conflicting" | "include-soft-conflicts") => {
-    const parsed = scheduleParsed ?? parseScheduleImport(scheduleImportText);
-    const preview =
-      schedulePreview ??
-      buildScheduleImportPreview({
-        date: activeDate,
-        parsed,
-        tasks,
-        anchors: onDayAnchors,
-        existingTimeBlocks: replaceExistingImported
-          ? onDayTimeBlocks.filter((block) => block.source !== "chatgpt_import")
-          : onDayTimeBlocks,
-      });
+    let parsed = scheduleParsed;
+    let editableRows = scheduleEditableRows;
+    if (!parsed || !editableRows) {
+      parsed = parseScheduleImport(scheduleImportText);
+      editableRows = editableRowsFromParsed(parsed);
+    }
+    const preview = schedulePreview ?? computePreviewForRows(editableRows, parsed);
     const rows = schedulePreviewRowsToApply(preview, mode);
     if (rows.length === 0) {
       setImportNotice("No applicable schedule rows. Fix invalid lines or task codes first.");
@@ -873,7 +963,7 @@ export default function CalendarPage() {
             anchors={onDayAnchors}
             conflicts={conflicts}
           />
-          <CapacityTimeline anchors={onDayAnchors} timeBlocks={onDayTimeBlocks} />
+          <CapacityTimeline anchors={onDayAnchors} timeBlocks={onDayTimeBlocks} tasks={tasks} />
           <FixedAnchorsPanel
             anchors={onDayAnchors}
             onUpdate={updateAnchor}
@@ -883,6 +973,13 @@ export default function CalendarPage() {
           <AddAnchorPanel draft={draft} setDraft={setDraft} onAdd={addAnchor} />
           <CollapsibleSection title="Operating Rhythms" defaultOpen={false}>
             <RecurringLoopsPanel loops={loops} />
+          </CollapsibleSection>
+          <CollapsibleSection title="Life Routines" defaultOpen={false}>
+            <LifeRoutinesPanel
+              userId={userId}
+              hasSupabaseConfig={hasSupabaseConfig}
+              sessionLoading={sessionLoading}
+            />
           </CollapsibleSection>
         </div>
       ) : null}
@@ -913,6 +1010,13 @@ export default function CalendarPage() {
             onChange={setScheduleImportText}
             parsed={scheduleParsed}
             preview={schedulePreview}
+            editableRows={scheduleEditableRows}
+            tasks={tasks}
+            onUpdateRow={updateScheduleRow}
+            onDeleteRow={deleteScheduleRow}
+            onDuplicateRow={duplicateScheduleRow}
+            onResetRow={resetScheduleRow}
+            onSyncToText={syncScheduleEditsToText}
             notice={importNotice}
             replaceExistingImported={replaceExistingImported}
             setReplaceExistingImported={setReplaceExistingImported}
@@ -921,6 +1025,9 @@ export default function CalendarPage() {
             onApplyNonConflicting={() => void applyScheduleImport("non-conflicting")}
             onApplyWithSoftConflicts={() => void applyScheduleImport("include-soft-conflicts")}
             onCancel={clearScheduleImport}
+            planningSnapshot={planningSnapshot}
+            anchors={onDayAnchors}
+            dayDate={activeDate}
           />
         </div>
       ) : null}
@@ -1208,6 +1315,13 @@ function ScheduleImportPanel({
   onChange,
   parsed,
   preview,
+  editableRows,
+  tasks,
+  onUpdateRow,
+  onDeleteRow,
+  onDuplicateRow,
+  onResetRow,
+  onSyncToText,
   notice,
   replaceExistingImported,
   setReplaceExistingImported,
@@ -1216,11 +1330,21 @@ function ScheduleImportPanel({
   onApplyNonConflicting,
   onApplyWithSoftConflicts,
   onCancel,
+  planningSnapshot,
+  anchors,
+  dayDate,
 }: {
   value: string;
   onChange: (value: string) => void;
   parsed: ScheduleImportParsed | null;
   preview: ScheduleImportPreview | null;
+  editableRows: EditableScheduleRow[] | null;
+  tasks: Task[];
+  onUpdateRow: (id: string, patch: Partial<EditableScheduleRow>) => void;
+  onDeleteRow: (id: string) => void;
+  onDuplicateRow: (id: string) => void;
+  onResetRow: (id: string) => void;
+  onSyncToText: () => void;
   notice: string | null;
   replaceExistingImported: boolean;
   setReplaceExistingImported: (value: boolean) => void;
@@ -1229,6 +1353,9 @@ function ScheduleImportPanel({
   onApplyNonConflicting: () => void;
   onApplyWithSoftConflicts: () => void;
   onCancel: () => void;
+  planningSnapshot: PlanningSnapshot;
+  anchors: CalendarAnchor[];
+  dayDate: string;
 }) {
   const hasConflicts = preview?.rows.some((row) => row.status === "conflict") ?? false;
   return (
@@ -1284,6 +1411,14 @@ function ScheduleImportPanel({
           </button>
         ) : null}
         <button
+          onClick={onSyncToText}
+          disabled={!editableRows || editableRows.length === 0}
+          className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm hover:bg-muted/70 disabled:opacity-50"
+          title="Rewrite the textarea above from the current edited rows"
+        >
+          Sync edits → text
+        </button>
+        <button
           onClick={onCancel}
           className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm hover:bg-muted/70"
         >
@@ -1299,8 +1434,27 @@ function ScheduleImportPanel({
         </label>
       </div>
       {notice ? <div className="notice-warning">{notice}</div> : null}
-      {preview ? <SchedulePreviewTable rows={preview.rows} /> : null}
-      {preview ? <ImportRealismNotes rows={preview.rows} /> : null}
+      {preview && editableRows ? (
+        <EditableSchedulePreviewTable
+          editableRows={editableRows}
+          previewRows={preview.rows}
+          tasks={tasks}
+          onUpdateRow={onUpdateRow}
+          onDeleteRow={onDeleteRow}
+          onDuplicateRow={onDuplicateRow}
+          onResetRow={onResetRow}
+        />
+      ) : preview ? (
+        <SchedulePreviewTable rows={preview.rows} />
+      ) : null}
+      {preview ? (
+        <ImportRealismNotes
+          rows={preview.rows}
+          planningSnapshot={planningSnapshot}
+          anchors={anchors}
+          dayDate={dayDate}
+        />
+      ) : null}
       {preview && (preview.unscheduled.length > 0 || preview.risks.length > 0 || preview.firstAction) ? (
         <div className="grid gap-3 md:grid-cols-3 text-xs">
           <ImportNoteList title="Unscheduled" items={preview.unscheduled} />
@@ -1325,44 +1479,77 @@ function ScheduleImportPanel({
 
 function ImportRealismNotes({
   rows,
+  planningSnapshot,
+  anchors,
+  dayDate,
 }: {
   rows: { start: string; end: string; imported_title: string; block_type: string }[];
+  planningSnapshot: PlanningSnapshot;
+  anchors: CalendarAnchor[];
+  dayDate: string;
 }) {
-  const issues = validateImportRealism(
-    rows.map((row) => ({
-      start_time: row.start,
-      end_time: row.end,
-      title: row.imported_title || "Untitled block",
-      block_type: row.block_type,
-    })),
-  );
-  if (issues.length === 0) return null;
-  const blocking = issues.filter((issue) => issue.severity === "block");
-  const soft = issues.filter((issue) => issue.severity === "warn");
+  const report: RealismReport = evaluateImportRealism({
+    blocks: rows
+      .filter((row) => row.start && row.end)
+      .map((row) => ({
+        start_time: row.start,
+        end_time: row.end,
+        title: row.imported_title || "Untitled block",
+        block_type: row.block_type,
+      })),
+    snapshot: planningSnapshot,
+    anchors,
+    dayDate,
+  });
+  const blocking = report.issues.filter((issue) => issue.severity === "block");
+  const soft = report.issues.filter((issue) => issue.severity === "warn");
+  const scoreColor =
+    report.score >= 8
+      ? "text-emerald-700"
+      : report.score >= 5
+        ? "text-amber-700"
+        : "text-rose-700";
   return (
     <div className="mt-3 rounded-lg border border-border bg-card/60 p-3 text-xs">
-      <div className="font-semibold text-foreground mb-1">Schedule realism check</div>
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <div className="font-semibold text-foreground">Schedule realism check</div>
+        <div className={`font-mono-data ${scoreColor}`}>
+          Realism: {report.score}/10
+        </div>
+      </div>
+      <div className="text-muted-foreground">
+        <span className="font-medium text-foreground">Bottleneck:</span> {report.bottleneck}
+      </div>
+      <div className="text-muted-foreground">
+        <span className="font-medium text-foreground">Correction:</span> {report.correction}
+      </div>
       {blocking.length > 0 ? (
-        <ul className="space-y-0.5 text-rose-700">
+        <ul className="mt-2 space-y-0.5 text-rose-700">
           {blocking.map((issue, i) => (
-            <li key={`block-${i}`}>⛔ {issue.message}</li>
+            <li key={`block-${i}`}>
+              ⛔ <span className="opacity-70">[{issue.category}]</span> {issue.message}
+            </li>
           ))}
         </ul>
       ) : null}
       {soft.length > 0 ? (
         <ul className="mt-1 space-y-0.5 text-amber-700">
           {soft.map((issue, i) => (
-            <li key={`warn-${i}`}>⚠ {issue.message}</li>
+            <li key={`warn-${i}`}>
+              ⚠ <span className="opacity-70">[{issue.category}]</span> {issue.message}
+            </li>
           ))}
         </ul>
       ) : null}
-      {blocking.length === 0 ? (
-        <div className="mt-1 text-muted-foreground">
+      {report.issues.length === 0 ? (
+        <div className="mt-2 text-emerald-700">No realism issues detected.</div>
+      ) : blocking.length === 0 ? (
+        <div className="mt-2 text-muted-foreground">
           Soft issues only — you can still apply, but review them first.
         </div>
       ) : (
-        <div className="mt-1 text-rose-700">
-          Impossible overlaps detected — fix these before applying.
+        <div className="mt-2 text-rose-700">
+          Blocking issues detected — fix these before applying.
         </div>
       )}
     </div>
@@ -1390,6 +1577,185 @@ function ImportNoteList({
           ))}
         </ul>
       )}
+    </div>
+  );
+}
+
+function EditableSchedulePreviewTable({
+  editableRows,
+  previewRows,
+  tasks,
+  onUpdateRow,
+  onDeleteRow,
+  onDuplicateRow,
+  onResetRow,
+}: {
+  editableRows: EditableScheduleRow[];
+  previewRows: ScheduleImportPreviewRow[];
+  tasks: Task[];
+  onUpdateRow: (id: string, patch: Partial<EditableScheduleRow>) => void;
+  onDeleteRow: (id: string) => void;
+  onDuplicateRow: (id: string) => void;
+  onResetRow: (id: string) => void;
+}) {
+  const knownCodes = Array.from(
+    new Set(["BREAK", "FREEFORM", ...tasks.map((t) => t.task_code).filter(Boolean)]),
+  );
+  return (
+    <div className="overflow-x-auto rounded-lg border border-border">
+      <datalist id="schedule-import-task-codes">
+        {knownCodes.map((code) => (
+          <option key={code} value={code} />
+        ))}
+      </datalist>
+      <table className="min-w-full text-left text-xs">
+        <thead className="bg-muted/70 text-muted-foreground">
+          <tr>
+            <th className="px-2 py-2">Start</th>
+            <th className="px-2 py-2">End</th>
+            <th className="px-2 py-2">Task code</th>
+            <th className="px-2 py-2">Matched task</th>
+            <th className="px-2 py-2">Imported title</th>
+            <th className="px-2 py-2">Block type</th>
+            <th className="px-2 py-2">Reason</th>
+            <th className="px-2 py-2">Status</th>
+            <th className="px-2 py-2">Actions</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border">
+          {editableRows.map((row, index) => {
+            const preview = previewRows[index];
+            const status = preview?.status ?? "invalid line";
+            const warnings = preview?.warnings ?? [];
+            const matchedTitle = preview?.matched_task_title ?? "";
+            return (
+              <tr
+                key={row.id}
+                className={`align-top ${row.edited ? "bg-amber-50/40" : "bg-card/60"}`}
+              >
+                <td className="px-2 py-2 font-mono-data">
+                  <input
+                    type="time"
+                    step={300}
+                    value={row.start}
+                    onChange={(event) => onUpdateRow(row.id, { start: event.target.value })}
+                    className="w-24 rounded border border-border bg-background px-1 py-0.5"
+                  />
+                </td>
+                <td className="px-2 py-2 font-mono-data">
+                  <input
+                    type="time"
+                    step={300}
+                    value={row.end}
+                    onChange={(event) => onUpdateRow(row.id, { end: event.target.value })}
+                    className="w-24 rounded border border-border bg-background px-1 py-0.5"
+                  />
+                </td>
+                <td className="px-2 py-2 font-mono-data">
+                  <input
+                    type="text"
+                    list="schedule-import-task-codes"
+                    value={row.task_code}
+                    onChange={(event) =>
+                      onUpdateRow(row.id, { task_code: event.target.value.toUpperCase() })
+                    }
+                    className="w-32 rounded border border-border bg-background px-1 py-0.5"
+                    placeholder="TASK-… / BREAK / FREEFORM"
+                  />
+                </td>
+                <td className="px-2 py-2 text-muted-foreground">{matchedTitle || "—"}</td>
+                <td className="px-2 py-2">
+                  <input
+                    type="text"
+                    value={row.imported_title}
+                    onChange={(event) =>
+                      onUpdateRow(row.id, { imported_title: event.target.value })
+                    }
+                    className="w-full min-w-[140px] rounded border border-border bg-background px-1 py-0.5"
+                  />
+                </td>
+                <td className="px-2 py-2">
+                  <select
+                    value={row.block_type || ""}
+                    onChange={(event) => onUpdateRow(row.id, { block_type: event.target.value })}
+                    className="rounded border border-border bg-background px-1 py-0.5"
+                  >
+                    <option value="">—</option>
+                    {SCHEDULE_BLOCK_TYPES.map((bt) => (
+                      <option key={bt} value={bt}>
+                        {bt}
+                      </option>
+                    ))}
+                    {row.block_type && !SCHEDULE_BLOCK_TYPES.includes(row.block_type as never) ? (
+                      <option value={row.block_type}>{row.block_type}</option>
+                    ) : null}
+                  </select>
+                </td>
+                <td className="px-2 py-2">
+                  <input
+                    type="text"
+                    value={row.reason}
+                    onChange={(event) => onUpdateRow(row.id, { reason: event.target.value })}
+                    className="w-full min-w-[140px] rounded border border-border bg-background px-1 py-0.5"
+                  />
+                </td>
+                <td className="px-2 py-2">
+                  <span
+                    className={`rounded-full px-2 py-0.5 ${
+                      status === "matched" ||
+                      status === "freeform block" ||
+                      status === "break/recovery block"
+                        ? "bg-emerald-50 text-emerald-700"
+                        : status === "conflict"
+                          ? "bg-amber-50 text-amber-800"
+                          : "bg-rose-50 text-rose-700"
+                    }`}
+                  >
+                    {status}
+                  </span>
+                  {row.edited ? (
+                    <span
+                      title="Edited from parsed value"
+                      className="ml-1 inline-block h-2 w-2 rounded-full bg-amber-500 align-middle"
+                    />
+                  ) : null}
+                  {warnings.length > 0 ? (
+                    <div className="mt-1 text-[11px] text-muted-foreground">
+                      {warnings.join(" · ")}
+                    </div>
+                  ) : null}
+                </td>
+                <td className="px-2 py-2">
+                  <div className="flex flex-col gap-1 text-[11px]">
+                    <button
+                      type="button"
+                      onClick={() => onDuplicateRow(row.id)}
+                      className="rounded border border-border bg-card px-1.5 py-0.5 hover:bg-muted/70"
+                    >
+                      Duplicate
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onResetRow(row.id)}
+                      disabled={!row.edited || row.isUnparsed}
+                      className="rounded border border-border bg-card px-1.5 py-0.5 hover:bg-muted/70 disabled:opacity-40"
+                    >
+                      Reset
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onDeleteRow(row.id)}
+                      className="rounded border border-rose-200 bg-rose-50 px-1.5 py-0.5 text-rose-700 hover:bg-rose-100"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -1618,8 +1984,16 @@ function Timeline({ timeline }: { timeline: ReturnType<typeof buildTodayTimeline
                       : slot.kind === "imported-task"
                         ? "bg-blue-500"
                         : "bg-primary";
+        const tooltip = [
+          `${slot.label} (${slot.start}–${slot.end})`,
+          slot.kind ? `Kind: ${slot.kind}` : "",
+          slot.category ? `Category: ${slot.category}` : "",
+          slot.detail ? `Details: ${slot.detail}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n");
         return (
-          <li key={`${slot.start}-${i}`} className="ml-4 relative">
+          <li key={`${slot.start}-${i}`} className="ml-4 relative cursor-help" title={tooltip}>
             <span
               className={`absolute -left-[22px] top-1.5 inline-block h-2.5 w-2.5 rounded-full ring-2 ring-background ${dot}`}
             />
