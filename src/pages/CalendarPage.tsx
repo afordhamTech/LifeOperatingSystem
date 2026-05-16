@@ -874,7 +874,7 @@ export default function CalendarPage() {
             anchors={onDayAnchors}
             conflicts={conflicts}
           />
-          <CapacityTimeline anchors={onDayAnchors} timeBlocks={onDayTimeBlocks} />
+          <CapacityTimeline anchors={onDayAnchors} timeBlocks={onDayTimeBlocks} tasks={tasks} />
           <FixedAnchorsPanel
             anchors={onDayAnchors}
             onUpdate={updateAnchor}
@@ -1626,8 +1626,16 @@ function Timeline({ timeline }: { timeline: ReturnType<typeof buildTodayTimeline
                       : slot.kind === "imported-task"
                         ? "bg-blue-500"
                         : "bg-primary";
+        const tooltip = [
+          `${slot.label} (${slot.start}–${slot.end})`,
+          slot.kind ? `Kind: ${slot.kind}` : "",
+          slot.category ? `Category: ${slot.category}` : "",
+          slot.detail ? `Details: ${slot.detail}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n");
         return (
-          <li key={`${slot.start}-${i}`} className="ml-4 relative">
+          <li key={`${slot.start}-${i}`} className="ml-4 relative cursor-help" title={tooltip}>
             <span
               className={`absolute -left-[22px] top-1.5 inline-block h-2.5 w-2.5 rounded-full ring-2 ring-background ${dot}`}
             />
