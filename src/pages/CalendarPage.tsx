@@ -86,6 +86,7 @@ import {
   type ScheduleImportPreview,
   type ScheduleImportPreviewRow,
 } from "@/lib/schedule-import";
+import { LifeRoutinesPanel } from "@/components/LifeRoutinesPanel";
 import {
   AdvancedOnly,
   AIActionButton,
@@ -883,6 +884,13 @@ export default function CalendarPage() {
           <AddAnchorPanel draft={draft} setDraft={setDraft} onAdd={addAnchor} />
           <CollapsibleSection title="Operating Rhythms" defaultOpen={false}>
             <RecurringLoopsPanel loops={loops} />
+          </CollapsibleSection>
+          <CollapsibleSection title="Life Routines" defaultOpen={false}>
+            <LifeRoutinesPanel
+              userId={userId}
+              hasSupabaseConfig={hasSupabaseConfig}
+              sessionLoading={sessionLoading}
+            />
           </CollapsibleSection>
         </div>
       ) : null}
