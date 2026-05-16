@@ -60,10 +60,18 @@ export async function runSupabasePersistence<T>({
   }
 
   try {
+    const data = await operation();
+    const globalScope = (globalThis as { window?: { dispatchEvent: (e: Event) => boolean } });
+    if (globalScope.window?.dispatchEvent) {
+      // Notify the canonical AI prompt context that Lifeee data changed so it
+      // can refetch. Keeps the prompt drawer in sync after writes from any
+      // page without forcing every caller to wire its own invalidation.
+      globalScope.window.dispatchEvent(new Event("lifeee:prompt-context-invalidate"));
+    }
     return {
       ok: true,
       status: "saved",
-      data: await operation(),
+      data,
     };
   } catch (error) {
     return {

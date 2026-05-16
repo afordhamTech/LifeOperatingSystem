@@ -14,10 +14,13 @@ import {
   fetchCalendarAnchors,
   fetchDailyPlan,
   fetchFaithEntry,
+  fetchHealthEntry,
+  fetchMoneyLog,
   fetchNutritionLog,
   fetchProofItems,
   fetchRelationshipEntries,
   fetchSleepLog,
+  fetchSubstanceEntry,
   fetchTimeBlocks,
   fetchUniversalTasks,
   fetchWeeklyReview,
@@ -48,12 +51,29 @@ function dedupeById(tasks: Task[]): Task[] {
   return result;
 }
 
+// Event name dispatched by pages after they write Lifeee data, so the
+// canonical prompt context can re-fetch and stay fresh without a reload.
+export const LIFEEE_CONTEXT_INVALIDATE_EVENT = "lifeee:prompt-context-invalidate";
+
+export function invalidateCanonicalPromptContext() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event(LIFEEE_CONTEXT_INVALIDATE_EVENT));
+}
+
 export function useCanonicalPromptContext(): PromptBuilderContext {
   const { hasSupabaseConfig, userId } = useSupabaseSession();
   const [context, setContext] = useState<PromptBuilderContext>({});
+  const [reloadKey, setReloadKey] = useState(0);
 
   const today = useMemo(() => toDateKey(), []);
   const weekStart = useMemo(() => getWeekStartDateKey(new Date()), []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handler = () => setReloadKey((k) => k + 1);
+    window.addEventListener(LIFEEE_CONTEXT_INVALIDATE_EVENT, handler);
+    return () => window.removeEventListener(LIFEEE_CONTEXT_INVALIDATE_EVENT, handler);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -88,6 +108,9 @@ export function useCanonicalPromptContext(): PromptBuilderContext {
         faithEntry,
         relationshipEntries,
         dailyLogResult,
+        moneyRow,
+        healthRow,
+        substanceRow,
       ] = await Promise.all([
         safe(fetchUniversalTasks(userId), [] as Task[]),
         safe(fetchCalendarAnchors(userId), []),
@@ -112,6 +135,9 @@ export function useCanonicalPromptContext(): PromptBuilderContext {
           ).then((res) => (res.data as Record<string, unknown> | null) ?? null),
           null as Record<string, unknown> | null,
         ),
+        safe(fetchMoneyLog(userId, today), null),
+        safe(fetchHealthEntry(userId, today), null),
+        safe(fetchSubstanceEntry(userId, today), null),
       ]);
 
       if (!active) return;
@@ -283,6 +309,21 @@ export function useCanonicalPromptContext(): PromptBuilderContext {
       }
       const antiDriftSummary = antiDriftLines.length ? antiDriftLines.join("\n") : undefined;
 
+      // ── Money ───────────────────────────────────────────────────────────
+      const moneySummary = moneyRow
+        ? `Net cash flow ${(moneyRow.income - moneyRow.spending).toFixed(0)} · income ${moneyRow.income} · spending ${moneyRow.spending} · savings ${moneyRow.savings} · subs ${moneyRow.subscriptions} · biggest leak: ${moneyRow.biggestLeak || "—"}`
+        : undefined;
+
+      // ── Health ──────────────────────────────────────────────────────────
+      const healthSummary = healthRow
+        ? `Pain ${healthRow.painScore}/10 (${healthRow.painArea || "no area"}, ${healthRow.painType}, ${healthRow.painTrend}) · sleep ${healthRow.sleep}/10 · hydration ${healthRow.hydration}/10 · mobility ${healthRow.mobilityDone ? "done" : "skipped"}${healthRow.doctorVisitNeeded ? " · doctor visit flagged" : ""}`
+        : undefined;
+
+      // ── Depth & Learning ────────────────────────────────────────────────
+      const depthLearningSummary = substanceRow
+        ? `Deep work ${(substanceRow as { deepWorkMinutes?: number; deep_work_minutes?: number }).deepWorkMinutes ?? (substanceRow as { deep_work_minutes?: number }).deep_work_minutes ?? "—"} min · reading ${(substanceRow as { readingMinutes?: number; reading_minutes?: number }).readingMinutes ?? (substanceRow as { reading_minutes?: number }).reading_minutes ?? "—"} min`
+        : undefined;
+
       const next: PromptBuilderContext = {
         operatingMode: dailyPlan?.operating_mode ?? undefined,
         taskSummary,
@@ -300,6 +341,9 @@ export function useCanonicalPromptContext(): PromptBuilderContext {
         relationshipSummary,
         careerProofSummary,
         antiDriftSummary,
+        moneySummary,
+        healthSummary,
+        depthLearningSummary,
       };
 
       setContext(next);
@@ -310,7 +354,7 @@ export function useCanonicalPromptContext(): PromptBuilderContext {
     return () => {
       active = false;
     };
-  }, [hasSupabaseConfig, today, userId, weekStart]);
+  }, [hasSupabaseConfig, today, userId, weekStart, reloadKey]);
 
   return context;
 }
