@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { ChevronDown, ChevronRight, Sparkles } from "lucide-react";
+import { ChevronDown, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useUIMode } from "@/providers/UIModeContext";
@@ -117,7 +117,7 @@ export function CollapsibleSection({
       <button
         type="button"
         onClick={() => setOpen((p) => !p)}
-        className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
+        className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left transition-colors hover:bg-muted/50"
       >
         <span>
           <span className="text-sm font-medium text-foreground">{title}</span>
@@ -125,13 +125,19 @@ export function CollapsibleSection({
             <span className="ml-2 text-xs text-muted-foreground">{subtitle}</span>
           ) : null}
         </span>
-        {open ? (
-          <ChevronDown size={16} className="text-muted-foreground" />
-        ) : (
-          <ChevronRight size={16} className="text-muted-foreground" />
-        )}
+        <ChevronDown
+          size={16}
+          className={cn(
+            "text-muted-foreground transition-transform duration-200",
+            open ? "rotate-180" : "rotate-0",
+          )}
+        />
       </button>
-      {open ? <div className="border-t border-border px-4 py-3">{children}</div> : null}
+      {open ? (
+        <div className="border-t border-border px-4 py-3 transition-all duration-200">
+          {children}
+        </div>
+      ) : null}
     </div>
   );
 }

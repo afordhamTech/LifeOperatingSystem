@@ -28,11 +28,11 @@ import {
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useUIMode } from "@/providers/UIModeContext";
 
 type NavItem = { path: string; label: string; icon: React.ComponentType<{ size?: number; className?: string }> };
-type NavSection = { heading: string; items: NavItem[] };
+type NavSection = { heading: string; items: NavItem[]; collapsible?: boolean };
 
 const navSections: NavSection[] = [
   {
@@ -46,19 +46,32 @@ const navSections: NavSection[] = [
     ],
   },
   {
-    heading: "Life Domains",
+    heading: "Wellness",
+    collapsible: true,
     items: [
       { path: "/sleep", label: "Sleep", icon: Moon },
-      { path: "/academics", label: "Academics", icon: GraduationCap },
-      { path: "/mcat", label: "MCAT", icon: FlaskConical },
       { path: "/workout", label: "Workout", icon: Dumbbell },
       { path: "/nutrition", label: "Nutrition", icon: Apple },
       { path: "/health", label: "Health", icon: HeartPulse },
+    ],
+  },
+  {
+    heading: "Mind + School",
+    collapsible: true,
+    items: [
+      { path: "/academics", label: "Academics", icon: GraduationCap },
+      { path: "/mcat", label: "MCAT", icon: FlaskConical },
+      { path: "/substance", label: "Depth & Learning", icon: Brain },
+    ],
+  },
+  {
+    heading: "Direction",
+    collapsible: true,
+    items: [
       { path: "/career", label: "Career", icon: Briefcase },
       { path: "/money", label: "Money", icon: Wallet },
       { path: "/faith", label: "Faith", icon: BookOpen },
       { path: "/relationships", label: "Relationships", icon: Users },
-      { path: "/substance", label: "Depth & Learning", icon: Brain },
     ],
   },
 ];
@@ -123,6 +136,45 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
   const toggleSidebar = useCallback(() => setCollapsed((p) => !p), []);
   const closeMobile = useCallback(() => setMobileOpen(false), []);
 
+  useEffect(() => {
+    const isTypingTarget = (target: EventTarget | null) => {
+      if (!(target instanceof HTMLElement)) return false;
+      const tag = target.tagName.toLowerCase();
+      return (
+        tag === "input" ||
+        tag === "textarea" ||
+        tag === "select" ||
+        target.isContentEditable
+      );
+    };
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        window.dispatchEvent(new CustomEvent("lifeee:escape"));
+        const active = document.activeElement;
+        if (active instanceof HTMLElement) active.blur();
+        return;
+      }
+
+      if (
+        event.key.toLowerCase() === "c" &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.altKey &&
+        !isTypingTarget(event.target)
+      ) {
+        const capture = document.querySelector<HTMLElement>('[data-lifeee-capture-input="true"]');
+        if (capture) {
+          event.preventDefault();
+          capture.focus();
+        }
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [location.pathname]);
+
   const today = new Date().toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
@@ -175,14 +227,8 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
 
         {/* Nav Items */}
         <nav className="flex-1 space-y-3 overflow-y-auto px-2 py-2">
-          {navSections.map((section) => (
-            <div key={section.heading} className="space-y-1">
-              {!collapsed && (
-                <div className="px-3 pt-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/80">
-                  {section.heading}
-                </div>
-              )}
-              {section.items.map((item) => {
+          {navSections.map((section) => {
+            const content = section.items.map((item) => {
                 const isActive = location.pathname === item.path;
                 const Icon = item.icon;
                 return (
@@ -201,9 +247,34 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
                     {!collapsed && <span className="truncate">{item.label}</span>}
                   </Link>
                 );
-              })}
-            </div>
-          ))}
+              });
+
+            if (collapsed || !section.collapsible) {
+              return (
+                <div key={section.heading} className="space-y-1">
+                  {!collapsed && (
+                    <div className="px-3 pt-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/80">
+                      {section.heading}
+                    </div>
+                  )}
+                  {content}
+                </div>
+              );
+            }
+
+            return (
+              <details key={section.heading} className="group space-y-1" open>
+                <summary className="flex cursor-pointer list-none items-center justify-between rounded-lg px-3 pt-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/80 hover:bg-muted/40">
+                  {section.heading}
+                  <ChevronRight
+                    size={12}
+                    className="transition-transform group-open:rotate-90"
+                  />
+                </summary>
+                {content}
+              </details>
+            );
+          })}
         </nav>
 
         {/* Simple / Advanced mode toggle */}
@@ -262,6 +333,19 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
       {/* Main Content */}
       <main className="flex-1 overflow-y-auto">
         <div className="max-w-[1440px] mx-auto p-4 lg:p-6 pt-16 lg:pt-6">
+          {!user ? (
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-muted/45 px-4 py-3 text-sm text-muted-foreground">
+              <span>
+                You&apos;re viewing draft mode. Log in to save your progress and unlock all features.
+              </span>
+              <Link
+                to="/login"
+                className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90"
+              >
+                Log in
+              </Link>
+            </div>
+          ) : null}
           {children}
         </div>
       </main>

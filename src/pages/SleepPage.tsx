@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CartesianGrid,
+  Bar,
+  ComposedChart,
   Line,
-  LineChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -33,6 +34,7 @@ import {
   NextActionCard,
   PageDecisionHeader,
 } from "@/components/ui-kit";
+import { calculateSleepDurationHours } from "@/lib/sleep-duration";
 
 type SleepForm = {
   bedtime: string;
@@ -72,16 +74,6 @@ function toIsoTimestamp(dateKey: string, timeValue: string, dayOffset = 0) {
   return date.toISOString();
 }
 
-function calculateHoursSlept(bedtime: string, wakeTime: string) {
-  const [bedHours, bedMinutes] = bedtime.split(":").map(Number);
-  const [wakeHours, wakeMinutes] = wakeTime.split(":").map(Number);
-  let totalMinutes = wakeHours * 60 + wakeMinutes - (bedHours * 60 + bedMinutes);
-  if (totalMinutes < 0) {
-    totalMinutes += 24 * 60;
-  }
-  return Math.round((totalMinutes / 60) * 100) / 100;
-}
-
 function rowToForm(row: SleepLogRow): SleepForm {
   return {
     bedtime: toTimeInputValue(row.bedtime) || defaultForm.bedtime,
@@ -99,7 +91,7 @@ function formToPayload(form: SleepForm, dateKey: string) {
   const bedtime = toIsoTimestamp(dateKey, form.bedtime);
   const wakeDayOffset = form.wakeTime <= form.bedtime ? 1 : 0;
   const wakeTime = toIsoTimestamp(dateKey, form.wakeTime, wakeDayOffset);
-  const hoursSlept = calculateHoursSlept(form.bedtime, form.wakeTime);
+  const hoursSlept = calculateSleepDurationHours(form.bedtime, form.wakeTime);
   const sleepDebt = calculateSleepDebt(hoursSlept);
   const sleepReadiness = calculateSleepReadiness({
     hoursSlept,
@@ -208,7 +200,7 @@ export default function SleepPage() {
     };
   }, [sessionLoading, setSyncStatus, supabaseConfigured, today, userId]);
 
-  const hoursSlept = calculateHoursSlept(form.bedtime, form.wakeTime);
+  const hoursSlept = calculateSleepDurationHours(form.bedtime, form.wakeTime);
   const sleepDebt = calculateSleepDebt(hoursSlept);
   const sleepReadiness = calculateSleepReadiness({
     hoursSlept,
@@ -442,12 +434,14 @@ export default function SleepPage() {
                   value={form.wakeEnergy}
                   onChange={(v) => setForm((p) => ({ ...p, wakeEnergy: v }))}
                   scale={["Exhausted", "Slow", "Ready", "Sharp"]}
+                  tone="positive"
                 />
                 <SliderInput
                   label="Sleep Quality"
                   value={form.sleepQuality}
                   onChange={(v) => setForm((p) => ({ ...p, sleepQuality: v }))}
                   scale={["Poor", "OK", "Good", "Excellent"]}
+                  tone="positive"
                 />
               </div>
             </div>
@@ -463,6 +457,7 @@ export default function SleepPage() {
                   value={form.stressBeforeBed}
                   onChange={(v) => setForm((p) => ({ ...p, stressBeforeBed: v }))}
                   scale={["Calm", "Moderate", "High", "High"]}
+                  tone="negative"
                 />
                 <div className="grid grid-cols-2 gap-3">
                   <label className="flex items-center gap-2">
@@ -524,7 +519,7 @@ export default function SleepPage() {
         </h3>
         {chartData.length > 0 ? (
           <ResponsiveContainer width="100%" height={200}>
-            <LineChart data={chartData}>
+            <ComposedChart data={chartData}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(111,104,95,0.14)" />
               <XAxis dataKey="day" stroke="#8c8478" fontSize={10} />
               <YAxis domain={[0, 10]} stroke="#8c8478" fontSize={10} />
@@ -536,28 +531,20 @@ export default function SleepPage() {
                   fontSize: "11px",
                 }}
               />
+              <Bar dataKey="hours" fill="#d8cdbd" radius={[3, 3, 0, 0]} name="Duration" />
               <Line
                 type="monotone"
-                dataKey="readiness"
+                dataKey="quality"
                 stroke="#6b87ae"
                 strokeWidth={2}
                 dot={{ r: 3, fill: "#6b87ae" }}
-                name="Readiness"
+                name="Sleep quality"
               />
-              <Line
-                type="monotone"
-                dataKey="hours"
-                stroke="#6a9a74"
-                strokeWidth={2}
-                strokeDasharray="5 5"
-                dot={false}
-                name="Hours"
-              />
-            </LineChart>
+            </ComposedChart>
           </ResponsiveContainer>
         ) : (
           <div className="h-[200px] flex items-center justify-center text-sm text-[#8c8478]">
-            No sleep logged yet. Add tonight&apos;s sleep to calculate readiness.
+            No sleep logged yet. Add tonight&apos;s sleep to calculate duration and quality trends.
           </div>
         )}
           <div className="mt-3 flex items-center justify-between text-xs text-[#6f685f]">
@@ -683,6 +670,7 @@ function SliderInput({
   min = 1,
   max = 10,
   scale,
+  tone = "positive",
 }: {
   label: string;
   value: number;
@@ -690,6 +678,7 @@ function SliderInput({
   min?: number;
   max?: number;
   scale?: string[];
+  tone?: "positive" | "negative";
 }) {
   const humanLabel = scale
     ? scale[
@@ -699,6 +688,19 @@ function SliderInput({
         )
       ]
     : null;
+  const pct = (value - min) / (max - min);
+  const accentColor =
+    tone === "negative"
+      ? pct >= 0.7
+        ? "#c97a73"
+        : pct >= 0.4
+          ? "#c39a4e"
+          : "#6a9a74"
+      : pct >= 0.7
+        ? "#6a9a74"
+        : pct >= 0.4
+          ? "#c39a4e"
+          : "#c97a73";
   return (
     <div>
       <div className="flex items-center justify-between mb-1">
@@ -717,6 +719,7 @@ function SliderInput({
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
         className="slider-dark"
+        style={{ accentColor }}
       />
     </div>
   );

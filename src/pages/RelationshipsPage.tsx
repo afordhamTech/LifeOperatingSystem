@@ -35,6 +35,23 @@ function writeLocalRelationships(entries: RelationshipEntry[]) {
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
 }
 
+function relationshipQualityLabel(value: number) {
+  if (value <= 3) return "Disconnected / Tense";
+  if (value <= 7) return "Standard / Good";
+  return "Deeply Connected";
+}
+
+function relationshipQualityColor(value: number) {
+  if (value <= 3) return "#c97a73";
+  if (value <= 7) return "#c39a4e";
+  return "#6a9a74";
+}
+
+function nextActionFromNotes(notes: string) {
+  const match = notes.match(/Next action:\s*(.+)$/im);
+  return match?.[1]?.trim() ?? "";
+}
+
 export default function RelationshipsPage() {
   const today = new Date().toISOString().split("T")[0];
   const { hasSupabaseConfig, isLoading: sessionLoading, userId } = useSupabaseSession();
@@ -49,6 +66,7 @@ export default function RelationshipsPage() {
     unresolvedIssue: "",
     followUpNeeded: false,
     notes: "",
+    nextAction: "",
   });
 
   useEffect(() => {
@@ -106,6 +124,7 @@ export default function RelationshipsPage() {
     }, new Map<string, RelationshipEntry>()),
   ).map(([, entry]) => entry);
   const followUps = entries.filter((entry) => entry.followUpNeeded);
+  const personNames = people.map((person) => person.personName).sort();
 
   const handleLog = async () => {
     if (!form.personName.trim()) return;
@@ -116,7 +135,9 @@ export default function RelationshipsPage() {
       conversationQuality: form.conversationQuality,
       unresolvedIssue: form.unresolvedIssue,
       followUpNeeded: form.followUpNeeded,
-      notes: form.notes,
+      notes: [form.notes.trim(), form.nextAction.trim() ? `Next action: ${form.nextAction.trim()}` : ""]
+        .filter(Boolean)
+        .join("\n"),
     };
     const optimistic = [entry, ...entries];
     setEntries(optimistic);
@@ -139,25 +160,58 @@ export default function RelationshipsPage() {
       setSyncStatus(hasSupabaseConfig ? "waiting" : "local");
     }
 
-    setForm({ personName: "", conversationQuality: 7, unresolvedIssue: "", followUpNeeded: false, notes: "" });
+    setForm({
+      personName: "",
+      conversationQuality: 7,
+      unresolvedIssue: "",
+      followUpNeeded: false,
+      notes: "",
+      nextAction: "",
+    });
+  };
+
+  const resolveFollowUp = async (entry: RelationshipEntry) => {
+    const updated = { ...entry, followUpNeeded: false };
+    const next = entries.map((item) => (item.id === entry.id ? updated : item));
+    setEntries(next);
+    writeLocalRelationships(next);
+    if (hasSupabaseConfig && userId && remoteLoadedRef.current) {
+      try {
+        setSyncStatus("saving");
+        const saved = await upsertRelationshipEntry(userId, updated);
+        const savedEntries = entries.map((item) => (item.id === entry.id ? saved : item));
+        setEntries(savedEntries);
+        writeLocalRelationships(savedEntries);
+        setSyncStatus("saved");
+      } catch (error) {
+        setSyncError(error instanceof Error ? error.message : "Could not resolve follow-up.");
+        setSyncStatus("error");
+      }
+    }
   };
 
   const unresolved = entries.filter((entry) => entry.unresolvedIssue.trim());
+  const needsSpace = entries.filter(
+    (entry) => !entry.followUpNeeded && !entry.unresolvedIssue.trim() && entry.conversationQuality <= 4,
+  );
   const radarTitle = followUps[0]?.personName
     ? `${followUps[0].personName} needs follow-up`
     : unresolved[0]?.personName
       ? `${unresolved[0].personName} has unresolved tension`
-      : "No urgent relationship action";
+      : needsSpace[0]?.personName
+        ? `${needsSpace[0].personName} may need space`
+        : "No urgent relationship action";
 
   const promptText = `Here is my relationship data:
 
 People remembered: ${people.length}
 Follow-ups needed: ${followUps.length}
+Needs space: ${needsSpace.length}
 
 Most recent interactions:
 ${people
   .slice(0, 3)
-  .map((p) => `- ${p.personName}: Quality ${p.conversationQuality}/10, Last contact: ${p.lastContact ?? "unknown"}`)
+  .map((p) => `- ${p.personName}: Quality ${p.conversationQuality}/10, Last contact: ${p.lastContact ?? "unknown"}, Notes: ${p.notes || "—"}`)
   .join("\n")}
 
 Help me understand who needs attention and give me mature next messages or actions.`;
@@ -180,12 +234,14 @@ Help me understand who needs attention and give me mature next messages or actio
           title={radarTitle}
           detail={
             followUps.length > 0
-              ? "Next mature action: follow through on the specific thing already noted."
+              ? `Text ${followUps[0].personName}: ${nextActionFromNotes(followUps[0].notes) || followUps[0].unresolvedIssue || "follow through on the noted next action"}.`
               : unresolved.length > 0
-                ? "Next mature action: repair simply before making it a bigger conversation."
-                : "Next mature action: remember one useful detail after your next interaction."
+                ? `Unresolved tension: ${unresolved.length}. Next mature action: repair simply before making it a bigger conversation.`
+                : needsSpace.length > 0
+                  ? `Needs space: ${needsSpace.length}. Next mature action: do one respectful action, then let it breathe.`
+                  : "Next mature action: remember one useful detail after your next interaction."
           }
-          tone={followUps.length || unresolved.length ? "warning" : "calm"}
+          tone={followUps.length || unresolved.length || needsSpace.length ? "warning" : "calm"}
         />
         <div className="rounded-xl border border-border bg-card p-4">
           <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
@@ -194,6 +250,7 @@ Help me understand who needs attention and give me mature next messages or actio
           <ul className="mt-2 space-y-1 text-xs text-[#6f685f]">
             <li>Do one mature action, then leave space.</li>
             <li>Do not double-text from anxiety.</li>
+            <li>Do not interrogate for certainty.</li>
             <li>Do not force a serious talk if simple repair works.</li>
           </ul>
         </div>
@@ -205,13 +262,16 @@ Help me understand who needs attention and give me mature next messages or actio
             <Users size={14} />
             PEOPLE REMEMBERED
           </h3>
-          <div className="space-y-2">
+          <div className="grid gap-2 sm:grid-cols-2">
             {people.map((person) => (
-              <div key={person.id} className="flex items-center justify-between p-2 bg-[#f0ebe2] rounded">
+              <div key={person.id} className="flex items-center justify-between p-3 bg-[#f0ebe2] rounded">
                 <div>
                   <div className="text-sm text-[#25313c]">{person.personName}</div>
                   <div className="text-[10px] text-[#6f685f]">
                     Last: {person.lastContact ?? "—"} | Connection: {person.conversationQuality ?? "—"}/10
+                  </div>
+                  <div className="mt-1 text-[11px] text-[#6f685f]">
+                    {person.notes.split("\n")[0] || "No detail saved yet."}
                   </div>
                 </div>
                 {person.followUpNeeded && <Bell size={14} className="text-[#c39a4e]" />}
@@ -233,17 +293,28 @@ Help me understand who needs attention and give me mature next messages or actio
             <label className="block">
               <span className="mb-1 block text-[10px] uppercase text-[#6f685f]">Person</span>
               <input
+                list="relationship-person-options"
                 type="text"
                 placeholder="Person name"
                 value={form.personName}
                 onChange={(e) => setForm((p) => ({ ...p, personName: e.target.value }))}
                 className="input-dark w-full"
               />
+              <datalist id="relationship-person-options">
+                {personNames.map((name) => (
+                  <option key={name} value={name} />
+                ))}
+              </datalist>
             </label>
             <div>
               <div className="flex items-center justify-between mb-1">
                 <label className="text-[10px] uppercase text-[#6f685f]">Connection Quality</label>
-                <span className="font-mono-data text-[10px] text-[#6b87ae]">{form.conversationQuality}/10</span>
+                <span
+                  className="font-mono-data text-[10px]"
+                  style={{ color: relationshipQualityColor(form.conversationQuality) }}
+                >
+                  {form.conversationQuality}/10
+                </span>
               </div>
               <input
                 type="range"
@@ -252,7 +323,11 @@ Help me understand who needs attention and give me mature next messages or actio
                 value={form.conversationQuality}
                 onChange={(e) => setForm((p) => ({ ...p, conversationQuality: Number(e.target.value) }))}
                 className="slider-dark"
+                style={{ accentColor: relationshipQualityColor(form.conversationQuality) }}
               />
+              <div className="mt-1 text-xs text-[#6f685f]">
+                {relationshipQualityLabel(form.conversationQuality)}
+              </div>
             </div>
             <label className="block">
               <span className="mb-1 block text-[10px] uppercase text-[#6f685f]">What happened?</span>
@@ -270,6 +345,16 @@ Help me understand who needs attention and give me mature next messages or actio
                 value={form.notes}
                 onChange={(e) => setForm((p) => ({ ...p, notes: e.target.value }))}
                 className="input-dark w-full h-16 resize-none"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-[10px] uppercase text-[#6f685f]">Next action</span>
+              <input
+                type="text"
+                placeholder="One mature follow-up, repair, or space-giving action"
+                value={form.nextAction}
+                onChange={(e) => setForm((p) => ({ ...p, nextAction: e.target.value }))}
+                className="input-dark w-full"
               />
             </label>
             <label className="flex items-center gap-2 text-xs text-[#6f685f] cursor-pointer">
@@ -295,10 +380,20 @@ Help me understand who needs attention and give me mature next messages or actio
           <h3 className="text-sm font-semibold text-[#c39a4e] mb-3">FOLLOW-UPS NEEDED</h3>
           <div className="space-y-2">
             {followUps.map((f) => (
-              <div key={f.id} className="flex items-center gap-2 text-sm">
-                <Bell size={12} className="text-[#c39a4e]" />
-                <span className="text-[#25313c]">{f.personName}</span>
-                <span className="text-[#6f685f]">{f.unresolvedIssue}</span>
+              <div key={f.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-[#e3d8c9] bg-[#fdfaf4] px-3 py-2 text-sm">
+                <div className="flex items-center gap-2">
+                  <Bell size={12} className="text-[#c39a4e]" />
+                  <span className="text-[#25313c]">
+                    Text {f.personName}: {nextActionFromNotes(f.notes) || f.unresolvedIssue || "follow up"}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void resolveFollowUp(f)}
+                  className="rounded-md border border-[#ddd4c6] bg-white px-2 py-1 text-xs text-[#25313c] hover:bg-[#f7f3ec]"
+                >
+                  Resolve
+                </button>
               </div>
             ))}
           </div>

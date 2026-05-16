@@ -30,11 +30,15 @@ import {
   PageDecisionHeader,
   StatusPill,
 } from "@/components/ui-kit";
+import {
+  academicSliderColor,
+  calculateAcademicPressure,
+} from "@/lib/academic-pressure";
 
 type AcademicTaskForm = {
   className: string;
   taskName: string;
-  itemType: "assignment" | "exam" | "quiz" | "lab" | "reading" | "office hours" | "study block";
+  itemType: "assignment" | "exam" | "quiz" | "lab" | "project" | "reading";
   dueDate: string;
   estimatedHours: number;
   difficulty: number;
@@ -217,8 +221,11 @@ export default function AcademicsPage() {
     score: Number(task.priority_score ?? 0),
   }));
   const highestRisk = highRiskTasks[0] ?? sortedTasks[0] ?? null;
-  const academicPressure =
-    highRiskTasks.length > 0 ? "high" : sortedTasks.length >= 4 ? "medium" : "low";
+  const academicPressure = calculateAcademicPressure(sortedTasks);
+  const courseOptions = useMemo(
+    () => Array.from(new Set(sortedTasks.map((task) => task.class_name).filter(Boolean))).sort(),
+    [sortedTasks],
+  );
 
   const handleAddTask = async () => {
     if (!form.className.trim() || !form.taskName.trim()) return;
@@ -325,8 +332,8 @@ export default function AcademicsPage() {
 
       <NextActionCard
         label="Academic pressure"
-        title={`${academicPressure[0].toUpperCase()}${academicPressure.slice(1)}`}
-        tone={academicPressure === "high" ? "warning" : "calm"}
+        title={`${academicPressure.category} · ${academicPressure.rawScore.toFixed(1)}`}
+        tone={academicPressure.category === "High" || academicPressure.category === "Critical" ? "warning" : "calm"}
         detail={
           highestRisk
             ? `Highest risk: ${highestRisk.class_name} - ${highestRisk.task_name}. Next action: start the first 25 minutes or mark it in progress.`
@@ -360,6 +367,7 @@ export default function AcademicsPage() {
                   Course
                 </label>
                 <input
+                  list="academic-course-options"
                   type="text"
                   placeholder="BIO 101"
                   value={form.className}
@@ -368,6 +376,16 @@ export default function AcademicsPage() {
                   }
                   className="input-dark w-full"
                 />
+                <datalist id="academic-course-options">
+                  {courseOptions.map((course) => (
+                    <option key={course} value={course} />
+                  ))}
+                </datalist>
+                {form.className.trim() && !courseOptions.includes(form.className.trim()) ? (
+                  <div className="mt-1 text-[10px] text-[#8c8478]">
+                    Quick-create course on save: {form.className.trim()}
+                  </div>
+                ) : null}
               </div>
               <div>
                 <label className="text-[10px] uppercase tracking-wider text-[#6f685f] block mb-1">
@@ -387,9 +405,8 @@ export default function AcademicsPage() {
                   <option value="exam">Exam</option>
                   <option value="quiz">Quiz</option>
                   <option value="lab">Lab</option>
+                  <option value="project">Project</option>
                   <option value="reading">Reading</option>
-                  <option value="office hours">Office hours</option>
-                  <option value="study block">Study block</option>
                 </select>
               </div>
               <div>
@@ -439,6 +456,7 @@ export default function AcademicsPage() {
                     }))
                   }
                   className="slider-dark"
+                  style={{ accentColor: academicSliderColor(form.difficulty) }}
                 />
                 <span className="text-[10px] text-[#6f685f]">
                   {form.difficulty}/10
@@ -460,6 +478,7 @@ export default function AcademicsPage() {
                     }))
                   }
                   className="slider-dark"
+                  style={{ accentColor: academicSliderColor(form.gradeImpact) }}
                 />
                 <span className="text-[10px] text-[#6f685f]">
                   {form.gradeImpact}/10
@@ -510,7 +529,7 @@ export default function AcademicsPage() {
 
           <div className="card-surface p-4">
             <h3 className="text-sm font-semibold text-[#25313c] mb-3">
-              TASK LIST - Sorted by Priority
+              DEADLINES - Sorted by Grade Risk
             </h3>
             {error ? (
               <div className="mb-3 rounded border border-[#c97a73]/30 bg-[#c97a73]/10 px-3 py-2 text-xs text-[#c97a73]">
@@ -671,8 +690,8 @@ export default function AcademicsPage() {
               </div>
               <div className="flex items-center justify-between gap-3 rounded-md bg-[#f0ebe2] px-3 py-2">
                 <span>Grade risk</span>
-                <StatusPill tone={academicPressure === "high" ? "danger" : "neutral"}>
-                  {academicPressure}
+                <StatusPill tone={academicPressure.category === "High" || academicPressure.category === "Critical" ? "danger" : "neutral"}>
+                  {academicPressure.category}
                 </StatusPill>
               </div>
             </div>
@@ -705,16 +724,6 @@ export default function AcademicsPage() {
             )}
           </CollapsibleSection>
 
-          <div className="card-surface p-4">
-            <h3 className="text-sm font-semibold text-[#25313c] mb-3">
-              DRAFT MODE
-            </h3>
-            <div className="text-xs text-[#6f685f]">
-              {supabaseConfigured
-                ? "Needs login. Unsynced tasks shown here are draft only."
-                : "Draft only. Saves are disabled until the env vars are added."}
-            </div>
-          </div>
         </div>
       </div>
     </div>

@@ -53,6 +53,7 @@ import {
 import { toDateKey } from "@/lib/date-helpers";
 import { useSupabaseSession } from "@/hooks/useSupabaseSession";
 import ExecutionTruthPanel from "@/components/ExecutionTruthPanel";
+import CapacityTimeline from "@/components/CapacityTimeline";
 import {
   buildPlanningSnapshot,
   validateImportRealism,
@@ -95,6 +96,11 @@ import {
   SegmentedModeTabs,
   StatusPill,
 } from "@/components/ui-kit";
+import {
+  formatDecimalHours,
+  getOpenTimeMinutes,
+  minutesToDecimalHours,
+} from "@/lib/calendar-capacity";
 
 type View = "today" | "week" | "month" | "agenda";
 type WorkflowMode = "reality" | "plan" | "execute" | "details";
@@ -867,6 +873,7 @@ export default function CalendarPage() {
             anchors={onDayAnchors}
             conflicts={conflicts}
           />
+          <CapacityTimeline anchors={onDayAnchors} timeBlocks={onDayTimeBlocks} />
           <FixedAnchorsPanel
             anchors={onDayAnchors}
             onUpdate={updateAnchor}
@@ -1024,7 +1031,8 @@ function RealitySummary({
         : "border-rose-200 bg-rose-50 text-rose-800";
   const largest = planning.largestWindow;
   const topDeepWork = planning.deepWorkWindows[0];
-  const focusHours = (planning.capacity.deepWorkCapacityMinutes / 60).toFixed(1);
+  const openMinutes = getOpenTimeMinutes(planning);
+  const focusHours = minutesToDecimalHours(planning.capacity.deepWorkCapacityMinutes);
   const deepWorkText = topDeepWork
     ? `${topDeepWork.start}-${topDeepWork.end}`
     : "no protected deep-work window";
@@ -1033,7 +1041,8 @@ function RealitySummary({
       <div className={`rounded-2xl border p-4 ${tone}`}>
         <div className="text-[10px] uppercase tracking-wider font-semibold">Plan reality</div>
         <div className="mt-2 text-base font-semibold">
-          You realistically have {focusHours} hours of quality focus capacity today. Best
+          You realistically have {focusHours} hours of quality focus capacity today and{" "}
+          {formatDecimalHours(openMinutes)} open overall. Best
           deep-work window: {deepWorkText}. Shutdown protected at{" "}
           {planning.shutdownReserve.start}.
         </div>
@@ -1057,8 +1066,8 @@ function RealitySummary({
       <div className="grid gap-3 md:grid-cols-3">
         <SmallStat
           label="Open time"
-          value={`${planning.capacity.totalAvailableMinutes} min`}
-          hint="After fixed commitments, buffers, and reserves"
+          value={formatDecimalHours(openMinutes)}
+          hint={`${openMinutes} min after fixed commitments, buffers, and reserves`}
         />
         <SmallStat
           label="Best focus window"
@@ -2198,10 +2207,10 @@ function AddAnchorPanel({
             ))}
           </select>
         </label>
+      </div>
+      <div className="grid gap-2 md:grid-cols-3 text-xs">
         <Field label="Date" type="date" value={draft.date} onChange={(v) => update("date", v)} />
         <Field label="Start" type="time" value={draft.start_time} onChange={onStartChange} />
-      </div>
-      <div className="grid gap-2 md:grid-cols-5 text-xs">
         <Field label="End" type="time" value={draft.end_time} onChange={(v) => update("end_time", v)} />
       </div>
 

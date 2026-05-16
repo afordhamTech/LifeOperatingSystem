@@ -12,6 +12,7 @@ import {
 } from "@/lib/lifeee-persistence";
 import { Flame } from "lucide-react";
 import { Label } from "@/components/ui/label";
+import { PageDecisionHeader } from "@/components/ui-kit";
 
 const STORAGE_KEY = "lifeee.faith_logs.v1";
 
@@ -163,7 +164,15 @@ export default function FaithPage() {
     };
   }, [hasSupabaseConfig, sessionLoading, today, userId, weekStartKey]);
 
-  const score = calcFaithScore(form.prayerDone, form.bibleReading, form.mainLesson, form.actionStep);
+  const breakdown = {
+    prayer: form.prayerDone ? 100 : 0,
+    bibleStudy: form.chapterStudied.trim() || form.bibleReading.trim() ? 100 : 0,
+    reflection: form.gratitude.trim() && form.mainLesson.trim() ? 100 : 0,
+    actionStep: form.actionStep.trim() ? 100 : 0,
+  };
+  const score = Math.round(
+    (breakdown.prayer + breakdown.bibleStudy + breakdown.reflection + breakdown.actionStep) / 4,
+  );
 
   const handleSave = async () => {
     if (conflict) {
@@ -227,9 +236,22 @@ export default function FaithPage() {
     setSyncStatus("saved");
   };
 
-  const streak = [...dailyScores]
-    .sort((a, b) => b.date.localeCompare(a.date))
-    .reduce((count, day) => (count === -1 ? -1 : day.score >= 50 ? count + 1 : -1), 0);
+  const scoreByDate = new Map(dailyScores.map((day) => [day.date, day.score]));
+  const lastSevenDays = Array.from({ length: 7 }).map((_, index) => {
+    const date = new Date(`${today}T00:00:00`);
+    date.setDate(date.getDate() - (6 - index));
+    const key = date.toISOString().split("T")[0] ?? "";
+    return { date: key, score: scoreByDate.get(key) ?? (key === today ? score : 0) };
+  });
+  let streak = 0;
+  for (let offset = 0; offset < 30; offset += 1) {
+    const date = new Date(`${today}T00:00:00`);
+    date.setDate(date.getDate() - offset);
+    const key = date.toISOString().split("T")[0] ?? "";
+    const dayScore = key === today ? score : scoreByDate.get(key) ?? 0;
+    if (dayScore <= 0) break;
+    streak += 1;
+  }
 
   const promptText = `Here is my faith data:
 
@@ -241,22 +263,19 @@ Current struggle: ${form.temptation || "—"}
 Prayer focus: ${form.prayerDone ? "Completed" : "Not yet"}
 Action step: ${form.actionStep || "—"}
 Gratitude: ${form.gratitude || "—"}
-Faith score: ${score}%
+Faith practice: ${score}%
 
 Help me turn this into a short Bible study, reflection, prayer, and one action step for today.`;
 
   return (
     <div className="space-y-6">
       <div className="border-b border-[#ddd4c6] pb-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold text-[#25313c]">Faith</h1>
-            <p className="text-sm text-[#6f685f] mt-1">
-              Track spiritual discipline, Bible study, prayer, and alignment with your values.
-            </p>
-          </div>
+        <PageDecisionHeader
+          title="Faith"
+          question="Read, reflect, pray, and obey one concrete step today."
+        >
           <SyncBadge status={syncStatus} />
-        </div>
+        </PageDecisionHeader>
         {syncError && <p className="mt-2 text-xs text-destructive">{syncError}</p>}
         {conflict ? (
           <div className="mt-3 rounded border border-[#c39a4e]/30 bg-[#c39a4e]/10 p-3 text-xs text-[#6f685f]">
@@ -290,7 +309,7 @@ Help me turn this into a short Bible study, reflection, prayer, and one action s
           </div>
           <div>
             <div className="text-[10px] uppercase text-[#6f685f]">Prayer focus</div>
-            <div className="text-[#25313c]">{form.prayerDone ? "Completed" : "Not yet"}</div>
+            <div className="text-[#25313c]">{form.question || "—"}</div>
           </div>
           <div>
             <div className="text-[10px] uppercase text-[#6f685f]">Action step</div>
@@ -303,8 +322,8 @@ Help me turn this into a short Bible study, reflection, prayer, and one action s
         <div className="lg:col-span-2 card-surface p-4">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-sm font-semibold text-[#25313c]">DAILY CHECK-IN</h3>
-            <span className="text-[10px] text-[#6a9a74]">
-              Church involvement and temptation save to Supabase.
+            <span className="text-[10px] text-[#6f685f]">
+              Private by default
             </span>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -316,6 +335,20 @@ Help me turn this into a short Bible study, reflection, prayer, and one action s
                 className="rounded"
               />
               Prayer completed
+            </label>
+            <label className="flex items-center gap-2 text-sm text-[#6f685f] cursor-pointer">
+              <input
+                type="checkbox"
+                checked={Boolean(form.bibleReading.trim())}
+                onChange={(e) =>
+                  setForm((p) => ({
+                    ...p,
+                    bibleReading: e.target.checked ? p.bibleReading || "Completed" : "",
+                  }))
+                }
+                className="rounded"
+              />
+              Bible reading completed
             </label>
             <label className="flex items-center gap-2 text-sm text-[#6f685f] cursor-pointer">
               <input
@@ -366,11 +399,11 @@ Help me turn this into a short Bible study, reflection, prayer, and one action s
             </div>
             <div>
               <Label htmlFor="faith-question" className="text-[10px] uppercase text-[#6f685f] mb-1">
-                Question I have
+                Prayer focus / question
               </Label>
               <textarea
                 id="faith-question"
-                placeholder="Question I had"
+                placeholder="Prayer focus or question"
                 value={form.question}
                 onChange={(e) => setForm((p) => ({ ...p, question: e.target.value }))}
                 className="input-dark h-16 resize-none w-full"
@@ -415,7 +448,7 @@ Help me turn this into a short Bible study, reflection, prayer, and one action s
             </div>
           </div>
           <button onClick={handleSave} className="btn-primary w-full mt-3">
-            {syncStatus === "saving" ? "Saving..." : "Save & Score"}
+            {syncStatus === "saving" ? "Saving..." : "Save Faith Practice"}
           </button>
         </div>
 
@@ -433,13 +466,13 @@ Help me turn this into a short Bible study, reflection, prayer, and one action s
           <div className="card-surface p-4">
             <h3 className="text-sm font-semibold text-[#25313c] mb-3">THIS WEEK</h3>
             <div className="flex gap-1 justify-center">
-              {dailyScores.map((day, i) => (
+              {lastSevenDays.map((day, i) => (
                 <div
                   key={`${day.date}-${i}`}
                   className={`w-8 h-8 rounded flex items-center justify-center text-[10px] font-mono-data ${
-                    day.score >= 75
+                    day.score > 0 && day.score >= 75
                       ? "bg-[#6a9a74]/20 text-[#6a9a74]"
-                      : day.score >= 50
+                      : day.score > 0 && day.score >= 50
                         ? "bg-[#c39a4e]/20 text-[#c39a4e]"
                         : "bg-[#f2ece3] text-[#8c8478]"
                   }`}
@@ -447,9 +480,6 @@ Help me turn this into a short Bible study, reflection, prayer, and one action s
                 >
                   {new Date(day.date).toLocaleDateString("en-US", { weekday: "narrow" })}
                 </div>
-              ))}
-              {dailyScores.length === 0 && Array.from({ length: 7 }).map((_, i) => (
-                <div key={i} className="w-8 h-8 rounded bg-[#f2ece3]" />
               ))}
             </div>
             <div className="mt-3 text-center">
@@ -463,10 +493,10 @@ Help me turn this into a short Bible study, reflection, prayer, and one action s
           <div className="card-surface p-4">
             <h3 className="text-sm font-semibold text-[#25313c] mb-2">BREAKDOWN</h3>
             <div className="space-y-2 text-xs">
-              <ScoreItem label="Prayer" value={form.prayerDone ? 30 : 0} max={30} />
-              <ScoreItem label="Bible Study" value={form.bibleReading ? 30 : 0} max={30} />
-              <ScoreItem label="Reflection" value={form.mainLesson ? 20 : 0} max={20} />
-              <ScoreItem label="Action Step" value={form.actionStep ? 20 : 0} max={20} />
+              <ScoreItem label="Prayer" value={breakdown.prayer} max={100} />
+              <ScoreItem label="Bible Study" value={breakdown.bibleStudy} max={100} />
+              <ScoreItem label="Reflection" value={breakdown.reflection} max={100} />
+              <ScoreItem label="Action Step" value={breakdown.actionStep} max={100} />
             </div>
           </div>
         </div>

@@ -13,6 +13,7 @@ import {
   RotateCcw,
   CalendarPlus,
   ParkingCircle,
+  Zap,
 } from "lucide-react";
 import {
   CONSEQUENCE_LEVELS,
@@ -80,6 +81,7 @@ import {
   EmptyStateCard,
   AIActionButton,
 } from "@/components/ui-kit";
+import { parseTaskTitleInput } from "@/lib/task-nlp-parser";
 
 type PageMode = "capture" | "plan" | "review";
 
@@ -223,9 +225,11 @@ export default function TaskCommandPage() {
   };
 
   const addTask = () => {
-    if (!draft.title.trim()) return;
+    const parsed = parseTaskTitleInput(draft.title);
+    const title = parsed.cleanedTitle || draft.title.trim();
+    if (!title) return;
     const task = makeTask({
-      title: draft.title.trim(),
+      title,
       description: draft.description.trim(),
       task_type: draft.task_type,
       due_date: draft.due_date || null,
@@ -379,9 +383,10 @@ export default function TaskCommandPage() {
           {getSyncLabel(visibleSyncStatus)}
         </span>
         <label className="text-xs text-[#6f685f] flex items-center gap-2">
+          <Zap size={13} className="text-[#c39a4e]" />
           Energy
           <input
-            type="number"
+            type="range"
             min={1}
             max={10}
             value={currentEnergy}
@@ -394,8 +399,9 @@ export default function TaskCommandPage() {
                 // ignore
               }
             }}
-            className="w-16 rounded-md border border-[#ddd4c6] px-2 py-1 text-sm"
+            className="w-24 accent-[#c39a4e]"
           />
+          <span className="font-mono-data text-xs text-[#25313c]">{currentEnergy}/10</span>
         </label>
         <AIActionButton onClick={copyPrompt}>
           {copied ? (
@@ -493,16 +499,37 @@ function CaptureMode({
   addTask: () => void;
   smartViews: ReturnType<typeof buildTaskSmartViews>;
 }) {
+  const applyTitleParse = (value: string) => {
+    const parsed = parseTaskTitleInput(value);
+    setDraft((current) => ({
+      ...current,
+      title: value,
+      task_type: parsed.taskType ?? current.task_type,
+      due_date: parsed.dueDate ?? current.due_date,
+      estimated_minutes: parsed.estimatedMinutes ?? current.estimated_minutes,
+      fixed_time: parsed.fixedTime ?? current.fixed_time,
+      priority: parsed.priority ?? current.priority,
+    }));
+  };
+
+  const submitIfShortcut = (event: React.KeyboardEvent<HTMLElement>) => {
+    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault();
+      addTask();
+    }
+  };
+
   return (
     <div className="space-y-6">
-      <div className="card-surface p-4 space-y-3">
+      <div className="card-surface p-4 space-y-3" onKeyDown={submitIfShortcut}>
         <div className="text-sm font-medium text-[#25313c]">Add a task</div>
         <div className="grid gap-2 md:grid-cols-3">
           <input
+            data-lifeee-capture-input="true"
             placeholder="Title (e.g. Connex Zoom, Dishes, MCAT block)"
             value={draft.title}
-            onChange={(e) => setDraft({ ...draft, title: e.target.value })}
-            className="rounded-md border border-[#ddd4c6] px-3 py-2 text-sm md:col-span-2"
+            onChange={(e) => applyTitleParse(e.target.value)}
+            className="rounded-md border border-[#b9a98f] bg-[#fffdf8] px-3 py-2 text-sm shadow-inner outline-none transition focus:border-[#6b87ae] focus:ring-2 focus:ring-[#6b87ae]/20 md:col-span-2"
           />
           <select
             value={draft.task_type}
@@ -516,9 +543,9 @@ function CaptureMode({
             ))}
           </select>
         </div>
-        <div className="grid gap-2 md:grid-cols-6 text-xs">
-          <NumField label="Due (YYYY-MM-DD)" type="text" value={draft.due_date} onChange={(v) => setDraft({ ...draft, due_date: v as string })} />
-          <NumField label="Est. minutes" value={draft.estimated_minutes} onChange={(v) => setDraft({ ...draft, estimated_minutes: Number(v) })} />
+        <div className="grid gap-2 text-xs md:grid-cols-3">
+          <NumField label="Due date" type="date" value={draft.due_date} onChange={(v) => setDraft({ ...draft, due_date: v as string })} />
+          <NumField label="Est. minutes" min={0} value={draft.estimated_minutes} onChange={(v) => setDraft({ ...draft, estimated_minutes: Number(v) })} />
           <label className="flex flex-col text-[10px] uppercase tracking-wider text-[#6f685f]">
             Priority
             <select
@@ -543,7 +570,7 @@ function CaptureMode({
               className="min-h-[70px] w-full rounded-md border border-[#ddd4c6] px-3 py-2 text-sm"
             />
             <div className="grid gap-2 md:grid-cols-6 text-xs">
-              <NumField label="Fixed time (e.g. 14:00)" type="text" value={draft.fixed_time} onChange={(v) => setDraft({ ...draft, fixed_time: v as string })} />
+              <NumField label="Fixed time" type="time" value={draft.fixed_time} onChange={(v) => setDraft({ ...draft, fixed_time: v as string })} />
               <label className="flex flex-col text-[10px] uppercase tracking-wider text-[#6f685f]">
                 Cost if delayed
                 <select
@@ -567,20 +594,20 @@ function CaptureMode({
               </label>
             </div>
             <div className="grid gap-2 md:grid-cols-6 text-xs">
-              <NumField label="Energy req" value={draft.energy_required} onChange={(v) => setDraft({ ...draft, energy_required: Number(v) })} />
-              <NumField label="Resistance" value={draft.resistance_level} onChange={(v) => setDraft({ ...draft, resistance_level: Number(v) })} />
-              <NumField label="Urgency" value={draft.urgency} onChange={(v) => setDraft({ ...draft, urgency: Number(v) })} />
-              <NumField label="Importance" value={draft.importance} onChange={(v) => setDraft({ ...draft, importance: Number(v) })} />
-              <NumField label="Cost if delayed" value={draft.consequence_if_delayed} onChange={(v) => setDraft({ ...draft, consequence_if_delayed: Number(v) })} />
-              <NumField label="Trust impact" value={draft.trust_impact} onChange={(v) => setDraft({ ...draft, trust_impact: Number(v) })} />
-              <NumField label="Leverage" value={draft.time_efficiency} onChange={(v) => setDraft({ ...draft, time_efficiency: Number(v) })} />
+              <NumField label="Energy req" min={1} max={10} value={draft.energy_required} onChange={(v) => setDraft({ ...draft, energy_required: Number(v) })} />
+              <NumField label="Resistance" min={1} max={10} value={draft.resistance_level} onChange={(v) => setDraft({ ...draft, resistance_level: Number(v) })} />
+              <NumField label="Urgency" min={1} max={10} value={draft.urgency} onChange={(v) => setDraft({ ...draft, urgency: Number(v) })} />
+              <NumField label="Importance" min={1} max={10} value={draft.importance} onChange={(v) => setDraft({ ...draft, importance: Number(v) })} />
+              <NumField label="Cost if delayed" min={1} max={10} value={draft.consequence_if_delayed} onChange={(v) => setDraft({ ...draft, consequence_if_delayed: Number(v) })} />
+              <NumField label="Trust impact" min={1} max={10} value={draft.trust_impact} onChange={(v) => setDraft({ ...draft, trust_impact: Number(v) })} />
+              <NumField label="Leverage" min={1} max={10} value={draft.time_efficiency} onChange={(v) => setDraft({ ...draft, time_efficiency: Number(v) })} />
             </div>
           </div>
         </AdvancedDetails>
 
         <button
           onClick={addTask}
-          className="inline-flex items-center gap-2 rounded-lg bg-[#25313c] px-3 py-2 text-sm text-white hover:bg-[#3a4754]"
+          className="ml-auto inline-flex w-full items-center justify-center gap-2 rounded-lg bg-[#25313c] px-3 py-2 text-sm text-white hover:bg-[#3a4754] sm:w-auto"
         >
           <Plus size={14} /> Add to Inbox
         </button>
@@ -810,17 +837,26 @@ function NumField({
   value,
   onChange,
   type = "number",
+  min,
+  max,
+  step,
 }: {
   label: string;
   value: string | number;
   onChange: (v: string | number) => void;
-  type?: "number" | "text";
+  type?: "number" | "text" | "date" | "time";
+  min?: number;
+  max?: number;
+  step?: number;
 }) {
   return (
     <label className="flex flex-col text-[10px] uppercase tracking-wider text-[#6f685f]">
       {label}
       <input
         type={type}
+        min={min}
+        max={max}
+        step={step}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className="mt-1 rounded-md border border-[#ddd4c6] px-2 py-1 text-sm normal-case tracking-normal"

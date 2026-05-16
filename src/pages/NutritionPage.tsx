@@ -32,9 +32,15 @@ import {
 } from "@/lib/lifeee-persistence";
 import {
   CollapsibleSection,
+  InsightCard,
   NextActionCard,
   PageDecisionHeader,
 } from "@/components/ui-kit";
+import {
+  DEFAULT_MEAL_TEMPLATES,
+  chooseNextFoodFix,
+  type MealTemplate,
+} from "@/lib/nutrition-helpers";
 
 type NutritionForm = {
   bodyweight: number;
@@ -158,10 +164,14 @@ export default function NutritionPage() {
   }, [hasSupabaseConfig, sessionLoading, setSyncStatus, today, userId]);
 
   const maintenance = Math.round(form.bodyweight * 15);
-  const targetCalories = form.trainingDay
+  const computedCalorieTarget = form.trainingDay
     ? Math.max(3000, Math.min(3400, maintenance + surplus))
     : maintenance + surplus;
-  const proteinTarget = form.trainingDay ? 165 : Math.round(form.bodyweight * 1.0);
+  // Display-fallback defaults — never silently overwrite stored user values.
+  const targetCalories = computedCalorieTarget < 2200 ? 3200 : computedCalorieTarget;
+  const computedProtein = form.trainingDay ? 165 : Math.round(form.bodyweight * 1.0);
+  const proteinTarget = computedProtein < 130 ? 170 : computedProtein;
+  const waterGlassTarget = 8; // ~4L at 16oz/glass
 
   const currentStatus = calcNutritionStatus(
     form.calories,
@@ -182,16 +192,22 @@ export default function NutritionPage() {
         : "Behind";
   const caloriesRemaining = Math.max(0, targetCalories - form.calories);
   const proteinRemaining = Math.max(0, proteinTarget - form.proteinG);
-  const nextFoodFix =
-    !hasNutritionLogged
-      ? "Log the first meal."
-      : proteinRemaining > 35
-        ? "Whey smoothie + bagel."
-        : caloriesRemaining > 700
-          ? "Rice/chicken meal or dining hall plate."
-          : form.waterOz < 6
-            ? "Water bottle plus electrolytes."
-            : "Protein shake if dinner is delayed.";
+  const waterGlassesRemaining = Math.max(0, waterGlassTarget - form.waterOz);
+  const hour = new Date().getHours();
+  const isEndOfDay = hour >= 20;
+
+  const mealTemplates: MealTemplate[] = DEFAULT_MEAL_TEMPLATES;
+  const foodFix = chooseNextFoodFix(mealTemplates, {
+    calories: caloriesRemaining,
+    proteinG: proteinRemaining,
+  });
+  const nextFoodFix = !hasNutritionLogged
+    ? `Start with ${foodFix.label}.`
+    : isEndOfDay && caloriesRemaining < 200 && proteinRemaining < 20
+      ? "On target — keep current pace."
+      : waterGlassesRemaining > 3
+        ? "Refill water bottle (target ~3.5–4.5L)."
+        : foodFix.label;
 
   const weightTrend = history
     .filter((row) => row.bodyweight != null)
@@ -297,6 +313,21 @@ export default function NutritionPage() {
 
   const waterRemaining = Math.max(0, 8 - form.waterOz);
 
+  const addMealTemplate = (m: MealTemplate) => {
+    setForm((p) => ({
+      ...p,
+      calories: p.calories + m.calories,
+      proteinG: p.proteinG + m.proteinG,
+      carbsG: p.carbsG + m.carbsG,
+      fatG: p.fatG + m.fatG,
+      mealsCount: p.mealsCount + 1,
+      notes: p.notes
+        ? `${p.notes}\n+ ${m.name}`
+        : `+ ${m.name}`,
+    }));
+    setNotice(`${m.name} added — remember to Save Nutrition.`);
+  };
+
   return (
     <div className="space-y-6">
       <PageDecisionHeader
@@ -307,15 +338,65 @@ export default function NutritionPage() {
       </PageDecisionHeader>
 
       <NextActionCard
-        label="Today's Fuel Status"
+        label="Fuel Status"
         title={visibleFuelStatus}
         tone={
           visibleFuelStatus === "On track" || visibleFuelStatus === "Not logged yet"
             ? "calm"
             : "warning"
         }
-        detail={`${caloriesRemaining} calories, ${proteinRemaining}g protein, and ${Math.max(0, 8 - form.waterOz)} water glasses remaining. Next Food Fix: ${nextFoodFix}`}
+        detail={`${caloriesRemaining} calories, ${proteinRemaining}g protein, and ${waterGlassesRemaining} water glasses remaining. Next Food Fix: ${nextFoodFix}`}
       />
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <InsightCard
+          label="Calories remaining"
+          value={hasNutritionLogged ? `${caloriesRemaining}` : "Not logged yet"}
+          interpretation={hasNutritionLogged ? `of ${targetCalories} target` : "Log a meal to begin."}
+        />
+        <InsightCard
+          label="Protein remaining"
+          value={hasNutritionLogged ? `${proteinRemaining}g` : "Not logged yet"}
+          interpretation={hasNutritionLogged ? `of ${proteinTarget}g target` : "Log a meal to begin."}
+        />
+        <InsightCard
+          label="Water remaining"
+          value={hasNutritionLogged ? `${waterGlassesRemaining} glasses` : "Not logged yet"}
+          interpretation={hasNutritionLogged ? `of ${waterGlassTarget} glasses (~4L)` : "Log a meal to begin."}
+        />
+      </div>
+
+      <NextActionCard
+        label="Next Food Fix"
+        title={nextFoodFix}
+        tone={nextFoodFix.startsWith("On target") ? "calm" : "warning"}
+        detail="Tap a meal template below to log it instantly."
+      />
+
+      <div className="card-surface p-4">
+        <h3 className="text-sm font-semibold text-[#25313c] mb-3">
+          QUICK MEAL TEMPLATES
+        </h3>
+        <div className="flex flex-wrap gap-2">
+          {mealTemplates.map((m) => (
+            <button
+              key={m.name}
+              type="button"
+              onClick={() => addMealTemplate(m)}
+              className="rounded border border-[#ddd4c6] bg-[#fdfaf4] px-3 py-2 text-xs text-[#25313c] hover:bg-[#f0ebe2] transition-colors"
+              title={`+${m.calories} cal, +${m.proteinG}g protein`}
+            >
+              + {m.name}
+              <span className="ml-1 text-[10px] text-[#6f685f]">
+                ({m.calories}c / {m.proteinG}p)
+              </span>
+            </button>
+          ))}
+        </div>
+        <div className="mt-2 text-[10px] text-[#6f685f]">
+          Adds macros to today's totals. Save Nutrition to persist.
+        </div>
+      </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="space-y-4">
@@ -412,9 +493,9 @@ export default function NutritionPage() {
                   }
                   className="input-dark w-full"
                 />
-                <div className="mt-1 h-1 bg-[#ece5da] rounded-full overflow-hidden">
+                <div className="mt-1 h-2 bg-[#ece5da] rounded-full overflow-hidden">
                   <div
-                    className="h-full bg-[#c39a4e] rounded-full transition-all"
+                    className={`h-full rounded-full transition-all ${form.calories >= targetCalories ? "bg-[#6a9a74]" : "bg-[#c39a4e]"}`}
                     style={{
                       width: `${Math.min(100, (form.calories / targetCalories) * 100)}%`,
                     }}
@@ -439,9 +520,9 @@ export default function NutritionPage() {
                   }
                   className="input-dark w-full"
                 />
-                <div className="mt-1 h-1 bg-[#ece5da] rounded-full overflow-hidden">
+                <div className="mt-1 h-2 bg-[#ece5da] rounded-full overflow-hidden">
                   <div
-                    className="h-full bg-[#6a9a74] rounded-full transition-all"
+                    className={`h-full rounded-full transition-all ${form.proteinG >= proteinTarget ? "bg-[#6a9a74]" : "bg-[#6b87ae]"}`}
                     style={{
                       width: `${Math.min(100, (form.proteinG / proteinTarget) * 100)}%`,
                     }}
@@ -482,30 +563,21 @@ export default function NutritionPage() {
                 <label className="text-[10px] uppercase text-[#6f685f] block mb-2">
                   Water Glasses
                 </label>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setForm((p) => ({ ...p, waterOz: Math.max(0, p.waterOz - 1) }))}
-                    className="p-1 bg-[#f0ebe2] rounded hover:bg-[#ebe4da] transition-colors"
-                  >
-                    <Minus size={14} />
-                  </button>
-                  <div className="flex gap-1 flex-1 justify-center">
-                    {Array.from({ length: 8 }).map((_, i) => (
+                <div className="flex gap-1">
+                  {Array.from({ length: 8 }).map((_, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => setForm((p) => ({ ...p, waterOz: i + 1 }))}
+                      className="rounded p-1 hover:bg-[#f0ebe2]"
+                      aria-label={`Set water to ${i + 1} glasses`}
+                    >
                       <Droplets
-                        key={i}
-                        size={16}
-                        className={
-                          i < form.waterOz ? "text-[#6b87ae]" : "text-white/[0.06]"
-                        }
+                        size={18}
+                        className={i < form.waterOz ? "text-[#6b87ae]" : "text-[#d8cdbd]"}
                       />
-                    ))}
-                  </div>
-                  <button
-                    onClick={() => setForm((p) => ({ ...p, waterOz: Math.min(8, p.waterOz + 1) }))}
-                    className="p-1 bg-[#f0ebe2] rounded hover:bg-[#ebe4da] transition-colors"
-                  >
-                    <Plus size={14} />
-                  </button>
+                    </button>
+                  ))}
                 </div>
                 <div className="mt-1 text-[10px] text-[#6f685f] text-center">
                   {waterRemaining} more glasses to hit the target
@@ -569,38 +641,6 @@ export default function NutritionPage() {
         </div>
 
         <div className="space-y-4">
-          <div className="card-surface p-4">
-            <h3 className="text-sm font-semibold text-[#25313c] mb-3">
-              FUEL STATUS
-            </h3>
-            <div className="grid grid-cols-2 gap-3 text-xs">
-              <StatusChip label="Calories" ok={currentStatus.caloriesHit} />
-              <StatusChip label="Protein" ok={currentStatus.proteinHit} />
-              <StatusChip label="Water" ok={currentStatus.waterHit} />
-              <StatusChip label="Meals" ok={currentStatus.timingOk} />
-            </div>
-            <div className="mt-3 text-sm text-[#6f685f]">
-              Checks: <span className="text-[#25313c]">{currentStatus.checks}/4</span>
-            </div>
-            <div className="mt-2 text-sm">
-              Status:{" "}
-              <span
-                className={
-                  !hasNutritionLogged
-                    ? "text-[#6f685f]"
-                    :
-                  currentStatus.status === "green"
-                    ? "text-[#6a9a74]"
-                    : currentStatus.status === "yellow"
-                      ? "text-[#c39a4e]"
-                      : "text-[#c97a73]"
-                }
-              >
-                {hasNutritionLogged ? visibleFuelStatus : "Not logged yet"}
-              </span>
-            </div>
-          </div>
-
           <div className="card-surface p-4">
             <h3 className="text-sm font-semibold text-[#25313c] mb-3">
               SAVE NUTRITION
@@ -693,20 +733,6 @@ export default function NutritionPage() {
           </div>
         </div>
       </div>
-    </div>
-  );
-}
-
-function StatusChip({ label, ok }: { label: string; ok: boolean }) {
-  return (
-    <div
-      className="flex items-center justify-between rounded px-3 py-2"
-      style={{ backgroundColor: ok ? "rgba(34,197,94,0.08)" : "rgba(239,68,68,0.08)" }}
-    >
-      <span className="text-[#6f685f]">{label}</span>
-      <span className={ok ? "text-[#6a9a74]" : "text-[#c97a73]"}>
-        {ok ? "Hit" : "Miss"}
-      </span>
     </div>
   );
 }
