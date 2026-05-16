@@ -78,6 +78,8 @@ import {
 import {
   MCAT_PHASE_0_TEMPLATE,
   MCAT_PHASE_0_TEMPLATE_KEY,
+  MCAT_PHASE_REGISTRY,
+  MCAT_PREP_SYSTEM_TAGLINE,
   MCAT_PHASE_0_SOURCE,
   getMcatPhase0TaskForDate,
   summarizeMcatPhase0SeedStatus,
@@ -350,11 +352,15 @@ function McatPhase0ScheduleCard({
               {summary.statusLabel}
             </span>
           </div>
+          <p className="mt-1 text-xs text-muted-foreground" data-phase-count={MCAT_PHASE_REGISTRY.length}>
+            Phase 0 of the MCAT prep system · later phases add on top
+          </p>
           <p className="mt-2 text-sm text-muted-foreground">
             {activePlan
               ? `${activePlan.seed_start_date} → ${activePlan.seed_end_date} · 78 total hours · ${activePlan.phase_name}`
               : `Starts today when seeded · 70 days · 78 total hours · ${MCAT_PHASE_0_TEMPLATE.phase_name}`}
           </p>
+          <p className="mt-1 text-xs italic text-muted-foreground">{MCAT_PREP_SYSTEM_TAGLINE}</p>
           {!activePlan ? (
             <p className="mt-1 text-xs text-muted-foreground">
               Week 1 begins on {todayKey}.
@@ -957,8 +963,11 @@ export default function McatFoundationPage() {
   );
   const todayPhase0Preview = useMemo(
     () =>
-      getMcatPhase0TaskForDate(effectiveSeedStartDate, todayKey, { today: todayKey }),
-    [effectiveSeedStartDate],
+      getMcatPhase0TaskForDate(effectiveSeedStartDate, todayKey, {
+        today: todayKey,
+        planInstanceId: activePhase0Plan?.id ?? null,
+      }),
+    [effectiveSeedStartDate, activePhase0Plan?.id],
   );
   const todaySeededTask = useMemo(
     () => seededPhaseTasks.find((task) => task.due_date === todayKey) ?? null,
@@ -1004,6 +1013,7 @@ export default function McatFoundationPage() {
       });
       const missingPayloads = getMissingMcatPhase0Tasks(existingTasks, seedStartDate, {
         today: todayKey,
+        planInstanceId: plan.id,
       });
 
       if (missingPayloads.length === 0) {

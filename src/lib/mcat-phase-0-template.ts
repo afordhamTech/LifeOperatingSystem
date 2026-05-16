@@ -10,6 +10,52 @@ import {
 export const MCAT_PHASE_0_TEMPLATE_KEY = "mcat_phase_0_foundation_v1";
 export const MCAT_PHASE_0_SOURCE = "mcat_phase_0_seed";
 
+export type McatPhaseDescriptor = {
+  template_key: string;
+  phase_name: string;
+  short_label: string;
+  status: "active" | "future";
+  total_days: number;
+  total_planned_minutes: number;
+};
+
+export const MCAT_PHASE_REGISTRY: McatPhaseDescriptor[] = [
+  {
+    template_key: MCAT_PHASE_0_TEMPLATE_KEY,
+    phase_name: "Phase 0 Foundation",
+    short_label: "Phase 0",
+    status: "active",
+    total_days: 70,
+    total_planned_minutes: 4680,
+  },
+  // Future phases (Phase 1 Content, AAMC, UWorld, full-length, final review)
+  // will be added here as additional descriptors with their own template files.
+];
+
+export const MCAT_PREP_SYSTEM_TAGLINE =
+  "AI tutor first · Khan as syllabus · dashboard always";
+
+export const MCAT_PHASE_0_LEARNING_LOOP = [
+  "Pick one topic from Khan",
+  "Learn it with ChatGPT Study Mode",
+  "Explain it back from memory",
+  "Answer tutor questions",
+  "Do 5–10 practice questions",
+  "Log mistakes in the error log",
+  "Make flashcards",
+  "Retest in 3–7 days",
+  "Update the dashboard",
+] as const;
+
+export const MCAT_NOT_YET_LEARNED_SUBJECTS = [
+  "Organic Chemistry",
+  "Physics",
+  "Biochemistry",
+  "Advanced Biology",
+  "Full Sociology",
+  "Advanced MCAT passage reasoning",
+] as const;
+
 type WeekdayLabel = "Mon" | "Tue" | "Wed" | "Thu" | "Fri" | "Sat" | "Sun";
 type McatDailyTaskType =
   | "foundation study"
@@ -260,7 +306,7 @@ function buildTaskDescription(rule: McatPhase0DayRule, topic: string) {
     return `Foundation-first MCAT CARS block. Work one untimed passage focused on ${topic}, write the main idea before checking answers, and tag any miss by reasoning error. Success = one passage completed and one CARS pattern recorded.`;
   }
   if (rule.daily_task_type === "practice questions") {
-    return `Foundation-first MCAT practice block. Complete a short ${topic} question set, review every miss, and connect each miss to the underlying concept. Success = questions attempted, misses explained, and the error log updated.`;
+    return `Foundation-first MCAT practice block. Use ChatGPT Study Mode as the tutor; Khan Academy is the syllabus and backup; log misses to the error log. Complete a short ${topic} question set, review every miss, and connect each miss to the underlying concept. Success = questions attempted, misses explained, and the error log updated.`;
   }
   if (rule.daily_task_type === "error log") {
     return `Foundation-first MCAT error-log block. Review ${topic}, rewrite the highest-leverage miss in plain English, and choose one retest item. Success = one weak pattern tightened and one follow-up question queued.`;
@@ -268,7 +314,7 @@ function buildTaskDescription(rule: McatPhase0DayRule, topic: string) {
   if (rule.daily_task_type === "review / recovery microdose") {
     return "Light MCAT recovery review. Skim the week's notes, clean one loose concept, and plan the next study block without turning this into a heavy session. Success = one note clarified and the next action chosen.";
   }
-  return `Foundation-first MCAT block. Review ${topic}, complete a short active-recall pass, and log any missed concept in the error log. Success = one clear concept learned and one error pattern recorded.`;
+  return `Foundation-first MCAT block. Use ChatGPT Study Mode as the tutor; Khan Academy is the syllabus and backup; log misses to the error log. Review ${topic}, complete a short active-recall pass, and log any missed concept in the error log. Success = one clear concept learned and one error pattern recorded.`;
 }
 
 function dailyRoleForRule(rule: McatPhase0DayRule, weekIndex: number): DailyRole {
@@ -340,7 +386,7 @@ function buildWeekPlan(seedStartDate: string, weekIndex: number): McatPhase0Week
 function buildTaskForDay(
   seedStartDate: string,
   dayIndex: number,
-  options: { today?: string } = {},
+  options: { today?: string; planInstanceId?: string | null } = {},
 ): McatPhase0TaskPayload {
   const weekIndex = Math.floor((dayIndex - 1) / 7) + 1;
   const dayOffset = (dayIndex - 1) % 7;
@@ -374,7 +420,7 @@ function buildTaskForDay(
     notes: [
       `${MCAT_PHASE_0_TEMPLATE.phase_name}.`,
       `Template ${MCAT_PHASE_0_TEMPLATE.template_key}; day ${dayIndex} of 70; week ${weekIndex} of 10.`,
-      `Week target ${weekPlan.target_minutes} minutes; daily type ${rule.daily_task_type}; topic focus ${topic}.`,
+      `Week target ${weekPlan.target_minutes} minutes; learning type ${rule.daily_task_type}; topic focus ${topic}.`,
       "Update MCAT review notes or the error log before marking done.",
     ].join(" "),
     source: MCAT_PHASE_0_SOURCE,
@@ -390,9 +436,13 @@ function buildTaskForDay(
       planned_date: dueDate,
       week_target_minutes: weekPlan.target_minutes,
       daily_task_type: rule.daily_task_type,
+      learning_type: rule.daily_task_type,
       topic_focus: topic,
       seed_start_date: seedStartDate,
       seed_end_date: seedEndDate,
+      plan_instance_id: options.planInstanceId ?? null,
+      learning_loop: MCAT_PHASE_0_LEARNING_LOOP,
+      not_yet_learned_subjects: MCAT_NOT_YET_LEARNED_SUBJECTS,
     },
   };
 }
@@ -411,7 +461,7 @@ export function getMcatPhase0WeekPlan(
 export function getMcatPhase0TaskForDate(
   seedStartDate: string,
   dateKey: string,
-  options: { today?: string } = {},
+  options: { today?: string; planInstanceId?: string | null } = {},
 ): McatPhase0TaskPayload | null {
   const dayIndex = getDayIndexForDate(seedStartDate, dateKey);
   return dayIndex == null ? null : buildTaskForDay(seedStartDate, dayIndex, options);
@@ -419,7 +469,7 @@ export function getMcatPhase0TaskForDate(
 
 export function generateMcatPhase0Tasks(
   seedStartDate: string,
-  options: { today?: string } = {},
+  options: { today?: string; planInstanceId?: string | null } = {},
 ): McatPhase0TaskPayload[] {
   return Array.from({ length: TOTAL_DAYS }, (_, index) =>
     buildTaskForDay(seedStartDate, index + 1, options),
@@ -433,7 +483,7 @@ function isMcatPhase0Task(task: Task) {
 export function getMissingMcatPhase0Tasks(
   existingTasks: Task[],
   seedStartDate: string,
-  options: { today?: string } = {},
+  options: { today?: string; planInstanceId?: string | null } = {},
 ) {
   const existingDayIndexes = new Set(
     existingTasks

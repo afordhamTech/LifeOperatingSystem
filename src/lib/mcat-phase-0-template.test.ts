@@ -4,6 +4,7 @@ import {
   MCAT_PHASE_0_SOURCE,
   MCAT_PHASE_0_TEMPLATE,
   MCAT_PHASE_0_TEMPLATE_KEY,
+  MCAT_PHASE_REGISTRY,
   generateMcatPhase0Tasks,
   getMcatPhase0TaskForDate,
   getMcatPhase0WeekPlan,
@@ -113,6 +114,68 @@ describe("MCAT Phase 0 template generator", () => {
     expect(missing.map((task) => task.template_day_index)).not.toContain(1);
     expect(missing.map((task) => task.template_day_index)).not.toContain(2);
     expect(missing).toHaveLength(68);
+  });
+
+  it("schedules 1–2 CARS microdoses per week", () => {
+    const tasks = generateMcatPhase0Tasks(SEED, { today: TODAY });
+    const byWeek = new Map<number, number>();
+    for (const task of tasks) {
+      if (task.generated_from.learning_type === "CARS microdose") {
+        byWeek.set(task.template_week_index, (byWeek.get(task.template_week_index) ?? 0) + 1);
+      }
+    }
+    for (let week = 1; week <= 10; week += 1) {
+      const count = byWeek.get(week) ?? 0;
+      expect(count).toBeGreaterThanOrEqual(1);
+      expect(count).toBeLessThanOrEqual(2);
+    }
+  });
+
+  it("propagates plan_instance_id into generated_from", () => {
+    const tasks = generateMcatPhase0Tasks(SEED, {
+      today: TODAY,
+      planInstanceId: "abc-123",
+    });
+    expect(tasks[0].generated_from.plan_instance_id).toBe("abc-123");
+    expect(tasks.every((task) => task.generated_from.plan_instance_id === "abc-123")).toBe(true);
+  });
+
+  it("aliases learning_type to daily_task_type for backwards compatibility", () => {
+    const tasks = generateMcatPhase0Tasks(SEED, { today: TODAY });
+    expect(tasks[0].generated_from.learning_type).toBe(tasks[0].generated_from.daily_task_type);
+  });
+
+  it("surfaces the not-yet-learned subjects vocabulary", () => {
+    const tasks = generateMcatPhase0Tasks(SEED, { today: TODAY });
+    const subjects = tasks[0].generated_from.not_yet_learned_subjects as readonly string[];
+    expect(subjects).toContain("Organic Chemistry");
+    expect(subjects).toContain("Physics");
+  });
+
+  it("registers exactly one active phase pointing at Phase 0", () => {
+    const active = MCAT_PHASE_REGISTRY.filter((phase) => phase.status === "active");
+    expect(active).toHaveLength(1);
+    expect(active[0].template_key).toBe(MCAT_PHASE_0_TEMPLATE_KEY);
+  });
+
+  it("includes the controlled diagnostic and revision/next-phase planning in Week 10", () => {
+    const week10 = generateMcatPhase0Tasks(SEED, { today: TODAY }).filter(
+      (task) => task.template_week_index === 10,
+    );
+    expect(
+      week10.some(
+        (task) =>
+          task.title.includes("Controlled diagnostic checkpoint") ||
+          task.generated_from.topic_focus === "controlled diagnostic",
+      ),
+    ).toBe(true);
+    expect(
+      week10.some(
+        (task) =>
+          task.title.includes("Revision checkpoint") ||
+          task.generated_from.topic_focus === "revision checkpoint",
+      ),
+    ).toBe(true);
   });
 
   it("reports fully seeded when all 70 days are present", () => {
