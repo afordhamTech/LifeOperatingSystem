@@ -1,7 +1,7 @@
 // Canonical AI Prompt Drawer context.
 // The AI Prompt Drawer is mounted in the app layout and is reachable from
 // every page, so its context cannot depend on whichever page happens to be
-// mounted. This hook loads canonical Supabase-backed state once (per session)
+// mounted. This hook loads canonical Saved state once (per session)
 // and assembles the data-backed PromptBuilderContext fields so every export
 // reflects real app state instead of stale placeholder text.
 

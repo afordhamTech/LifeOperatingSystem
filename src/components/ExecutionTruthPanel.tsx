@@ -118,7 +118,7 @@ export default function ExecutionTruthPanel({ today, userId, hasSupabaseConfig }
 
   async function runMutation(fn: () => Promise<void>) {
     if (!userId) {
-      setError("Sign in to save execution truth to Supabase.");
+      setError("Sign in to save.");
       return;
     }
     setStatus("saving");

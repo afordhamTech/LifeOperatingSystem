@@ -305,7 +305,7 @@ export default function TodayDecisionLoop({
           </div>
           <p className="mt-1 max-w-xl text-xs text-[#6f685f]">
             {isAdvanced
-              ? "Capture into universal_tasks, decide what counts today, mark what to ignore, and surface trust protectors. All edits persist to Supabase."
+              ? "Capture today’s work, decide what counts, mark what to ignore, and surface trust protectors. Edits are saved automatically."
               : "Capture the next thing, choose what counts today, and hide anything you are intentionally not doing."}
           </p>
         </div>
@@ -340,7 +340,7 @@ export default function TodayDecisionLoop({
             onChange={(event) => setCaptureTitle(event.target.value)}
             onKeyDown={handleCaptureKeyDown}
             placeholder={
-              isAdvanced ? "What just came up? (saved to universal_tasks)" : "What just came up?"
+              isAdvanced ? "What just came up? (saved to Tasks)" : "What just came up?"
             }
             className="flex-1 min-w-[200px] rounded-md border border-[#b9a98f] bg-[#fffdf8] px-3 py-2 text-sm shadow-inner outline-none transition focus:border-[#6b87ae] focus:ring-2 focus:ring-[#6b87ae]/20"
           />

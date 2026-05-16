@@ -333,7 +333,7 @@ Calculate my cash flow, savings rate, biggest leak, and give me a simple money s
         defaultOpen={safeToSpend === 0 - weekly.minimumBuffer}
       >
         <p className="mb-3 text-xs text-muted-foreground">
-          Weekly control inputs are a local-only scaffold for planning. The daily money log and recurring leaks still save through the existing Supabase flow.
+          Weekly control inputs are a local-only scaffold for planning. The daily money log and recurring leaks still save normally.
         </p>
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
           <div>

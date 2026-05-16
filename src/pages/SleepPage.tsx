@@ -151,8 +151,8 @@ export default function SleepPage() {
         setIsLoading(false);
         setNotice(
           supabaseConfigured
-            ? "No Supabase session yet. Sleep logs stay in draft mode until auth is connected."
-            : "Supabase env vars are missing. Sleep logs stay in local draft mode.",
+            ? "Not signed in. Sleep logs stay as a local draft until you sign in."
+            : "Sign-in is unavailable right now. Sleep logs stay as a local draft.",
         );
         setSyncStatus(supabaseConfigured ? "waiting" : "local");
         return;
@@ -180,7 +180,7 @@ export default function SleepPage() {
         setIsLoading(false);
         setNotice(
           todayRow
-            ? "Loaded from Supabase."
+            ? "Loaded saved data."
             : "No sleep log exists for today yet. Draft only until you save.",
         );
         setSyncStatus(todayRow ? "saved" : "local");
@@ -244,7 +244,7 @@ export default function SleepPage() {
     });
 
     if (result.ok) {
-      setNotice("Sleep log saved to Supabase.");
+      setNotice("Sleep log saved.");
       if (result.data) setForm(rowToForm(result.data));
 
       const start = new Date();
@@ -364,14 +364,14 @@ export default function SleepPage() {
 
           {!supabaseConfigured ? (
             <div className="mb-4 rounded border border-[#c39a4e]/30 bg-[#c39a4e]/10 px-3 py-2 text-xs text-[#c39a4e]">
-              Supabase env vars are missing. This form stays local until they are
+              Sign-in is unavailable right now. This form stays local until it is
               added.
             </div>
           ) : null}
 
           {supabaseConfigured && !userId ? (
             <div className="mb-4 rounded border border-[#6b87ae]/30 bg-[#6b87ae]/10 px-3 py-2 text-xs text-[#6b87ae]">
-              Supabase is configured, but there is no session yet. Draft mode is
+              Not signed in yet. Draft mode is
               still available.
             </div>
           ) : null}

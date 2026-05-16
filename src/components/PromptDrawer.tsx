@@ -105,7 +105,7 @@ export function PromptDrawer({ context }: { context?: PromptBuilderContext }) {
               <div>
                 <h2 className="text-lg font-semibold text-foreground">AI Prompt Drawer</h2>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Copies prompt text and saves export history only when Supabase accepts the row.
+                  Copies prompt text and saves export history when changes are saved.
                 </p>
               </div>
               <button

@@ -159,7 +159,7 @@ export default function ArchivePage() {
       } catch (error) {
         if (!active) return;
         setSyncStatus("error");
-        setSyncError(error instanceof Error ? error.message : "Could not load Archive from Supabase.");
+        setSyncError(error instanceof Error ? error.message : "Could not load Archive.");
       }
     };
 

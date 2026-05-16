@@ -1007,6 +1007,7 @@ function TaskRow({
         onClick={() => onComplete(task.id)}
         className="text-[#9b938a] hover:text-[#6a9a74] disabled:opacity-40"
         title="Mark done"
+        aria-label={`Mark “${task.title}” done`}
         disabled={archivedOrTrashed || isDone}
       >
         <CheckCircle2 size={18} />
@@ -1106,7 +1107,7 @@ function TaskRow({
         onHardDelete={() => {
           if (
             window.confirm(
-              `Permanently delete ${task.task_code}? This cannot be undone.`,
+              `Permanently delete “${task.title}”? This cannot be undone.`,
             )
           ) {
             onHardDelete(task);
@@ -1156,6 +1157,7 @@ function TaskActionMenu({
           type="button"
           className="rounded-md border border-[#ddd4c6] bg-white p-1.5 text-[#6f685f] hover:bg-[#f7f3ec]"
           title="More"
+          aria-label={`More actions for “${task.title}”`}
         >
           <MoreHorizontal size={16} />
         </button>
@@ -1168,7 +1170,7 @@ function TaskActionMenu({
             </DropdownMenuItem>
             {isTrashedTask(task) ? (
               <DropdownMenuItem variant="destructive" onClick={onHardDelete}>
-                <Trash2 size={14} /> Hard Delete
+                <Trash2 size={14} /> Delete permanently
               </DropdownMenuItem>
             ) : null}
           </>
@@ -1239,7 +1241,9 @@ function TaskEditorSheet({
           <SheetDescription>
             Edit the canonical task metadata used by smart views and planning exports.
           </SheetDescription>
-          <div className="font-mono-data text-xs text-muted-foreground">{task.task_code}</div>
+          <AdvancedOnly>
+            <div className="font-mono-data text-xs text-muted-foreground">{task.task_code}</div>
+          </AdvancedOnly>
         </SheetHeader>
         <div className="grid gap-3 px-4 pb-4">
           <label className="text-xs font-medium text-[#6f685f]">
@@ -1260,7 +1264,7 @@ function TaskEditorSheet({
           </label>
           <div className="grid gap-3 sm:grid-cols-2">
             <SelectField label="Task type" value={draft.task_type} values={TASK_TYPES} onChange={(value) => updateDraft({ task_type: value as TaskType })} />
-            <SelectField label="Status" value={draft.status === "completed" ? "done" : draft.status} values={["inbox", "today", "this_week", "scheduled", "waiting", "done", "ignored_today", "parking_lot", "archived", "trashed"]} onChange={(value) => updateDraft({ status: value as TaskStatus })} />
+            <SelectField label="Status" value={draft.status === "completed" ? "done" : draft.status} values={["inbox", "today", "this_week", "scheduled", "waiting", "done", "ignored_today", "parking_lot", "archived", "trashed"]} labels={STATUS_LABELS} onChange={(value) => updateDraft({ status: value as TaskStatus })} />
             <SelectField label="Priority" value={draft.priority ?? ""} values={["", ...TASK_PRIORITIES]} onChange={(value) => updateDraft({ priority: (value || null) as Task["priority"] })} />
             <SelectField label="Cost if delayed" value={draft.consequence_level ?? ""} values={["", ...CONSEQUENCE_LEVELS]} onChange={(value) => updateDraft({ consequence_level: (value || null) as Task["consequence_level"] })} />
             <SelectField label="Daily role" value={draft.daily_role ?? ""} values={["", ...DAILY_ROLES]} onChange={(value) => updateDraft({ daily_role: (value || null) as DailyRole | null })} />
@@ -1307,16 +1311,31 @@ function TaskEditorSheet({
   );
 }
 
+const STATUS_LABELS: Record<string, string> = {
+  inbox: "Inbox",
+  today: "Today",
+  this_week: "This week",
+  scheduled: "Scheduled",
+  waiting: "Waiting",
+  done: "Done",
+  ignored_today: "Hidden for today",
+  parking_lot: "Backlog",
+  archived: "Archived",
+  trashed: "Trash",
+};
+
 function SelectField({
   label,
   value,
   values,
   onChange,
+  labels,
 }: {
   label: string;
   value: string;
   values: readonly string[];
   onChange: (value: string) => void;
+  labels?: Record<string, string>;
 }) {
   return (
     <label className="text-xs font-medium text-[#6f685f]">
@@ -1328,7 +1347,7 @@ function SelectField({
       >
         {values.map((item) => (
           <option key={item || "unset"} value={item}>
-            {item || "Unset"}
+            {labels?.[item] ?? (item || "Unset")}
           </option>
         ))}
       </select>

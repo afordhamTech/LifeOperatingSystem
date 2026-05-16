@@ -317,12 +317,12 @@ export type SubstanceEntry = {
 };
 
 export function getSyncLabel(status: LifeeeSyncStatus) {
-  if (status === "loading") return "Loading Supabase";
+  if (status === "loading") return "Loading";
   if (status === "saving") return "Saving";
   if (status === "saved") return "Saved";
   if (status === "waiting") return "Draft only";
   if (status === "error") return "Sync failed";
-  if (status === "placeholder") return "Placeholder only";
+  if (status === "placeholder") return "Local only";
   return "Draft only";
 }
 

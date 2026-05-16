@@ -255,8 +255,8 @@ export default function Dashboard() {
         setIsLoading(false);
         setNotice(
           hasSupabaseConfig
-            ? "No Supabase session yet. The dashboard shows local drafts and placeholders until auth is connected."
-            : "Supabase env vars are missing. The dashboard is still usable in local draft mode.",
+            ? "Not signed in. The dashboard shows local drafts until you sign in."
+            : "Sign-in is unavailable right now. The dashboard still works as a local draft.",
         );
         return;
       }
@@ -368,7 +368,7 @@ export default function Dashboard() {
         decisionLogsResult.error;
 
       if (firstError) {
-        setError(firstError instanceof Error ? firstError.message : "Dashboard Supabase load failed.");
+        setError(firstError instanceof Error ? firstError.message : "Dashboard could not load saved data.");
       }
 
       setState({
@@ -640,7 +640,7 @@ export default function Dashboard() {
   };
 
   const logIgnoreDecision = async (task: Task, reviewDate: string | null) => {
-    if (!userId) throw new Error("Sign in to save decisions to Supabase.");
+    if (!userId) throw new Error("Sign in to save.");
     const payload = {
       id: createLifeeeId(),
       decision: task.title,
@@ -1139,13 +1139,13 @@ export default function Dashboard() {
         ) : null}
         {hasSupabaseConfig && !userId ? (
           <div className="rounded border border-[#6b87ae]/30 bg-[#6b87ae]/10 px-3 py-2 text-xs text-[#6b87ae]">
-            Supabase is configured, but there is no session yet. The dashboard is
+            Not signed in yet. The dashboard is
             still usable in draft mode.
           </div>
         ) : null}
         {!hasSupabaseConfig ? (
           <div className="rounded border border-[#c39a4e]/30 bg-[#c39a4e]/10 px-3 py-2 text-xs text-[#c39a4e]">
-            Supabase env vars are missing. The dashboard still works locally.
+            Sign-in is unavailable right now. The dashboard still works locally.
           </div>
         ) : null}
       </AdvancedOnly>
@@ -1834,7 +1834,7 @@ export default function Dashboard() {
                   Refreshing dashboard...
                 </span>
               ) : (
-                "Dashboard is synced to the Supabase v1 tables."
+                "Dashboard is synced."
               )}
             </div>
             <div>

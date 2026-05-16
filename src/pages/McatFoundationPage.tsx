@@ -232,10 +232,10 @@ function shouldUseRemoteSnapshot(
 
 function syncLabel(status: McatSyncStatus, hasConfig: boolean, userId: string | null) {
   if (!hasConfig) return "Local only";
-  if (status === "loading") return userId ? "Loading Supabase" : "Checking auth";
+  if (status === "loading") return userId ? "Loading" : "Checking auth";
   if (!userId) return "Sign in to sync";
-  if (status === "saving") return "Saving Supabase";
-  if (status === "synced") return "Supabase synced";
+  if (status === "saving") return "Saving";
+  if (status === "synced") return "Synced";
   if (status === "error") return "Sync error";
   return "Local only";
 }
@@ -381,7 +381,7 @@ function McatPhase0ScheduleCard({
   onSeed: () => void;
 }) {
   const authMessage = !hasSupabaseConfig
-    ? "Supabase is not configured for saved MCAT task seeding."
+    ? "Saved MCAT seeding is unavailable right now."
     : !userId
       ? "Log in to seed MCAT tasks to your plan."
       : null;
@@ -1094,7 +1094,7 @@ export default function McatFoundationPage() {
       setPhaseSeedStatus("saved");
       setPhaseSeedMessage(
         savedTasks.length === 70
-          ? "Seeded 70 MCAT Phase 0 tasks into universal_tasks."
+          ? "Seeded 70 MCAT Phase 0 tasks."
           : `Seeded ${savedTasks.length} missing MCAT Phase 0 task(s).`,
       );
     } catch (error) {

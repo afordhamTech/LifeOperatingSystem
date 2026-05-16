@@ -85,7 +85,7 @@ export default function WeeklyExecutionStats({
 
   async function save() {
     if (!userId) {
-      setError("Sign in to save execution stats to Supabase.");
+      setError("Sign in to save.");
       return;
     }
     setStatus("saving");

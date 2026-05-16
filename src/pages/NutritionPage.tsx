@@ -109,8 +109,8 @@ export default function NutritionPage() {
         setIsLoading(false);
         setNotice(
           hasSupabaseConfig
-            ? "No Supabase session yet. Nutrition logs stay in local draft mode until auth is connected."
-            : "Supabase env vars are missing. Nutrition logs stay in local draft mode.",
+            ? "Not signed in. Nutrition logs stay as a local draft until you sign in."
+            : "Sign-in is unavailable right now. Nutrition logs stay as a local draft.",
         );
         setSyncStatus(hasSupabaseConfig ? "waiting" : "local");
         return;
@@ -143,7 +143,7 @@ export default function NutritionPage() {
         setIsLoading(false);
         setNotice(
           todayNutrition
-            ? "Loaded from Supabase."
+            ? "Loaded saved data."
             : "No nutrition log exists for today yet. Draft only until you save.",
         );
         setSyncStatus(todayNutrition ? "saved" : "local");
@@ -301,7 +301,7 @@ export default function NutritionPage() {
         });
       }
 
-      setNotice("Nutrition log saved to Supabase.");
+      setNotice("Nutrition log saved.");
       setSyncStatus(result.status);
     } else {
       setError(result.error);
@@ -647,13 +647,13 @@ export default function NutritionPage() {
             </h3>
             {!hasSupabaseConfig ? (
               <div className="mb-3 rounded border border-[#c39a4e]/30 bg-[#c39a4e]/10 px-3 py-2 text-xs text-[#c39a4e]">
-                Supabase env vars are missing. Nutrition logs stay in local draft
+                Sign-in is unavailable right now. Nutrition logs stay as a local draft
                 mode.
               </div>
             ) : null}
             {hasSupabaseConfig && !userId ? (
               <div className="mb-3 rounded border border-[#6b87ae]/30 bg-[#6b87ae]/10 px-3 py-2 text-xs text-[#6b87ae]">
-                Supabase is configured, but there is no session yet.
+                Not signed in yet.
               </div>
             ) : null}
             {error ? (
@@ -727,7 +727,7 @@ export default function NutritionPage() {
             </h3>
             <div className="text-xs text-[#6f685f]">
               {history.length > 0
-                ? `${history.length} nutrition logs loaded from Supabase.`
+                ? `${history.length} nutrition logs loaded.`
                 : "No weekly logs yet. Add a few days of entries to see weight and calorie trends."}
             </div>
           </div>

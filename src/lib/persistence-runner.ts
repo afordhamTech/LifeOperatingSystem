@@ -35,8 +35,8 @@ export function getBlockedSyncStatus({
 
 export function getBlockedSyncMessage(status: Extract<PersistenceSyncStatus, "local" | "waiting">) {
   return status === "local"
-    ? "Supabase is not configured. This is a local draft only."
-    : "Waiting for Supabase to load before saving.";
+    ? "Sign-in is unavailable right now. Changes stay as a local draft."
+    : "Loading your saved data before saving changes…";
 }
 
 export async function runSupabasePersistence<T>({

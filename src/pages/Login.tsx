@@ -57,7 +57,7 @@ export default function Login() {
 
   const handlePasswordAuth = async () => {
     if (!supabase) {
-      setError("Supabase is not configured for this site.");
+      setError("Sign-in is unavailable right now.");
       return;
     }
 
@@ -88,7 +88,7 @@ export default function Login() {
 
   const handleMagicLink = async () => {
     if (!supabase) {
-      setError("Supabase is not configured for this site.");
+      setError("Sign-in is unavailable right now.");
       return;
     }
 
@@ -180,7 +180,7 @@ export default function Login() {
             </>
           ) : (
             <p className="text-sm text-muted-foreground">
-              Supabase auth is missing. Add `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`.
+              Sign-in is unavailable right now.
             </p>
           )}
 

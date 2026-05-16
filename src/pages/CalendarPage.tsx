@@ -774,12 +774,12 @@ export default function CalendarPage() {
       });
       await markScheduleImportApplied(userId, importBatchId);
       setSyncStatus("saved");
-      setImportNotice(`${rows.length} schedule block${rows.length === 1 ? "" : "s"} saved to Supabase.`);
+      setImportNotice(`${rows.length} schedule block${rows.length === 1 ? "" : "s"} saved.`);
       clearAppliedScheduleImport();
     } catch (error) {
       setSyncStatus("error");
       setSyncError(error instanceof Error ? error.message : "Unable to apply imported schedule.");
-      setImportNotice("Import failed before Supabase confirmed the write.");
+      setImportNotice("Import failed before changes were saved.");
     }
   };
 

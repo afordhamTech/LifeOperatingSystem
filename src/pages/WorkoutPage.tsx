@@ -136,8 +136,8 @@ export default function WorkoutPage() {
         setIsLoading(false);
         setNotice(
           hasSupabaseConfig
-            ? "No Supabase session yet. Workout logs stay in local draft mode until auth is connected."
-            : "Supabase env vars are missing. Workout logs stay in local draft mode.",
+            ? "Not signed in. Workout logs stay as a local draft until you sign in."
+            : "Sign-in is unavailable right now. Workout logs stay as a local draft.",
         );
         setSyncStatus(hasSupabaseConfig ? "waiting" : "local");
         return;
@@ -177,7 +177,7 @@ export default function WorkoutPage() {
         setIsLoading(false);
         setNotice(
           todayWorkout
-            ? "Loaded from Supabase."
+            ? "Loaded saved data."
             : "No workout exists for today yet. Draft only until you save.",
         );
         setSyncStatus(todayWorkout ? "saved" : "local");
@@ -331,7 +331,7 @@ export default function WorkoutPage() {
           return [...next, result.data as WorkoutLogRow];
         });
       }
-      setNotice("Workout saved to Supabase.");
+      setNotice("Workout saved.");
       setSyncStatus(result.status);
     } else {
       setError(result.error);
@@ -638,13 +638,13 @@ export default function WorkoutPage() {
           </h3>
           {!hasSupabaseConfig ? (
             <div className="mb-3 rounded border border-[#c39a4e]/30 bg-[#c39a4e]/10 px-3 py-2 text-xs text-[#c39a4e]">
-              Supabase env vars are missing. Workout logs stay in local draft
+              Sign-in is unavailable right now. Workout logs stay as a local draft
               mode.
             </div>
           ) : null}
           {hasSupabaseConfig && !userId ? (
             <div className="mb-3 rounded border border-[#6b87ae]/30 bg-[#6b87ae]/10 px-3 py-2 text-xs text-[#6b87ae]">
-              Supabase is configured, but there is no session yet.
+              Not signed in yet.
             </div>
           ) : null}
           {error ? (
