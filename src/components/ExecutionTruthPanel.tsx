@@ -7,6 +7,16 @@ import { MoreHorizontal } from "lucide-react";
 import { SyncBadge } from "@/components/SyncBadge";
 import { Button } from "@/components/ui/button";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -26,8 +36,13 @@ import {
   MISSED_REASONS,
   PLAN_CHANGE_REASONS,
   aggregateExecutionStats,
+  createBlockResolutionDraft,
+  createShutdownRitualDraft,
   shouldShowAntiDriftWarning,
+  type BlockResolutionDraft,
   type CarryForwardAction,
+  type PlanChangeReason,
+  type ShutdownRitualDraft,
 } from "@/lib/execution-truth";
 import {
   fetchDailyPlan,
@@ -72,6 +87,16 @@ export default function ExecutionTruthPanel({ today, userId, hasSupabaseConfig }
   const [shutdown, setShutdown] = useState<DailyShutdownRow | null>(null);
   const [status, setStatus] = useState<LifeeeSyncStatus>("loading");
   const [error, setError] = useState<string | null>(null);
+  const [unlockReason, setUnlockReason] = useState<PlanChangeReason>(PLAN_CHANGE_REASONS[0]);
+  const [unlockDialogOpen, setUnlockDialogOpen] = useState(false);
+  const [blockResolution, setBlockResolution] = useState<
+    | (BlockResolutionDraft & {
+        block: TimeBlock;
+        completeLinkedTask: boolean;
+      })
+    | null
+  >(null);
+  const [shutdownDraft, setShutdownDraft] = useState<ShutdownRitualDraft | null>(null);
 
   const loggedIn = hasSupabaseConfig && Boolean(userId);
 
@@ -91,20 +116,25 @@ export default function ExecutionTruthPanel({ today, userId, hasSupabaseConfig }
 
   useEffect(() => {
     let active = true;
-    if (!loggedIn || !userId) {
-      setStatus(hasSupabaseConfig ? "waiting" : "local");
-      return;
-    }
-    setStatus("loading");
-    reload()
-      .then(() => {
+
+    const loadExecutionData = async () => {
+      if (!loggedIn || !userId) {
+        if (active) setStatus(hasSupabaseConfig ? "waiting" : "local");
+        return;
+      }
+      setStatus("loading");
+      try {
+        await reload();
         if (active) setStatus("saved");
-      })
-      .catch((err: unknown) => {
+      } catch (err) {
         if (!active) return;
         setError(err instanceof Error ? err.message : "Failed to load execution data.");
         setStatus("error");
-      });
+      }
+    };
+
+    void loadExecutionData();
+
     return () => {
       active = false;
     };
@@ -147,12 +177,14 @@ export default function ExecutionTruthPanel({ today, userId, hasSupabaseConfig }
     });
   }
 
-  async function handleUnlock() {
-    const reason = window.prompt(
-      `Change reason (one of: ${PLAN_CHANGE_REASONS.join(", ")}):`,
-      PLAN_CHANGE_REASONS[0],
-    );
-    if (!reason) return;
+  function openUnlockDialog() {
+    setUnlockReason(PLAN_CHANGE_REASONS[0]);
+    setUnlockDialogOpen(true);
+  }
+
+  async function submitUnlock() {
+    const reason = unlockReason;
+    setUnlockDialogOpen(false);
     await runMutation(async () => {
       await updateDailyPlanLock(userId!, {
         date: today,
@@ -169,26 +201,36 @@ export default function ExecutionTruthPanel({ today, userId, hasSupabaseConfig }
   }
 
   // ── Time Block Execution ──────────────────────────────────────────────────
-  async function setBlockStatus(block: TimeBlock, next: ExecutionStatus) {
-    const now = new Date().toISOString();
-    let missedReason: string | null = block.missed_reason;
+  function requestBlockStatus(block: TimeBlock, next: ExecutionStatus) {
+    const linked = block.linked_task_id ? taskById.get(block.linked_task_id) ?? null : null;
+    const draft = createBlockResolutionDraft({
+      block,
+      nextStatus: next,
+      linkedTask: linked,
+    });
 
-    if (next === "missed" || next === "skipped") {
-      const linked = block.linked_task_id ? taskById.get(block.linked_task_id) : undefined;
-      const highStakes =
-        linked?.priority === "high" ||
-        linked?.priority === "critical" ||
-        linked?.consequence_level === "high" ||
-        linked?.consequence_level === "critical";
-      if (next === "missed" || highStakes) {
-        const entered = window.prompt(
-          `Reason this block was ${next} (one of: ${MISSED_REASONS.join(", ")}):`,
-          MISSED_REASONS[0],
-        );
-        if (!entered) return;
-        missedReason = entered;
-      }
+    if (draft.canApplyImmediately) {
+      void applyBlockStatus(block, next, {
+        missedReason: block.missed_reason,
+        completeLinkedTask: false,
+      });
+      return;
     }
+
+    setBlockResolution({
+      ...draft,
+      block,
+      completeLinkedTask: false,
+    });
+  }
+
+  async function applyBlockStatus(
+    block: TimeBlock,
+    next: ExecutionStatus,
+    options: { missedReason: string | null; completeLinkedTask: boolean },
+  ) {
+    const now = new Date().toISOString();
+    const missedReason = options.missedReason;
 
     await runMutation(async () => {
       await updateTimeBlockExecution(userId!, block.id, {
@@ -223,23 +265,28 @@ export default function ExecutionTruthPanel({ today, userId, hasSupabaseConfig }
       // Mark linked task done only when block represents the whole task.
       if (next === "done" && block.linked_task_id) {
         const linked = taskById.get(block.linked_task_id);
-        if (linked && linked.status !== "done") {
-          const confirmDone = window.confirm(
-            `Mark linked task "${linked.title}" as done too?`,
+        if (linked && linked.status !== "done" && options.completeLinkedTask) {
+          await upsertUniversalTask(
+            userId!,
+            updateTask(linked, {
+              status: "done",
+              completed_at: now,
+              previous_status: linked.status,
+            }),
+            5,
           );
-          if (confirmDone) {
-            await upsertUniversalTask(
-              userId!,
-              updateTask(linked, {
-                status: "done",
-                completed_at: now,
-                previous_status: linked.status,
-              }),
-              5,
-            );
-          }
         }
       }
+    });
+  }
+
+  async function submitBlockResolution() {
+    if (!blockResolution) return;
+    const current = blockResolution;
+    setBlockResolution(null);
+    await applyBlockStatus(current.block, current.nextStatus, {
+      missedReason: current.requiresReason ? current.missedReason : current.block.missed_reason,
+      completeLinkedTask: current.completeLinkedTask,
     });
   }
 
@@ -311,24 +358,18 @@ export default function ExecutionTruthPanel({ today, userId, hasSupabaseConfig }
   }
 
   // ── Shutdown Ritual ───────────────────────────────────────────────────────
-  async function completeShutdown() {
-    const notes = window.prompt("Shutdown notes — what happened today?", shutdown?.shutdown_notes ?? "");
-    if (notes === null) return;
-    const lesson = window.prompt(
-      "Anti-drift lesson — what does the execution data teach you?",
-      shutdown?.anti_drift_lesson ?? "",
-    );
-    if (lesson === null) return;
-    const firstMove = window.prompt(
-      "Tomorrow's first move?",
-      shutdown?.tomorrow_first_move ?? "",
-    );
-    if (firstMove === null) return;
-    const target = window.prompt(
-      "Tomorrow shutdown / sleep target?",
-      shutdown?.tomorrow_shutdown_target ?? "",
-    );
-    if (target === null) return;
+  function openShutdownDialog() {
+    setShutdownDraft(createShutdownRitualDraft(shutdown));
+  }
+
+  function updateShutdownDraft(patch: Partial<ShutdownRitualDraft>) {
+    setShutdownDraft((current) => (current ? { ...current, ...patch } : current));
+  }
+
+  async function submitShutdown() {
+    if (!shutdownDraft) return;
+    const draft = shutdownDraft;
+    setShutdownDraft(null);
 
     const missedSummary = blocks
       .filter((b) => b.execution_status === "missed" || b.execution_status === "skipped")
@@ -341,17 +382,17 @@ export default function ExecutionTruthPanel({ today, userId, hasSupabaseConfig }
       await upsertDailyShutdown(userId!, {
         date: today,
         completed_at: new Date().toISOString(),
-        shutdown_notes: notes,
-        anti_drift_lesson: lesson,
-        tomorrow_first_move: firstMove,
-        tomorrow_shutdown_target: target,
+        shutdown_notes: draft.notes,
+        anti_drift_lesson: draft.lesson,
+        tomorrow_first_move: draft.firstMove,
+        tomorrow_shutdown_target: draft.target,
         missed_summary: missedSummary,
         carry_forward_summary: carrySummary,
       });
       await insertTaskEvent(userId!, {
         task_id: plan?.must_do_task_id ?? "",
         event_type: "shutdown_completed",
-        reason: firstMove,
+        reason: draft.firstMove,
       }).catch(() => undefined);
     });
   }
@@ -382,7 +423,7 @@ export default function ExecutionTruthPanel({ today, userId, hasSupabaseConfig }
             {lockStatus === "locked" ? "Plan Locked" : "Today's Plan"}
           </span>
           {lockStatus === "locked" ? (
-            <Button size="sm" variant="outline" onClick={handleUnlock} disabled={!loggedIn}>
+            <Button size="sm" variant="outline" onClick={openUnlockDialog} disabled={!loggedIn}>
               Unlock / modify (reason required)
             </Button>
           ) : (
@@ -457,7 +498,7 @@ export default function ExecutionTruthPanel({ today, userId, hasSupabaseConfig }
                       variant="outline"
                       className="h-7 text-[11px]"
                       disabled={!loggedIn}
-                      onClick={() => setBlockStatus(block, "in_progress")}
+                      onClick={() => requestBlockStatus(block, "in_progress")}
                     >
                       Start
                     </Button>
@@ -466,7 +507,7 @@ export default function ExecutionTruthPanel({ today, userId, hasSupabaseConfig }
                       variant="outline"
                       className="h-7 text-[11px]"
                       disabled={!loggedIn}
-                      onClick={() => setBlockStatus(block, "done")}
+                      onClick={() => requestBlockStatus(block, "done")}
                     >
                       Done
                     </Button>
@@ -475,7 +516,7 @@ export default function ExecutionTruthPanel({ today, userId, hasSupabaseConfig }
                       variant="outline"
                       className="h-7 text-[11px]"
                       disabled={!loggedIn}
-                      onClick={() => setBlockStatus(block, "partial")}
+                      onClick={() => requestBlockStatus(block, "partial")}
                     >
                       Partial
                     </Button>
@@ -484,7 +525,7 @@ export default function ExecutionTruthPanel({ today, userId, hasSupabaseConfig }
                       variant="outline"
                       className="h-7 text-[11px]"
                       disabled={!loggedIn}
-                      onClick={() => setBlockStatus(block, "missed")}
+                      onClick={() => requestBlockStatus(block, "missed")}
                     >
                       Missed
                     </Button>
@@ -493,7 +534,7 @@ export default function ExecutionTruthPanel({ today, userId, hasSupabaseConfig }
                       variant="outline"
                       className="h-7 text-[11px]"
                       disabled={!loggedIn}
-                      onClick={() => setBlockStatus(block, "skipped")}
+                      onClick={() => requestBlockStatus(block, "skipped")}
                     >
                       Skip
                     </Button>
@@ -502,7 +543,7 @@ export default function ExecutionTruthPanel({ today, userId, hasSupabaseConfig }
                       variant="outline"
                       className="h-7 text-[11px]"
                       disabled={!loggedIn}
-                      onClick={() => setBlockStatus(block, "rescheduled")}
+                      onClick={() => requestBlockStatus(block, "rescheduled")}
                     >
                       Reschedule
                     </Button>
@@ -515,7 +556,7 @@ export default function ExecutionTruthPanel({ today, userId, hasSupabaseConfig }
                         variant="outline"
                         className="h-7 text-[11px]"
                         disabled={!loggedIn}
-                        onClick={() => setBlockStatus(block, "done")}
+                        onClick={() => requestBlockStatus(block, "done")}
                       >
                         Complete
                       </Button>
@@ -525,7 +566,7 @@ export default function ExecutionTruthPanel({ today, userId, hasSupabaseConfig }
                         variant="outline"
                         className="h-7 text-[11px]"
                         disabled={!loggedIn}
-                        onClick={() => setBlockStatus(block, "in_progress")}
+                        onClick={() => requestBlockStatus(block, "in_progress")}
                       >
                         Start
                       </Button>
@@ -537,24 +578,25 @@ export default function ExecutionTruthPanel({ today, userId, hasSupabaseConfig }
                           variant="ghost"
                           className="h-7 px-2 text-[11px]"
                           disabled={!loggedIn}
+                          aria-label={`More execution actions for ${block.title}`}
                         >
                           <MoreHorizontal size={14} />
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => setBlockStatus(block, "done")}>
+                        <DropdownMenuItem onClick={() => requestBlockStatus(block, "done")}>
                           Done
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => setBlockStatus(block, "partial")}>
+                        <DropdownMenuItem onClick={() => requestBlockStatus(block, "partial")}>
                           Partial
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => setBlockStatus(block, "missed")}>
+                        <DropdownMenuItem onClick={() => requestBlockStatus(block, "missed")}>
                           Missed
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => setBlockStatus(block, "skipped")}>
+                        <DropdownMenuItem onClick={() => requestBlockStatus(block, "skipped")}>
                           Skip
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => setBlockStatus(block, "rescheduled")}>
+                        <DropdownMenuItem onClick={() => requestBlockStatus(block, "rescheduled")}>
                           Reschedule
                         </DropdownMenuItem>
                       </DropdownMenuContent>
@@ -602,7 +644,7 @@ export default function ExecutionTruthPanel({ today, userId, hasSupabaseConfig }
       <div className="rounded-md border border-[#e3ddd2] p-3 space-y-2">
         <div className="flex items-center justify-between gap-2">
           <span className="text-xs font-semibold text-[#25313c]">Shutdown Ritual</span>
-          <Button size="sm" onClick={completeShutdown} disabled={!loggedIn}>
+          <Button size="sm" onClick={openShutdownDialog} disabled={!loggedIn}>
             {shutdown?.completed_at ? "Update Shutdown" : "Complete Shutdown"}
           </Button>
         </div>
@@ -622,6 +664,178 @@ export default function ExecutionTruthPanel({ today, userId, hasSupabaseConfig }
           </div>
         ) : null}
       </div>
+
+      <Dialog open={unlockDialogOpen} onOpenChange={setUnlockDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Unlock today&apos;s plan</DialogTitle>
+            <DialogDescription>
+              Choose the reason before changing a locked plan.
+            </DialogDescription>
+          </DialogHeader>
+          <label className="space-y-1 text-sm font-medium text-foreground">
+            Change reason
+            <select
+              className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm"
+              value={unlockReason}
+              onChange={(event) => setUnlockReason(event.target.value as PlanChangeReason)}
+            >
+              {PLAN_CHANGE_REASONS.map((reason) => (
+                <option key={reason} value={reason}>
+                  {reason}
+                </option>
+              ))}
+            </select>
+          </label>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setUnlockDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={submitUnlock} disabled={!loggedIn}>
+              Save reason
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(blockResolution)}
+        onOpenChange={(open) => {
+          if (!open) setBlockResolution(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Update block status</DialogTitle>
+            <DialogDescription>
+              Confirm what happened before saving today&apos;s progress.
+            </DialogDescription>
+          </DialogHeader>
+          {blockResolution ? (
+            <div className="space-y-4">
+              <div className="rounded-md border border-border bg-muted/30 p-3 text-sm">
+                <div className="font-medium text-foreground">{blockResolution.block.title}</div>
+                <div className="text-xs text-muted-foreground">
+                  {blockResolution.block.start_time}–{blockResolution.block.end_time} ·{" "}
+                  {EXECUTION_STATUS_LABELS[blockResolution.nextStatus]}
+                </div>
+              </div>
+              {blockResolution.requiresReason ? (
+                <label className="space-y-1 text-sm font-medium text-foreground">
+                  Reason
+                  <select
+                    className="mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm"
+                    value={blockResolution.missedReason}
+                    onChange={(event) =>
+                      setBlockResolution((current) =>
+                        current ? { ...current, missedReason: event.target.value } : current,
+                      )
+                    }
+                  >
+                    {MISSED_REASONS.map((reason) => (
+                      <option key={reason} value={reason}>
+                        {reason}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+              {blockResolution.requiresLinkedTaskDecision ? (
+                <label className="flex items-start gap-2 rounded-md border border-border bg-card p-3 text-sm">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    checked={blockResolution.completeLinkedTask}
+                    onChange={(event) =>
+                      setBlockResolution((current) =>
+                        current
+                          ? { ...current, completeLinkedTask: event.target.checked }
+                          : current,
+                      )
+                    }
+                  />
+                  <span>
+                    Mark linked task done too
+                    {blockResolution.linkedTaskTitle ? (
+                      <span className="block text-xs text-muted-foreground">
+                        {blockResolution.linkedTaskTitle}
+                      </span>
+                    ) : null}
+                  </span>
+                </label>
+              ) : null}
+            </div>
+          ) : null}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setBlockResolution(null)}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={submitBlockResolution} disabled={!loggedIn}>
+              Save status
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(shutdownDraft)}
+        onOpenChange={(open) => {
+          if (!open) setShutdownDraft(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Shutdown ritual</DialogTitle>
+            <DialogDescription>
+              Close the day with what happened, what it taught you, and tomorrow&apos;s first move.
+            </DialogDescription>
+          </DialogHeader>
+          {shutdownDraft ? (
+            <div className="grid gap-3">
+              <label className="space-y-1 text-sm font-medium text-foreground">
+                What happened today?
+                <Textarea
+                  value={shutdownDraft.notes}
+                  onChange={(event) => updateShutdownDraft({ notes: event.target.value })}
+                  placeholder="Plan changes, completions, misses, and useful context"
+                />
+              </label>
+              <label className="space-y-1 text-sm font-medium text-foreground">
+                Anti-drift lesson
+                <Textarea
+                  value={shutdownDraft.lesson}
+                  onChange={(event) => updateShutdownDraft({ lesson: event.target.value })}
+                  placeholder="What does the execution data teach you?"
+                />
+              </label>
+              <label className="space-y-1 text-sm font-medium text-foreground">
+                Tomorrow&apos;s first move
+                <Input
+                  value={shutdownDraft.firstMove}
+                  onChange={(event) => updateShutdownDraft({ firstMove: event.target.value })}
+                  placeholder="The first concrete action"
+                />
+              </label>
+              <label className="space-y-1 text-sm font-medium text-foreground">
+                Tomorrow shutdown / sleep target
+                <Input
+                  value={shutdownDraft.target}
+                  onChange={(event) => updateShutdownDraft({ target: event.target.value })}
+                  placeholder="22:30"
+                />
+              </label>
+            </div>
+          ) : null}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setShutdownDraft(null)}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={submitShutdown} disabled={!loggedIn}>
+              Save shutdown
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }
