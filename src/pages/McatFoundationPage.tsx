@@ -391,11 +391,10 @@ function McatPhase0ScheduleCard({
     !sessionLoading &&
     !summary.isFullySeeded &&
     seedStatus !== "loading" &&
-    seedStatus !== "seeding" &&
-    seedStatus !== "error";
+    seedStatus !== "seeding";
   const seedButtonLabel =
     seedStatus === "error"
-      ? "Seed unavailable"
+      ? "Retry seed"
       : summary.hasPartialSeed
         ? "Seed missing tasks"
         : "Seed Phase 0 Tasks";
@@ -1013,7 +1012,24 @@ export default function McatFoundationPage() {
     });
   };
 
-  const effectiveSeedStartDate = activePhase0Plan?.seed_start_date ?? todayKey;
+  // Prefer the active plan instance; otherwise recover from generated task
+  // metadata; otherwise the earliest seeded due_date; finally fall back to
+  // today so "Starts today when seeded" still renders for first-time users.
+  const recoveredSeedStartDate = useMemo(() => {
+    if (activePhase0Plan?.seed_start_date) return activePhase0Plan.seed_start_date;
+    if (!seededPhaseTasks.length) return null;
+    for (const task of seededPhaseTasks) {
+      const meta = task.generated_from as { seed_start_date?: unknown } | null | undefined;
+      const candidate = meta && typeof meta.seed_start_date === "string" ? meta.seed_start_date : null;
+      if (candidate) return candidate;
+    }
+    const earliest = seededPhaseTasks
+      .map((task) => task.due_date)
+      .filter((d): d is string => Boolean(d))
+      .sort()[0];
+    return earliest ?? null;
+  }, [activePhase0Plan?.seed_start_date, seededPhaseTasks]);
+  const effectiveSeedStartDate = recoveredSeedStartDate ?? todayKey;
   const phase0SeedSummary = useMemo(
     () =>
       summarizeMcatPhase0SeedStatus(seededPhaseTasks, effectiveSeedStartDate, {

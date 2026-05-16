@@ -310,7 +310,10 @@ export function generateRoutineTaskDates(
 
   if (template.cadence === "weekly") {
     const preferred = resolvePreferredDays(template, options?.preferredDays);
-    const weekday = preferred && preferred.length > 0 ? preferred[0] : weekdayOf(beginDate);
+    // Without preferred_weekdays, anchor weekly routines to Sunday (0)
+    // deterministically rather than drifting to whatever day the user
+    // happened to activate the routine on.
+    const weekday = preferred && preferred.length > 0 ? preferred[0] : 0;
     // Step forward across horizon, pick one per ISO-ish week (use Monday-start week boundary).
     const weeksSeen = new Set<string>();
     for (let i = 0; i < horizonDays; i += 1) {
@@ -414,6 +417,13 @@ function isRoutineTaskForTemplate(task: Task, templateKey: string) {
   return task.source === ROUTINE_SOURCE && task.template_key === templateKey;
 }
 
+function routineInstanceIdOf(task: Task): string | null {
+  const meta = task.generated_from as { routine_instance_id?: unknown } | null | undefined;
+  if (meta && typeof meta.routine_instance_id === "string") return meta.routine_instance_id;
+  const direct = (task as { routine_instance_id?: unknown }).routine_instance_id;
+  return typeof direct === "string" ? direct : null;
+}
+
 export function getMissingRoutineTasks(
   template: RoutineTemplate,
   existingTasks: Task[],
@@ -425,9 +435,19 @@ export function getMissingRoutineTasks(
     instance?: { id?: string; preferred_time?: string | null };
   },
 ): RoutineTaskPayload[] {
+  // Duplicate prevention is instance-aware so a reactivated routine does not
+  // collide with leftover tasks from a paused/superseded instance.
+  const activeInstanceId = options?.instance?.id ?? null;
   const existingDates = new Set(
     existingTasks
       .filter((t) => isRoutineTaskForTemplate(t, template.template_key))
+      .filter((t) => {
+        if (!activeInstanceId) return true;
+        const id = routineInstanceIdOf(t);
+        // Only consider tasks tied to the active instance (or legacy tasks
+        // that have no instance id yet) when blocking new generation.
+        return id == null || id === activeInstanceId;
+      })
       .map((t) => t.due_date)
       .filter((d): d is string => typeof d === "string" && d.length > 0),
   );
