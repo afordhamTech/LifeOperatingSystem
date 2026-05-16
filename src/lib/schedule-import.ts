@@ -357,7 +357,10 @@ export function resetEditableRow(row: EditableScheduleRow): EditableScheduleRow 
   };
 }
 
-export function serializeEditableRowsToScheduleText(rows: EditableScheduleRow[]): string {
+export function serializeEditableRowsToScheduleText(
+  rows: EditableScheduleRow[],
+  parsed?: ScheduleImportParsed | null,
+): string {
   const lines = ["SCHEDULE"];
   const sorted = [...rows].sort((a, b) => {
     const aMin = a.start ? parseTimeToMinutes(a.start) : Number.POSITIVE_INFINITY;
@@ -377,6 +380,38 @@ export function serializeEditableRowsToScheduleText(rows: EditableScheduleRow[])
       } | ${row.reason || ""}`,
     );
   }
+
+  if (parsed) {
+    if (parsed.unscheduled.length > 0) {
+      lines.push("", "UNSCHEDULED");
+      for (const note of parsed.unscheduled) {
+        lines.push(`- ${note.task_code} | ${note.reason}`);
+      }
+    }
+    if (parsed.risks.length > 0) {
+      lines.push("", "RISKS");
+      for (const note of parsed.risks) {
+        lines.push(`- ${note.task_code} | ${note.reason}`);
+      }
+    }
+    if (parsed.firstAction) {
+      lines.push(
+        "",
+        "FIRST_ACTION",
+        `- ${parsed.firstAction.task_code} | ${parsed.firstAction.text}`,
+      );
+    }
+    if (parsed.planRealism.score != null || parsed.planRealism.reason) {
+      lines.push("", "PLAN_REALISM");
+      if (parsed.planRealism.score != null) {
+        lines.push(`- score: ${parsed.planRealism.score}`);
+      }
+      if (parsed.planRealism.reason) {
+        lines.push(`- reason: ${parsed.planRealism.reason}`);
+      }
+    }
+  }
+
   return lines.join("\n");
 }
 

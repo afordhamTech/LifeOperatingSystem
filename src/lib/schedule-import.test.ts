@@ -301,6 +301,44 @@ describe("editable schedule rows", () => {
     expect(preview.rows[0].status).toBe("matched");
   });
 
+  it("serializeEditableRowsToScheduleText preserves non-schedule sections when given parsed", () => {
+    const { rows } = setup();
+    const cleanRows = rows.filter((r) => !r.isUnparsed);
+    const parsed = parseScheduleImport(
+      [
+        "SCHEDULE",
+        "- 09:00-10:00 | TASK-A | Title A | deep_work | reason A",
+        "",
+        "UNSCHEDULED",
+        "- TASK-Z | bumped due to overload",
+        "",
+        "RISKS",
+        "- TASK-Y | might run long",
+        "",
+        "FIRST_ACTION",
+        "- TASK-A | open the doc",
+        "",
+        "PLAN_REALISM",
+        "- score: 7",
+        "- reason: tight evening",
+      ].join("\n"),
+    );
+    const text = serializeEditableRowsToScheduleText(cleanRows, parsed);
+    expect(text).toContain("UNSCHEDULED");
+    expect(text).toContain("- TASK-Z | bumped due to overload");
+    expect(text).toContain("RISKS");
+    expect(text).toContain("FIRST_ACTION");
+    expect(text).toContain("PLAN_REALISM");
+    expect(text).toContain("- score: 7");
+    expect(text).toContain("- reason: tight evening");
+    // Re-parse should preserve those sections too.
+    const reparsed = parseScheduleImport(text);
+    expect(reparsed.unscheduled).toHaveLength(1);
+    expect(reparsed.risks).toHaveLength(1);
+    expect(reparsed.firstAction?.task_code).toBe("TASK-A");
+    expect(reparsed.planRealism.score).toBe(7);
+  });
+
   it("raw text parse path still works (no editing required)", () => {
     const preview = buildScheduleImportPreview({
       date: TODAY,
