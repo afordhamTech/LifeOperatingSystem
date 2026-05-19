@@ -128,6 +128,7 @@ export type McatSummary = {
   questionsAttempted: number;
   questionsCorrect: number;
   accuracy: number;
+  previousQuestionsAttempted: number;
   accuracyTrend: number;
   flashcardsDue: number;
   minutesThisWeek: number;
@@ -876,6 +877,7 @@ export function getMcatSummary(state: McatFoundationState, today = new Date()): 
     questionsAttempted,
     questionsCorrect,
     accuracy,
+    previousQuestionsAttempted: previousAttempted,
     accuracyTrend: round(accuracy - previousAccuracy),
     flashcardsDue: state.topics.reduce((sum, topic) => sum + topic.flashcardsDue, 0),
     minutesThisWeek: sessionsThisWeek.reduce((sum, session) => sum + session.minutes, 0),

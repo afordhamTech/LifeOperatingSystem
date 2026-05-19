@@ -81,19 +81,31 @@ import {
   MCAT_PHASE_REGISTRY,
   MCAT_PREP_SYSTEM_TAGLINE,
   MCAT_PHASE_0_SOURCE,
-  getMcatPhase0TaskForDate,
-  summarizeMcatPhase0SeedStatus,
-  getMissingMcatPhase0Tasks,
-  type McatPhase0SeedSummary,
 } from "@/lib/mcat-phase-0-template";
+import {
+  MCAT_COMMITTED_STUDY_SOURCE,
+  buildMcatTodayCommand,
+  commitMcatPlanOccurrenceToTask,
+  formatMcatAccuracyTrendLabel,
+  generateMcatPhase0PlanOccurrences,
+  pickTodayMcatOccurrence,
+  summarizeMcatPlanOccurrenceStatus,
+  type McatPlanOccurrence,
+  type McatPlanOccurrenceSummary,
+  type McatTodayCommand,
+} from "@/lib/mcat-plan-occurrences";
 import {
   createMcatPlanInstance,
   fetchActiveMcatPlanInstance,
+  fetchMcatPlanOccurrences,
+  fetchUniversalTasks,
   fetchUniversalTasksByTemplate,
+  updateMcatPlanOccurrence,
+  upsertMcatPlanOccurrences,
   upsertUniversalTask,
   type McatPlanInstance,
 } from "@/lib/lifeee-persistence";
-import { loadTasks, makeTask, saveTasks, type Task } from "@/lib/task-system";
+import { loadTasks, saveTasks, type Task } from "@/lib/task-system";
 import { supabase } from "@/lib/supabase-client";
 import { useSupabaseSession } from "@/hooks/useSupabaseSession";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -106,7 +118,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { CollapsibleSection, NextActionCard, PageDecisionHeader } from "@/components/ui-kit";
+import { CollapsibleSection, PageDecisionHeader } from "@/components/ui-kit";
 import { cn } from "@/lib/utils";
 
 const DAILY_GOAL_MINUTES = 60;
@@ -206,6 +218,7 @@ const MCAT_SYNC_DEBOUNCE_MS = 700;
 
 type McatSyncStatus = "local" | "loading" | "saving" | "synced" | "error";
 type McatPhaseSeedStatus = "idle" | "loading" | "seeding" | "saved" | "error";
+type McatCommitStatus = "idle" | "committing" | "saved" | "error";
 
 type McatRemoteRow = {
   state: unknown;
@@ -258,6 +271,10 @@ function sortTemplateTasks(tasks: Task[]) {
   return [...tasks].sort(
     (a, b) => (a.template_day_index ?? 999) - (b.template_day_index ?? 999),
   );
+}
+
+function sortTemplateOccurrences(occurrences: McatPlanOccurrence[]) {
+  return [...occurrences].sort((a, b) => a.template_day_index - b.template_day_index);
 }
 
 function readErrorMessage(error: unknown, fallback: string) {
@@ -361,43 +378,45 @@ function McatPhase0ScheduleCard({
   hasSupabaseConfig,
   userId,
   sessionLoading,
-  todayPreviewTitle,
-  todaySeededTask,
+  todayOccurrence,
+  todayCommittedTask,
+  legacySeededTaskCount,
   activePlan,
   todayKey,
   onSeed,
 }: {
-  summary: McatPhase0SeedSummary;
+  summary: McatPlanOccurrenceSummary;
   seedStatus: McatPhaseSeedStatus;
   seedMessage: string | null;
   seedError: string | null;
   hasSupabaseConfig: boolean;
   userId: string | null;
   sessionLoading: boolean;
-  todayPreviewTitle: string | null;
-  todaySeededTask: Task | null;
+  todayOccurrence: McatPlanOccurrence | null;
+  todayCommittedTask: Task | null;
+  legacySeededTaskCount: number;
   activePlan: McatPlanInstance | null;
   todayKey: string;
   onSeed: () => void;
 }) {
   const authMessage = !hasSupabaseConfig
-    ? "Saved MCAT seeding is unavailable right now."
+    ? "Saved MCAT plan storage is unavailable right now."
     : !userId
-      ? "Log in to seed MCAT tasks to your plan."
+      ? "Log in to start the MCAT plan."
       : null;
   const canSeed =
     Boolean(userId) &&
     hasSupabaseConfig &&
     !sessionLoading &&
-    !summary.isFullySeeded &&
+    summary.generatedPlanDayCount < summary.totalPlanDayCount &&
     seedStatus !== "loading" &&
     seedStatus !== "seeding";
   const seedButtonLabel =
     seedStatus === "error"
-      ? "Retry seed"
-      : summary.hasPartialSeed
-        ? "Seed missing tasks"
-        : "Seed Phase 0 Tasks";
+      ? "Retry plan start"
+      : summary.generatedPlanDayCount > 0
+        ? "Repair Phase 0 Plan"
+        : "Start Phase 0 Plan";
   const remainingHours = Math.round((summary.remainingPlannedMinutes / 60) * 10) / 10;
 
   return (
@@ -417,7 +436,7 @@ function McatPhase0ScheduleCard({
           <p className="mt-2 text-sm text-muted-foreground">
             {activePlan
               ? `${activePlan.seed_start_date} → ${activePlan.seed_end_date} · 78 total hours · ${activePlan.phase_name}`
-              : `Starts today when seeded · 70 days · 78 total hours · ${MCAT_PHASE_0_TEMPLATE.phase_name}`}
+              : `Starts today when started · 70 days · 78 total hours · ${MCAT_PHASE_0_TEMPLATE.phase_name}`}
           </p>
           <p className="mt-1 text-xs italic text-muted-foreground">{MCAT_PREP_SYSTEM_TAGLINE}</p>
           {!activePlan ? (
@@ -425,31 +444,30 @@ function McatPhase0ScheduleCard({
               Week 1 begins on {todayKey}.
             </p>
           ) : null}
-          <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+          <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-6">
             <MiniMetric
               label="Current week"
               value={
-                summary.currentWeekTargetMinutes
-                  ? `Week ${summary.currentWeekIndex}: ${summary.currentWeekTargetMinutes / 60}h`
+                summary.currentWeekIndex
+                  ? `Week ${summary.currentWeekIndex}`
                   : "Outside phase"
               }
             />
             <MiniMetric
               label="Generated"
-              value={`${summary.seededTaskCount}/${summary.totalTaskCount}`}
+              value={`${summary.generatedPlanDayCount}/${summary.totalPlanDayCount} plan days`}
             />
-            <MiniMetric label="Completed" value={`${summary.completedTaskCount}`} />
+            <MiniMetric label="Committed to Tasks" value={`${summary.committedTaskCount}`} />
+            <MiniMetric label="Completed" value={`${summary.completedCount}`} />
             <MiniMetric label="Remaining" value={`${summary.remainingPlannedMinutes}m`} />
             <MiniMetric label="Hours left" value={`${remainingHours}h`} />
           </div>
           <div className="mt-3 text-xs text-muted-foreground">
-            {todaySeededTask
-              ? `Today's seeded task: ${todaySeededTask.task_code} · ${todaySeededTask.title}`
-              : !activePlan && todayPreviewTitle
-                ? `Today's preview task if seeded now: ${todayPreviewTitle}`
-                : todayPreviewTitle
-                  ? `Today's planned task: ${todayPreviewTitle}`
-                  : "No Phase 0 task is due today."}
+            {todayCommittedTask
+              ? `Today's committed task: ${todayCommittedTask.task_code} · ${todayCommittedTask.title}`
+              : todayOccurrence
+                ? `Today's plan move: ${todayOccurrence.title}`
+                : "No Phase 0 plan move is due today."}
           </div>
         </div>
 
@@ -472,10 +490,10 @@ function McatPhase0ScheduleCard({
           </Link>
           <Link
             to="/tasks"
-            aria-disabled={!todaySeededTask}
+            aria-disabled={!todayCommittedTask}
             className={cn(
               "inline-flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted",
-              !todaySeededTask && "pointer-events-none opacity-50",
+              !todayCommittedTask && "pointer-events-none opacity-50",
             )}
           >
             <CalendarClock size={14} />
@@ -499,9 +517,9 @@ function McatPhase0ScheduleCard({
           {seedError}
         </div>
       ) : null}
-      {summary.duplicateTemplateDayCount > 0 ? (
-        <div className="mt-3 rounded-md border border-destructive/25 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-          {summary.duplicateTemplateDayCount} duplicate seeded day record(s) were detected. Existing tasks were not deleted or overwritten.
+      {legacySeededTaskCount > 0 ? (
+        <div className="mt-3 rounded-md border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+          Old MCAT seeded tasks detected: {legacySeededTaskCount}. They are hidden from normal task planning unless you commit/adopt one.
         </div>
       ) : null}
     </section>
@@ -517,17 +535,104 @@ function MiniMetric({ label, value }: { label: string; value: string }) {
   );
 }
 
+function McatTodayCommandCard({
+  command,
+  isCommitted,
+  canCommit,
+  commitStatus,
+  commitMessage,
+  onStart,
+  onCommit,
+  onViewDetails,
+}: {
+  command: McatTodayCommand;
+  isCommitted: boolean;
+  canCommit: boolean;
+  commitStatus: McatCommitStatus;
+  commitMessage: string | null;
+  onStart: () => void;
+  onCommit: () => void;
+  onViewDetails: () => void;
+}) {
+  return (
+    <section className="card-elevated border-primary/25 bg-primary/5 p-5">
+      <div className="mb-4 rounded-md border border-primary/20 bg-background/80 px-3 py-2 text-xs font-semibold text-primary">
+        {command.disciplineText}
+      </div>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0 flex-1">
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            {command.heading}
+          </div>
+          <h2 className="mt-1 text-xl font-semibold text-foreground">
+            Do this now: {command.action}
+          </h2>
+          <div className="mt-3 grid gap-3 md:grid-cols-3">
+            <MiniMetric label="Time" value={`${command.estimatedMinutes}m`} />
+            <div className="rounded-md border border-border bg-background/70 p-2 md:col-span-2">
+              <div className="text-[10px] uppercase text-muted-foreground">Why this</div>
+              <div className="mt-1 text-sm text-foreground">{command.why}</div>
+            </div>
+          </div>
+          <div className="mt-3 rounded-md border border-border bg-background/70 p-3">
+            <div className="text-[10px] uppercase text-muted-foreground">Success</div>
+            <div className="mt-1 text-sm text-foreground">{command.successCondition}</div>
+          </div>
+        </div>
+        <div className="flex shrink-0 flex-wrap gap-2 lg:max-w-[240px] lg:justify-end">
+          <button className="btn-primary flex items-center gap-2" onClick={onStart}>
+            <Play size={15} />
+            Start session
+          </button>
+          <button
+            className="btn-secondary flex items-center gap-2"
+            onClick={onCommit}
+            disabled={!canCommit || isCommitted || commitStatus === "committing"}
+          >
+            <CalendarClock size={15} />
+            {isCommitted
+              ? "Already committed"
+              : commitStatus === "committing"
+                ? "Committing..."
+                : "Commit to Daily OS"}
+          </button>
+          <button className="btn-secondary flex items-center gap-2" onClick={onViewDetails}>
+            <BookOpenCheck size={15} />
+            View details
+          </button>
+        </div>
+      </div>
+      {commitMessage ? (
+        <div
+          className={cn(
+            "mt-4 rounded-md border px-3 py-2 text-xs",
+            commitStatus === "error"
+              ? "border-destructive/25 bg-destructive/10 text-destructive"
+              : "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+          )}
+        >
+          {commitMessage}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 export default function McatFoundationPage() {
   const { hasSupabaseConfig, isLoading: sessionLoading, userId } = useSupabaseSession();
   const [state, setState] = useState<McatFoundationState>(() => loadMcatFoundationState());
   const [activeSession, setActiveSession] = useState<ActiveMcatSession | null>(() => loadActiveSession());
   const [syncStatus, setSyncStatus] = useState<McatSyncStatus>("local");
   const [syncError, setSyncError] = useState<string | null>(null);
-  const [seededPhaseTasks, setSeededPhaseTasks] = useState<Task[]>([]);
+  const [phase0Occurrences, setPhase0Occurrences] = useState<McatPlanOccurrence[]>([]);
+  const [legacySeededPhaseTasks, setLegacySeededPhaseTasks] = useState<Task[]>([]);
+  const [committedMcatTasks, setCommittedMcatTasks] = useState<Task[]>([]);
   const [activePhase0Plan, setActivePhase0Plan] = useState<McatPlanInstance | null>(null);
   const [phaseSeedStatus, setPhaseSeedStatus] = useState<McatPhaseSeedStatus>("idle");
   const [phaseSeedMessage, setPhaseSeedMessage] = useState<string | null>(null);
   const [phaseSeedError, setPhaseSeedError] = useState<string | null>(null);
+  const [commitStatus, setCommitStatus] = useState<McatCommitStatus>("idle");
+  const [commitMessage, setCommitMessage] = useState<string | null>(null);
   const stateRef = useRef(state);
   const activeSessionRef = useRef(activeSession);
   const remoteLoadedForUserRef = useRef<string | null>(null);
@@ -673,10 +778,12 @@ export default function McatFoundationPage() {
   useEffect(() => {
     let active = true;
 
-    const loadSeededTasks = async () => {
+    const loadPhase0Plan = async () => {
       if (sessionLoading) return;
       if (!supabase || !hasSupabaseConfig || !userId) {
-        setSeededPhaseTasks([]);
+        setPhase0Occurrences([]);
+        setLegacySeededPhaseTasks([]);
+        setCommittedMcatTasks([]);
         setActivePhase0Plan(null);
         setPhaseSeedStatus("idle");
         setPhaseSeedError(null);
@@ -686,10 +793,15 @@ export default function McatFoundationPage() {
       setPhaseSeedStatus("loading");
       setPhaseSeedError(null);
       try {
-        const [tasks, plan] = await Promise.all([
+        const [legacyTasks, committedTasks, plan] = await Promise.all([
           fetchUniversalTasksByTemplate({
             userId,
             source: MCAT_PHASE_0_SOURCE,
+            templateKey: MCAT_PHASE_0_TEMPLATE_KEY,
+          }),
+          fetchUniversalTasksByTemplate({
+            userId,
+            source: MCAT_COMMITTED_STUDY_SOURCE,
             templateKey: MCAT_PHASE_0_TEMPLATE_KEY,
           }),
           fetchActiveMcatPlanInstance({
@@ -697,18 +809,23 @@ export default function McatFoundationPage() {
             templateKey: MCAT_PHASE_0_TEMPLATE_KEY,
           }),
         ]);
+        const occurrences = plan
+          ? await fetchMcatPlanOccurrences({ userId, planInstanceId: plan.id })
+          : [];
         if (!active) return;
-        setSeededPhaseTasks(sortTemplateTasks(tasks));
+        setLegacySeededPhaseTasks(sortTemplateTasks(legacyTasks));
+        setCommittedMcatTasks(sortTemplateTasks(committedTasks));
+        setPhase0Occurrences(sortTemplateOccurrences(occurrences));
         setActivePhase0Plan(plan);
         setPhaseSeedStatus("saved");
       } catch (error) {
         if (!active) return;
         setPhaseSeedStatus("error");
-        setPhaseSeedError(readErrorMessage(error, "Unable to load MCAT Phase 0 tasks."));
+        setPhaseSeedError(readErrorMessage(error, "Unable to load MCAT Phase 0 plan."));
       }
     };
 
-    void loadSeededTasks();
+    void loadPhase0Plan();
 
     return () => {
       active = false;
@@ -783,7 +900,6 @@ export default function McatFoundationPage() {
     () => state.topics.find((topic) => topic.title === todayMove.topic) ?? studyNowTopic,
     [state.topics, studyNowTopic, todayMove.topic],
   );
-  const todayMoveReason = topicRecommendationReason(todayMoveTopic);
   const streak = useMemo(() => getStudyStreak(state), [state]);
   const todayMinutes = useMemo(() => getDailyMinutes(state, todayKey), [state]);
   const dailySeries = useMemo(() => getDailyMinutesSeries(state, 14), [state]);
@@ -1012,48 +1128,67 @@ export default function McatFoundationPage() {
     });
   };
 
-  // Prefer the active plan instance; otherwise recover from generated task
-  // metadata; otherwise the earliest seeded due_date; finally fall back to
-  // today so "Starts today when seeded" still renders for first-time users.
+  // Prefer the active plan instance; otherwise recover from old generated task
+  // metadata; otherwise the earliest old due_date; finally fall back to today.
   const recoveredSeedStartDate = useMemo(() => {
     if (activePhase0Plan?.seed_start_date) return activePhase0Plan.seed_start_date;
-    if (!seededPhaseTasks.length) return null;
-    for (const task of seededPhaseTasks) {
+    if (!legacySeededPhaseTasks.length) return null;
+    for (const task of legacySeededPhaseTasks) {
       const meta = task.generated_from as { seed_start_date?: unknown } | null | undefined;
       const candidate = meta && typeof meta.seed_start_date === "string" ? meta.seed_start_date : null;
       if (candidate) return candidate;
     }
-    const earliest = seededPhaseTasks
+    const earliest = legacySeededPhaseTasks
       .map((task) => task.due_date)
       .filter((d): d is string => Boolean(d))
       .sort()[0];
     return earliest ?? null;
-  }, [activePhase0Plan?.seed_start_date, seededPhaseTasks]);
+  }, [activePhase0Plan, legacySeededPhaseTasks]);
   const effectiveSeedStartDate = recoveredSeedStartDate ?? todayKey;
   const phase0SeedSummary = useMemo(
     () =>
-      summarizeMcatPhase0SeedStatus(seededPhaseTasks, effectiveSeedStartDate, {
+      summarizeMcatPlanOccurrenceStatus(phase0Occurrences, {
         today: todayKey,
       }),
-    [seededPhaseTasks, effectiveSeedStartDate],
+    [phase0Occurrences],
   );
-  const todayPhase0Preview = useMemo(
-    () =>
-      getMcatPhase0TaskForDate(effectiveSeedStartDate, todayKey, {
+  const previewOccurrence = useMemo(
+    () => {
+      const generated = generateMcatPhase0PlanOccurrences(effectiveSeedStartDate, {
         today: todayKey,
         planInstanceId: activePhase0Plan?.id ?? null,
-      }),
+      });
+      return pickTodayMcatOccurrence(generated, todayKey);
+    },
     [effectiveSeedStartDate, activePhase0Plan?.id],
   );
-  const todaySeededTask = useMemo(
-    () => seededPhaseTasks.find((task) => task.due_date === todayKey) ?? null,
-    [seededPhaseTasks],
+  const todayPlanOccurrence = useMemo(
+    () => pickTodayMcatOccurrence(phase0Occurrences, todayKey) ?? previewOccurrence,
+    [phase0Occurrences, previewOccurrence],
+  );
+  const todayCommittedTask = useMemo(
+    () =>
+      committedMcatTasks.find((task) => task.id === todayPlanOccurrence?.linked_task_id) ??
+      committedMcatTasks.find((task) => task.due_date === todayKey) ??
+      null,
+    [committedMcatTasks, todayPlanOccurrence?.linked_task_id],
+  );
+  const todayCommand = useMemo(
+    () =>
+      buildMcatTodayCommand({
+        occurrence: todayPlanOccurrence,
+        fallbackTitle: todayMove.title,
+        fallbackDetail: todayMove.detail,
+        hasActiveSession: Boolean(activeSession),
+        hasLoggedToday: todaySessions.length > 0 || todayCars.length > 0,
+      }),
+    [activeSession, todayCars.length, todayMove.detail, todayMove.title, todayPlanOccurrence, todaySessions.length],
   );
 
   const handleSeedPhase0Tasks = async () => {
     if (!hasSupabaseConfig || !userId) {
       setPhaseSeedMessage(null);
-      setPhaseSeedError("Log in to seed MCAT tasks to your plan.");
+      setPhaseSeedError("Log in to start the MCAT Phase 0 plan.");
       return;
     }
 
@@ -1082,40 +1217,103 @@ export default function McatFoundationPage() {
       }
       const seedStartDate = plan.seed_start_date;
 
-      const existingTasks = await fetchUniversalTasksByTemplate({
+      const existingOccurrences = await fetchMcatPlanOccurrences({
         userId,
-        source: MCAT_PHASE_0_SOURCE,
-        templateKey: MCAT_PHASE_0_TEMPLATE_KEY,
-      });
-      const missingPayloads = getMissingMcatPhase0Tasks(existingTasks, seedStartDate, {
-        today: todayKey,
         planInstanceId: plan.id,
       });
+      const existingDays = new Set(existingOccurrences.map((occurrence) => occurrence.template_day_index));
+      const missingOccurrences = generateMcatPhase0PlanOccurrences(seedStartDate, {
+        today: todayKey,
+        planInstanceId: plan.id,
+      }).filter((occurrence) => !existingDays.has(occurrence.template_day_index));
 
-      if (missingPayloads.length === 0) {
-        setSeededPhaseTasks(sortTemplateTasks(existingTasks));
+      if (missingOccurrences.length === 0) {
+        setPhase0Occurrences(sortTemplateOccurrences(existingOccurrences));
         setPhaseSeedStatus("saved");
-        setPhaseSeedMessage("MCAT Phase 0 tasks already seeded.");
+        setPhaseSeedMessage("MCAT Phase 0 plan already started.");
         return;
       }
 
-      const savedTasks = await Promise.all(
-        missingPayloads.map((payload) =>
-          upsertUniversalTask(userId, makeTask(payload), 6),
+      const savedOccurrences = await upsertMcatPlanOccurrences(userId, missingOccurrences);
+      const nextOccurrences = sortTemplateOccurrences([
+        ...existingOccurrences,
+        ...savedOccurrences.filter(
+          (saved) =>
+            !existingOccurrences.some(
+              (existing) => existing.template_day_index === saved.template_day_index,
+            ),
         ),
-      );
-      const nextTasks = sortTemplateTasks([...existingTasks, ...savedTasks]);
-      setSeededPhaseTasks(nextTasks);
-      mergeTasksIntoLocalCache(savedTasks);
+      ]);
+      setPhase0Occurrences(nextOccurrences);
       setPhaseSeedStatus("saved");
       setPhaseSeedMessage(
-        savedTasks.length === 70
-          ? "Seeded 70 MCAT Phase 0 tasks."
-          : `Seeded ${savedTasks.length} missing MCAT Phase 0 task(s).`,
+        savedOccurrences.length === 70
+          ? "Generated 70 MCAT Phase 0 plan days."
+          : `Generated ${savedOccurrences.length} missing MCAT Phase 0 plan day(s).`,
       );
     } catch (error) {
       setPhaseSeedStatus("error");
-      setPhaseSeedError(readErrorMessage(error, "Unable to seed MCAT Phase 0 tasks."));
+      setPhaseSeedError(readErrorMessage(error, "Unable to start MCAT Phase 0 plan."));
+    }
+  };
+
+  const handleCommitTodayOccurrence = async () => {
+    if (!hasSupabaseConfig || !userId) {
+      setCommitStatus("error");
+      setCommitMessage("Log in to commit MCAT work to Daily OS.");
+      return;
+    }
+    if (!todayPlanOccurrence || !activePhase0Plan || phase0Occurrences.length === 0) {
+      setCommitStatus("error");
+      setCommitMessage("Start the Phase 0 plan before committing a study block.");
+      return;
+    }
+    if (todayPlanOccurrence.linked_task_id && todayCommittedTask) {
+      setCommitStatus("saved");
+      setCommitMessage("Already committed.");
+      return;
+    }
+
+    setCommitStatus("committing");
+    setCommitMessage(null);
+    try {
+      const existingTasks = await fetchUniversalTasks(userId);
+      const result = commitMcatPlanOccurrenceToTask(todayPlanOccurrence, existingTasks, {
+        today: todayKey,
+      });
+      const savedTask = await upsertUniversalTask(userId, result.task, 6);
+      const occurrenceToSave: McatPlanOccurrence = {
+        ...result.occurrence,
+        linked_task_id: savedTask.id,
+        status: "committed",
+        generated_from: {
+          ...result.occurrence.generated_from,
+          committed_task_id: savedTask.id,
+        },
+      };
+      const savedOccurrence = await updateMcatPlanOccurrence(userId, occurrenceToSave);
+      setPhase0Occurrences((current) =>
+        sortTemplateOccurrences(
+          current.map((occurrence) =>
+            occurrence.id === savedOccurrence.id ? savedOccurrence : occurrence,
+          ),
+        ),
+      );
+      setCommittedMcatTasks((current) =>
+        sortTemplateTasks([
+          savedTask,
+          ...current.filter((task) => task.id !== savedTask.id),
+        ]),
+      );
+      setLegacySeededPhaseTasks((current) =>
+        current.filter((task) => task.id !== savedTask.id),
+      );
+      mergeTasksIntoLocalCache([savedTask]);
+      setCommitStatus("saved");
+      setCommitMessage("Committed to Daily OS.");
+    } catch (error) {
+      setCommitStatus("error");
+      setCommitMessage(readErrorMessage(error, "Unable to commit MCAT work to Daily OS."));
     }
   };
 
@@ -1132,6 +1330,10 @@ export default function McatFoundationPage() {
       : !hasSupabaseConfig || !userId
         ? "local"
         : syncStatus;
+  const commandTopicId = todayMoveTopic?.id ?? studyNowTopic?.id ?? firstTopicId;
+  const isTodayOccurrenceCommitted = Boolean(
+    todayPlanOccurrence?.linked_task_id && todayCommittedTask,
+  );
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -1150,31 +1352,15 @@ export default function McatFoundationPage() {
         </span>
       </PageDecisionHeader>
 
-      <NextActionCard
-        label="Today's Move"
-        title={todayMove.topic}
-        detail={
-          <span>
-            {todayMove.detail} Why it matters: {todayMoveReason}
-          </span>
-        }
-      />
-
-      <McatRoadmapCard />
-
-      <McatPhase0ScheduleCard
-        summary={phase0SeedSummary}
-        seedStatus={phaseSeedStatus}
-        seedMessage={phaseSeedMessage}
-        seedError={phaseSeedError}
-        hasSupabaseConfig={hasSupabaseConfig}
-        userId={userId}
-        sessionLoading={sessionLoading}
-        todayPreviewTitle={todayPhase0Preview?.title ?? null}
-        todaySeededTask={todaySeededTask}
-        activePlan={activePhase0Plan}
-        todayKey={todayKey}
-        onSeed={handleSeedPhase0Tasks}
+      <McatTodayCommandCard
+        command={todayCommand}
+        isCommitted={isTodayOccurrenceCommitted}
+        canCommit={Boolean(activePhase0Plan && phase0Occurrences.length > 0 && todayPlanOccurrence)}
+        commitStatus={commitStatus}
+        commitMessage={commitMessage}
+        onStart={() => commandTopicId && startSession(commandTopicId)}
+        onCommit={handleCommitTodayOccurrence}
+        onViewDetails={() => commandTopicId && setTopicDetailId(commandTopicId)}
       />
 
       <ActiveSessionCard
@@ -1192,8 +1378,28 @@ export default function McatFoundationPage() {
             current ? { ...current, topicId } : current,
           )
         }
-        defaultTopicId={todayMoveTopic?.id ?? studyNowTopic?.id ?? firstTopicId}
+        defaultTopicId={commandTopicId}
       />
+
+      <McatPhase0ScheduleCard
+        summary={phase0SeedSummary}
+        seedStatus={phaseSeedStatus}
+        seedMessage={phaseSeedMessage}
+        seedError={phaseSeedError}
+        hasSupabaseConfig={hasSupabaseConfig}
+        userId={userId}
+        sessionLoading={sessionLoading}
+        todayOccurrence={todayPlanOccurrence}
+        todayCommittedTask={todayCommittedTask}
+        legacySeededTaskCount={legacySeededPhaseTasks.length}
+        activePlan={activePhase0Plan}
+        todayKey={todayKey}
+        onSeed={handleSeedPhase0Tasks}
+      />
+
+      <CollapsibleSection title="Roadmap" subtitle="Phase gates and locked future phases" defaultOpen={false}>
+        <McatRoadmapCard />
+      </CollapsibleSection>
 
       <CollapsibleSection title="Metrics" subtitle="Study pace, accuracy, CARS, and cards" defaultOpen={false}>
         <section className="grid grid-cols-2 gap-3 md:grid-cols-5">
@@ -1213,10 +1419,14 @@ export default function McatFoundationPage() {
           <HeroStat
             icon={<TrendingUp size={14} />}
             label="Week accuracy"
-            value={summary.questionsAttempted > 0 ? `${summary.accuracy}%` : "—"}
+            value={summary.questionsAttempted > 0 ? `${summary.accuracy}%` : "Not enough data yet"}
             sub={
-              summary.accuracyTrend !== 0
-                ? `${summary.accuracyTrend > 0 ? "+" : ""}${summary.accuracyTrend}% wow`
+              summary.questionsAttempted > 0
+                ? formatMcatAccuracyTrendLabel({
+                    currentAttempted: summary.questionsAttempted,
+                    previousAttempted: summary.previousQuestionsAttempted,
+                    trend: summary.accuracyTrend,
+                  })
                 : undefined
             }
           />
@@ -2168,16 +2378,19 @@ function CarsTab({
             onChange={(minutes) => setCarsForm((c) => ({ ...c, minutes }))}
           />
           <NumberField
-            label="Attempted"
+            label="Questions attempted"
             value={carsForm.questionsAttempted}
             onChange={(questionsAttempted) => setCarsForm((c) => ({ ...c, questionsAttempted }))}
           />
           <NumberField
-            label="Correct"
+            label="Questions correct"
             value={carsForm.questionsCorrect}
             onChange={(questionsCorrect) => setCarsForm((c) => ({ ...c, questionsCorrect }))}
           />
         </div>
+        <p className="mt-2 text-xs text-muted-foreground">
+          Accuracy is optional. Set questions attempted to 0 if you only want to track passages and miss types.
+        </p>
         <div className="mt-3">
           <div className="mb-2 text-[10px] uppercase tracking-wider text-muted-foreground">CARS miss types</div>
           <div className="flex flex-wrap gap-2">

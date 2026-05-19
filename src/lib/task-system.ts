@@ -585,6 +585,19 @@ export function isActiveTask(task: Task) {
   return !isDoneStatus(task.status) && !isArchivedTask(task) && !isTrashedTask(task);
 }
 
+const UNCOMMITTED_MCAT_PLAN_SOURCES = new Set(["mcat_phase_0_seed"]);
+
+export function isTaskVisibleInGeneralSurfaces(task: Task) {
+  if (task.source === "mcat_committed_study") return true;
+  if (UNCOMMITTED_MCAT_PLAN_SOURCES.has(task.source ?? "")) return false;
+  if (task.generated_from?.source === "mcat_phase_0_seed") return false;
+  return true;
+}
+
+function visibleGeneralSurfaceTasks(tasks: Task[]) {
+  return tasks.filter(isTaskVisibleInGeneralSurfaces);
+}
+
 export function isIgnoredTodayTask(task: Task, today = toDashedDateKey()) {
   if (!isActiveTask(task)) return false;
   if (task.status !== "ignored_today" && task.daily_role !== "Ignore Today") return false;
@@ -716,7 +729,9 @@ export function buildDayPlan(
   currentEnergy: number,
   today = toDashedDateKey(),
 ): DayPlan {
-  const live = tasks.filter((task) => isActiveTask(task) && task.status !== "parking_lot");
+  const live = visibleGeneralSurfaceTasks(tasks).filter(
+    (task) => isActiveTask(task) && task.status !== "parking_lot",
+  );
   const sorted = [...live].sort(
     (a, b) =>
       calcTaskPriority(b, currentEnergy) - calcTaskPriority(a, currentEnergy),
@@ -775,7 +790,7 @@ export function buildExportablePlanningSet(
   options: TaskSmartViewOptions = {},
 ): Task[] {
   const today = options.today ?? toDashedDateKey();
-  const active = tasks.filter(isActiveTask);
+  const active = visibleGeneralSurfaceTasks(tasks).filter(isActiveTask);
   const trustTaskIds = new Set(active.filter((task) => isTrustProtectorTask(task, today)).map((task) => task.id));
   return active.filter((task) => {
     if (isDoneStatus(task.status) || isArchivedTask(task) || isTrashedTask(task)) return false;
@@ -795,7 +810,7 @@ export function buildTaskSmartViews(
   options: TaskSmartViewOptions = {},
 ): TaskSmartViews {
   const today = options.today ?? toDashedDateKey();
-  const active = tasks.filter(isActiveTask);
+  const active = visibleGeneralSurfaceTasks(tasks).filter(isActiveTask);
   const trustProtectors = active.filter((task) => isTrustProtectorTask(task, today));
   const inboxCandidates = active.filter((task) => task.status === "inbox");
   const committedToday = active.filter(
@@ -890,7 +905,7 @@ function listPlanningTasks(tasks: Task[]): string {
 export function buildTriagePrompt(tasks: Task[], currentEnergy: number): string {
   const views = buildTaskSmartViews(tasks, { currentEnergy });
   const calendarAnchors = tasks
-    .filter((task) => task.fixed_time)
+    .filter((task) => isTaskVisibleInGeneralSurfaces(task) && task.fixed_time)
     .map((task) => `- ${task.task_code} | ${task.title} @ ${task.fixed_time}`)
     .join("\n");
 

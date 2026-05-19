@@ -10,6 +10,7 @@ import {
   formatTaskForPlanningExport,
   isActiveTask,
   isIgnoredTodayTask,
+  isTaskVisibleInGeneralSurfaces,
 } from "@/lib/task-system";
 import { parseTimeToMinutes } from "@/lib/calendar-system";
 import { hasResult } from "@/lib/decision-log-summary";
@@ -32,7 +33,7 @@ export type TrustProtector = {
 };
 
 function isLiveTask(task: Task) {
-  return isActiveTask(task) && task.status !== "parking_lot";
+  return isTaskVisibleInGeneralSurfaces(task) && isActiveTask(task) && task.status !== "parking_lot";
 }
 
 function localDateKey(date = new Date()) {
@@ -172,20 +173,20 @@ export function pickTrustProtectors(
 
 export function pickInboxCandidates(tasks: Task[], currentEnergy: number) {
   return tasks
-    .filter((task) => isActiveTask(task) && task.status === "inbox")
+    .filter((task) => isTaskVisibleInGeneralSurfaces(task) && isActiveTask(task) && task.status === "inbox")
     .sort((a, b) => calcTaskPriority(b, currentEnergy) - calcTaskPriority(a, currentEnergy))
     .slice(0, 8);
 }
 
 export function pickIgnoredToday(tasks: Task[], today = localDateKey()) {
   return tasks
-    .filter((task) => isIgnoredTodayTask(task, today))
+    .filter((task) => isTaskVisibleInGeneralSurfaces(task) && isIgnoredTodayTask(task, today))
     .slice(0, 10);
 }
 
 export function pickTodayCommittedTasks(tasks: Task[], today: string) {
   return tasks
-    .filter((task) => isActiveTask(task))
+    .filter((task) => isTaskVisibleInGeneralSurfaces(task) && isActiveTask(task))
     .filter(
       (task) =>
         task.status === "today" ||

@@ -35,6 +35,7 @@ import {
   isActiveTask,
   isArchivedTask,
   isDoneStatus,
+  isTaskVisibleInGeneralSurfaces,
   isTrashedTask,
   loadTasks,
   makeTask,
@@ -320,7 +321,7 @@ export default function TaskCommandPage() {
   const topPriority = useMemo(
     () =>
       [...tasks]
-        .filter((t) => isActiveTask(t) && t.status !== "parking_lot")
+        .filter((t) => isTaskVisibleInGeneralSurfaces(t) && isActiveTask(t) && t.status !== "parking_lot")
         .sort(
           (a, b) => calcTaskPriority(b, currentEnergy) - calcTaskPriority(a, currentEnergy),
         )
@@ -359,21 +360,24 @@ export default function TaskCommandPage() {
     onHardDelete: hardRemoveTask,
   };
 
-  const recurringTasks = useMemo(() => tasks.filter((t) => t.recurring), [tasks]);
+  const recurringTasks = useMemo(
+    () => tasks.filter((t) => isTaskVisibleInGeneralSurfaces(t) && t.recurring),
+    [tasks],
+  );
   const waitingTasks = useMemo(
-    () => tasks.filter((t) => t.status === "waiting"),
+    () => tasks.filter((t) => isTaskVisibleInGeneralSurfaces(t) && t.status === "waiting"),
     [tasks],
   );
   const doneTasks = useMemo(
-    () => tasks.filter((t) => isDoneStatus(t.status)),
+    () => tasks.filter((t) => isTaskVisibleInGeneralSurfaces(t) && isDoneStatus(t.status)),
     [tasks],
   );
   const archivedTasks = useMemo(
-    () => tasks.filter((t) => isArchivedTask(t)),
+    () => tasks.filter((t) => isTaskVisibleInGeneralSurfaces(t) && isArchivedTask(t)),
     [tasks],
   );
   const trashedTasks = useMemo(
-    () => tasks.filter((t) => isTrashedTask(t)),
+    () => tasks.filter((t) => isTaskVisibleInGeneralSurfaces(t) && isTrashedTask(t)),
     [tasks],
   );
 

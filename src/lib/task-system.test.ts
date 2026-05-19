@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   buildExportablePlanningSet,
+  buildDayPlan,
   buildTaskSmartViews,
+  buildTriagePrompt,
   changeTaskStatus,
   completeTask,
   createTask,
   ignoreTaskToday,
+  isTaskVisibleInGeneralSurfaces,
   makeTask,
   restoreTask,
   trashTask,
@@ -114,5 +117,65 @@ describe("task system Phase 1A contract", () => {
 
     expect(exportable.map((t) => t.task_code)).toEqual(["TASK-0001", "TASK-0002"]);
     expect(changeTaskStatus(thisWeek, "waiting").previous_status).toBe("this_week");
+  });
+
+  it("keeps old planned MCAT seed tasks out of normal task surfaces until committed", () => {
+    const oldSeeded = task({
+      title: "MCAT planned day 1",
+      task_code: "TASK-MCAT-OLD",
+      task_type: "MCAT",
+      status: "today",
+      daily_role: "Must Do",
+      source: "mcat_phase_0_seed",
+      template_key: "mcat_phase_0_foundation_v1",
+      template_day_index: 1,
+      estimated_minutes: 60,
+      priority: "high",
+    });
+    const committed = task({
+      title: "MCAT committed CARS",
+      task_code: "TASK-MCAT-NEW",
+      task_type: "MCAT",
+      status: "today",
+      daily_role: "Must Do",
+      source: "mcat_committed_study",
+      template_key: "mcat_phase_0_foundation_v1",
+      template_day_index: 1,
+      estimated_minutes: 60,
+      priority: "high",
+    });
+    const manualMcat = task({
+      title: "Manual MCAT note review",
+      task_code: "TASK-MCAT-MAN",
+      task_type: "MCAT",
+      status: "today",
+      daily_role: "Should Do",
+      source: "manual",
+      estimated_minutes: 20,
+    });
+    const views = buildTaskSmartViews([oldSeeded, committed, manualMcat], {
+      today: TODAY,
+      currentEnergy: 7,
+    });
+    const plan = buildDayPlan([oldSeeded, committed, manualMcat], 7, TODAY);
+    const prompt = buildTriagePrompt([oldSeeded, committed, manualMcat], 7);
+
+    expect(isTaskVisibleInGeneralSurfaces(oldSeeded)).toBe(false);
+    expect(isTaskVisibleInGeneralSurfaces(committed)).toBe(true);
+    expect(isTaskVisibleInGeneralSurfaces(manualMcat)).toBe(true);
+    expect(views.committedToday.map((t) => t.task_code)).toEqual([
+      "TASK-MCAT-NEW",
+      "TASK-MCAT-MAN",
+    ]);
+    expect(views.trustProtectors.map((t) => t.task_code)).not.toContain("TASK-MCAT-OLD");
+    expect(buildExportablePlanningSet([oldSeeded, committed, manualMcat], { today: TODAY }).map((t) => t.task_code)).toEqual([
+      "TASK-MCAT-NEW",
+      "TASK-MCAT-MAN",
+    ]);
+    expect([...plan.mustDo, ...plan.shouldDo].map((t) => t.task_code)).not.toContain(
+      "TASK-MCAT-OLD",
+    );
+    expect(prompt).not.toContain("TASK-MCAT-OLD");
+    expect(prompt).toContain("TASK-MCAT-NEW");
   });
 });
