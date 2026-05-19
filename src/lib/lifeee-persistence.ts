@@ -896,6 +896,11 @@ export type McatPlanOccurrenceRow = {
   description: string | null;
   estimated_minutes: number;
   status: McatPlanOccurrenceStatus | string;
+  started_at: string | null;
+  completed_at: string | null;
+  skipped_at: string | null;
+  skipped_reason: string | null;
+  moved_from_date: string | null;
   linked_task_id: string | null;
   generated_from: Record<string, unknown> | null;
   created_at: string;
@@ -956,6 +961,11 @@ function rowToMcatPlanOccurrence(row: McatPlanOccurrenceRow): McatPlanOccurrence
     description: row.description,
     estimated_minutes: row.estimated_minutes,
     status: row.status as McatPlanOccurrenceStatus,
+    started_at: row.started_at,
+    completed_at: row.completed_at,
+    skipped_at: row.skipped_at,
+    skipped_reason: row.skipped_reason,
+    moved_from_date: row.moved_from_date,
     linked_task_id: row.linked_task_id,
     generated_from: row.generated_from ?? {},
     created_at: row.created_at,
@@ -984,6 +994,11 @@ function occurrenceToRow(userId: string, occurrence: McatPlanOccurrence) {
     description: occurrence.description,
     estimated_minutes: occurrence.estimated_minutes,
     status: occurrence.status,
+    started_at: occurrence.started_at,
+    completed_at: occurrence.completed_at,
+    skipped_at: occurrence.skipped_at,
+    skipped_reason: occurrence.skipped_reason,
+    moved_from_date: occurrence.moved_from_date,
     linked_task_id: occurrence.linked_task_id,
     generated_from: occurrence.generated_from,
   };
@@ -1032,6 +1047,12 @@ export async function updateMcatPlanOccurrence(
     .from("mcat_plan_occurrences")
     .update({
       status: occurrence.status,
+      started_at: occurrence.started_at,
+      completed_at: occurrence.completed_at,
+      skipped_at: occurrence.skipped_at,
+      skipped_reason: occurrence.skipped_reason,
+      moved_from_date: occurrence.moved_from_date,
+      planned_date: occurrence.planned_date,
       linked_task_id: occurrence.linked_task_id,
       generated_from: occurrence.generated_from,
     })

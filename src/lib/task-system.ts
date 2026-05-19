@@ -588,6 +588,7 @@ export function isActiveTask(task: Task) {
 const UNCOMMITTED_MCAT_PLAN_SOURCES = new Set(["mcat_phase_0_seed"]);
 
 export function isTaskVisibleInGeneralSurfaces(task: Task) {
+  if (task.source === "mcat_active_study") return true;
   if (task.source === "mcat_committed_study") return true;
   if (UNCOMMITTED_MCAT_PLAN_SOURCES.has(task.source ?? "")) return false;
   if (task.generated_from?.source === "mcat_phase_0_seed") return false;

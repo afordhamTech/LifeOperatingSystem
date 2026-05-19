@@ -5,13 +5,15 @@ import {
   getMcatPhase0TaskForDate,
   generateMcatPhase0Tasks,
 } from "@/lib/mcat-phase-0-template";
-import { makeTask, updateTask, type Task } from "@/lib/task-system";
+import { completeTask, makeTask, updateTask, type Task } from "@/lib/task-system";
 
 export const MCAT_COMMITTED_STUDY_SOURCE = "mcat_committed_study";
+export const MCAT_ACTIVE_STUDY_SOURCE = "mcat_active_study";
 
 export const MCAT_PLAN_OCCURRENCE_STATUSES = [
   "planned",
-  "committed",
+  "available",
+  "in_progress",
   "completed",
   "skipped",
   "moved",
@@ -33,6 +35,11 @@ export type McatPlanOccurrence = {
   description: string | null;
   estimated_minutes: number;
   status: McatPlanOccurrenceStatus;
+  started_at?: string | null;
+  completed_at?: string | null;
+  skipped_at?: string | null;
+  skipped_reason?: string | null;
+  moved_from_date?: string | null;
   linked_task_id: string | null;
   generated_from: Record<string, unknown>;
   created_at?: string;
@@ -58,6 +65,8 @@ export type McatTodayCommand = {
   why: string;
   successCondition: string;
   disciplineText: string;
+  dayLabel: string;
+  statusLabel: string;
   occurrence: McatPlanOccurrence | null;
 };
 
@@ -74,6 +83,8 @@ function normalizeOccurrenceStatus(value: unknown): McatPlanOccurrenceStatus {
   return typeof value === "string" &&
     MCAT_PLAN_OCCURRENCE_STATUSES.includes(value as McatPlanOccurrenceStatus)
     ? (value as McatPlanOccurrenceStatus)
+    : value === "committed"
+      ? "in_progress"
     : "planned";
 }
 
@@ -82,7 +93,7 @@ export function isOldMcatPhase0SeedTask(task: Task) {
 }
 
 export function isCommittedMcatStudyTask(task: Task) {
-  return task.source === MCAT_COMMITTED_STUDY_SOURCE;
+  return task.source === MCAT_COMMITTED_STUDY_SOURCE || task.source === MCAT_ACTIVE_STUDY_SOURCE;
 }
 
 export function normalizeMcatPlanOccurrence(
@@ -118,6 +129,11 @@ export function normalizeMcatPlanOccurrence(
     description: raw.description ?? null,
     estimated_minutes: Math.max(1, Math.floor(raw.estimated_minutes)),
     status: normalizeOccurrenceStatus(raw.status),
+    started_at: raw.started_at ?? null,
+    completed_at: raw.completed_at ?? null,
+    skipped_at: raw.skipped_at ?? null,
+    skipped_reason: raw.skipped_reason ?? null,
+    moved_from_date: raw.moved_from_date ?? null,
     linked_task_id: raw.linked_task_id ?? null,
     generated_from: generatedFrom,
     created_at: raw.created_at,
@@ -149,6 +165,11 @@ export function generateMcatPhase0PlanOccurrences(
       description: task.description,
       estimated_minutes: task.estimated_minutes,
       status: "planned",
+      started_at: null,
+      completed_at: null,
+      skipped_at: null,
+      skipped_reason: null,
+      moved_from_date: null,
       linked_task_id: null,
       generated_from: {
         ...task.generated_from,
@@ -178,7 +199,7 @@ export function summarizeMcatPlanOccurrenceStatus(
   return {
     totalPlanDayCount: 70,
     generatedPlanDayCount: unique.length,
-    committedTaskCount: unique.filter((occurrence) => occurrence.status === "committed").length,
+    committedTaskCount: unique.filter((occurrence) => Boolean(occurrence.linked_task_id)).length,
     completedCount: unique.filter((occurrence) => occurrence.status === "completed").length,
     skippedCount: unique.filter((occurrence) => occurrence.status === "skipped").length,
     remainingPlannedMinutes:
@@ -264,11 +285,26 @@ function committedGeneratedFrom(occurrence: McatPlanOccurrence, adoptedFromSourc
   };
 }
 
-function buildCommittedTaskFromOccurrence(
+function taskSourceGeneratedFrom(
   occurrence: McatPlanOccurrence,
-  options: { today?: string } = {},
+  source: typeof MCAT_COMMITTED_STUDY_SOURCE | typeof MCAT_ACTIVE_STUDY_SOURCE,
+  adoptedFromSource?: string | null,
+) {
+  return {
+    ...committedGeneratedFrom(occurrence, adoptedFromSource),
+    source,
+  };
+}
+
+function buildTaskFromOccurrence(
+  occurrence: McatPlanOccurrence,
+  options: {
+    today?: string;
+    source?: typeof MCAT_COMMITTED_STUDY_SOURCE | typeof MCAT_ACTIVE_STUDY_SOURCE;
+  } = {},
 ): Task {
   const today = options.today ?? new Date().toISOString().slice(0, 10);
+  const source = options.source ?? MCAT_COMMITTED_STUDY_SOURCE;
   const seedStartDate = textMeta(occurrence.generated_from.seed_start_date);
   const templateTask = seedStartDate
     ? getMcatPhase0TaskForDate(seedStartDate, occurrence.planned_date, {
@@ -283,23 +319,33 @@ function buildCommittedTaskFromOccurrence(
     task_type: "MCAT",
     due_date: occurrence.planned_date,
     estimated_minutes: occurrence.estimated_minutes,
-    source: MCAT_COMMITTED_STUDY_SOURCE,
+    source,
     template_key: occurrence.template_key,
     template_day_index: occurrence.template_day_index,
     template_week_index: occurrence.template_week_index,
     template_phase: MCAT_PHASE_0_TEMPLATE.phase_name,
-    status: commitStatusForDate(occurrence.planned_date, today),
-    daily_role: occurrence.planned_date <= today ? "Must Do" : "Should Do",
+    status: source === MCAT_ACTIVE_STUDY_SOURCE ? "today" : commitStatusForDate(occurrence.planned_date, today),
+    daily_role: source === MCAT_ACTIVE_STUDY_SOURCE || occurrence.planned_date <= today ? "Must Do" : "Should Do",
     priority: templateTask?.priority ?? "high",
     consequence_level: templateTask?.consequence_level ?? "medium",
     notes: [
       templateTask?.notes,
-      `Committed from MCAT plan occurrence ${occurrence.id}.`,
+      `Linked from MCAT plan occurrence ${occurrence.id}.`,
       `Success condition: ${successConditionForLearningType(occurrence.learning_type, occurrence.topic)}`,
     ]
       .filter(Boolean)
       .join(" "),
-    generated_from: committedGeneratedFrom(occurrence),
+    generated_from: taskSourceGeneratedFrom(occurrence, source),
+  });
+}
+
+function buildCommittedTaskFromOccurrence(
+  occurrence: McatPlanOccurrence,
+  options: { today?: string } = {},
+): Task {
+  return buildTaskFromOccurrence(occurrence, {
+    ...options,
+    source: MCAT_COMMITTED_STUDY_SOURCE,
   });
 }
 
@@ -326,7 +372,7 @@ export function commitMcatPlanOccurrenceToTask(
     return {
       occurrence: {
         ...occurrence,
-        status: "committed",
+        status: "in_progress",
         linked_task_id: task.id,
       },
       task,
@@ -338,7 +384,7 @@ export function commitMcatPlanOccurrenceToTask(
   return {
     occurrence: {
       ...occurrence,
-      status: "committed",
+      status: "in_progress",
       linked_task_id: task.id,
     },
     task,
@@ -346,10 +392,193 @@ export function commitMcatPlanOccurrenceToTask(
   };
 }
 
+function isIncompleteQueueOccurrence(occurrence: McatPlanOccurrence) {
+  return occurrence.status !== "completed" && occurrence.status !== "skipped";
+}
+
+function replaceOccurrence(
+  occurrences: McatPlanOccurrence[],
+  replacement: McatPlanOccurrence,
+) {
+  return occurrences
+    .map((occurrence) => (occurrence.id === replacement.id ? replacement : occurrence))
+    .sort((a, b) => a.template_day_index - b.template_day_index);
+}
+
+export function getCurrentMcatQueueOccurrence(occurrences: McatPlanOccurrence[]) {
+  const ordered = [...occurrences].sort(
+    (a, b) => a.template_day_index - b.template_day_index,
+  );
+  return (
+    ordered.find((occurrence) => occurrence.status === "in_progress") ??
+    ordered.find((occurrence) => isIncompleteQueueOccurrence(occurrence)) ??
+    null
+  );
+}
+
+export function getNextMcatQueueOccurrence(
+  occurrences: McatPlanOccurrence[],
+  afterDayIndex = 0,
+) {
+  return (
+    [...occurrences]
+      .sort((a, b) => a.template_day_index - b.template_day_index)
+      .find(
+        (occurrence) =>
+          occurrence.template_day_index > afterDayIndex && isIncompleteQueueOccurrence(occurrence),
+      ) ?? null
+  );
+}
+
+export function startMcatPlanOccurrenceQueue(input: {
+  occurrences: McatPlanOccurrence[];
+  occurrenceId: string;
+  existingTasks: Task[];
+  today?: string;
+  now?: string;
+}): {
+  occurrences: McatPlanOccurrence[];
+  occurrence: McatPlanOccurrence;
+  task: Task;
+  created: boolean;
+} {
+  const now = input.now ?? new Date().toISOString();
+  const occurrence = input.occurrences.find((item) => item.id === input.occurrenceId);
+  if (!occurrence) throw new Error("MCAT occurrence not found");
+
+  const existing = findTaskToLink(occurrence, input.existingTasks);
+  const task = existing
+    ? updateTask(existing, {
+        source: MCAT_ACTIVE_STUDY_SOURCE,
+        status: "today",
+        daily_role: "Must Do",
+        generated_from: taskSourceGeneratedFrom(
+          occurrence,
+          MCAT_ACTIVE_STUDY_SOURCE,
+          isOldMcatPhase0SeedTask(existing) ? existing.source : null,
+        ),
+      })
+    : buildTaskFromOccurrence(occurrence, {
+        today: input.today,
+        source: MCAT_ACTIVE_STUDY_SOURCE,
+      });
+  const nextOccurrence: McatPlanOccurrence = {
+    ...normalizeMcatPlanOccurrence(occurrence),
+    status: "in_progress",
+    started_at: occurrence.started_at ?? now,
+    linked_task_id: task.id,
+    generated_from: {
+      ...occurrence.generated_from,
+      active_task_id: task.id,
+    },
+  };
+  const occurrences = input.occurrences
+    .map((item) => {
+      if (item.id === nextOccurrence.id) return nextOccurrence;
+      if (item.status === "in_progress") {
+        return {
+          ...item,
+          status: "available" as const,
+        };
+      }
+      return item;
+    })
+    .sort((a, b) => a.template_day_index - b.template_day_index);
+
+  return {
+    occurrences,
+    occurrence: nextOccurrence,
+    task,
+    created: !existing,
+  };
+}
+
+export function completeMcatPlanOccurrenceQueue(input: {
+  occurrences: McatPlanOccurrence[];
+  occurrenceId: string;
+  existingTasks: Task[];
+  now?: string;
+}): {
+  occurrences: McatPlanOccurrence[];
+  occurrence: McatPlanOccurrence;
+  task: Task | null;
+  nextOccurrence: McatPlanOccurrence | null;
+} {
+  const now = input.now ?? new Date().toISOString();
+  const occurrence = input.occurrences.find((item) => item.id === input.occurrenceId);
+  if (!occurrence) throw new Error("MCAT occurrence not found");
+  const taskToComplete = findTaskToLink(occurrence, input.existingTasks);
+  const completedOccurrence: McatPlanOccurrence = {
+    ...normalizeMcatPlanOccurrence(occurrence),
+    status: "completed",
+    completed_at: occurrence.completed_at ?? now,
+  };
+  const occurrences = replaceOccurrence(input.occurrences, completedOccurrence);
+  return {
+    occurrences,
+    occurrence: completedOccurrence,
+    task: taskToComplete ? completeTask(taskToComplete) : null,
+    nextOccurrence: getNextMcatQueueOccurrence(occurrences, completedOccurrence.template_day_index),
+  };
+}
+
+export function skipMcatPlanOccurrenceQueue(input: {
+  occurrences: McatPlanOccurrence[];
+  occurrenceId: string;
+  reason: string;
+  now?: string;
+}): {
+  occurrences: McatPlanOccurrence[];
+  occurrence: McatPlanOccurrence;
+  nextOccurrence: McatPlanOccurrence | null;
+} {
+  const reason = input.reason.trim();
+  if (!reason) throw new Error("Skip reason is required");
+  const now = input.now ?? new Date().toISOString();
+  const occurrence = input.occurrences.find((item) => item.id === input.occurrenceId);
+  if (!occurrence) throw new Error("MCAT occurrence not found");
+  const skippedOccurrence: McatPlanOccurrence = {
+    ...normalizeMcatPlanOccurrence(occurrence),
+    status: "skipped",
+    skipped_at: occurrence.skipped_at ?? now,
+    skipped_reason: reason,
+  };
+  const occurrences = replaceOccurrence(input.occurrences, skippedOccurrence);
+  return {
+    occurrences,
+    occurrence: skippedOccurrence,
+    nextOccurrence: getNextMcatQueueOccurrence(occurrences, skippedOccurrence.template_day_index),
+  };
+}
+
+export function moveMcatPlanOccurrenceQueue(input: {
+  occurrences: McatPlanOccurrence[];
+  occurrenceId: string;
+  plannedDate: string;
+}): {
+  occurrences: McatPlanOccurrence[];
+  occurrence: McatPlanOccurrence;
+} {
+  const occurrence = input.occurrences.find((item) => item.id === input.occurrenceId);
+  if (!occurrence) throw new Error("MCAT occurrence not found");
+  const movedOccurrence: McatPlanOccurrence = {
+    ...normalizeMcatPlanOccurrence(occurrence),
+    status: "moved",
+    moved_from_date: occurrence.moved_from_date ?? occurrence.planned_date,
+    planned_date: input.plannedDate,
+  };
+  return {
+    occurrences: replaceOccurrence(input.occurrences, movedOccurrence),
+    occurrence: movedOccurrence,
+  };
+}
+
 export function pickTodayMcatOccurrence(
   occurrences: McatPlanOccurrence[],
   today = new Date().toISOString().slice(0, 10),
 ) {
+  const current = getCurrentMcatQueueOccurrence(occurrences);
+  if (current) return current;
   const ordered = [...occurrences].sort(
     (a, b) => a.template_day_index - b.template_day_index,
   );
@@ -391,19 +620,25 @@ export function buildMcatTodayCommand(input: {
     : "Finish one focused block and log what happened.";
   const disciplineText = input.hasActiveSession
     ? "Finish and log this session."
+    : input.occurrence?.status === "in_progress"
+      ? "Current state: Finish the in-progress session."
+      : input.occurrence?.status === "completed"
+        ? "Done for this item. Preview the next queue item."
     : input.hasLoggedToday
       ? "Review mistakes or stop for today."
-      : "Start today's recommended session first.";
+      : "Do this first: Start the current MCAT command. Do not browse topics until it is logged.";
 
   return {
     heading: "Today's MCAT Command",
     action,
     estimatedMinutes,
     why: input.occurrence
-      ? `Phase 0 day ${input.occurrence.template_day_index} keeps the plan inside MCAT until you commit it.`
+      ? `Day ${input.occurrence.template_day_index} of 70 keeps Phase 0 chronological: start it, finish it, then advance.`
       : input.fallbackDetail,
     successCondition,
     disciplineText,
+    dayLabel: input.occurrence ? `Day ${input.occurrence.template_day_index} of 70` : "No plan day",
+    statusLabel: input.occurrence?.status.replace(/_/g, " ") ?? "not started",
     occurrence: input.occurrence,
   };
 }

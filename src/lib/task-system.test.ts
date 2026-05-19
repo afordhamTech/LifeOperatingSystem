@@ -119,7 +119,7 @@ describe("task system Phase 1A contract", () => {
     expect(changeTaskStatus(thisWeek, "waiting").previous_status).toBe("this_week");
   });
 
-  it("keeps old planned MCAT seed tasks out of normal task surfaces until committed", () => {
+  it("keeps old planned MCAT seed tasks out of normal task surfaces until active or committed", () => {
     const oldSeeded = task({
       title: "MCAT planned day 1",
       task_code: "TASK-MCAT-OLD",
@@ -144,6 +144,18 @@ describe("task system Phase 1A contract", () => {
       estimated_minutes: 60,
       priority: "high",
     });
+    const active = task({
+      title: "MCAT active CARS",
+      task_code: "TASK-MCAT-ACTIVE",
+      task_type: "MCAT",
+      status: "today",
+      daily_role: "Must Do",
+      source: "mcat_active_study",
+      template_key: "mcat_phase_0_foundation_v1",
+      template_day_index: 2,
+      estimated_minutes: 60,
+      priority: "high",
+    });
     const manualMcat = task({
       title: "Manual MCAT note review",
       task_code: "TASK-MCAT-MAN",
@@ -153,23 +165,26 @@ describe("task system Phase 1A contract", () => {
       source: "manual",
       estimated_minutes: 20,
     });
-    const views = buildTaskSmartViews([oldSeeded, committed, manualMcat], {
+    const views = buildTaskSmartViews([oldSeeded, committed, active, manualMcat], {
       today: TODAY,
       currentEnergy: 7,
     });
-    const plan = buildDayPlan([oldSeeded, committed, manualMcat], 7, TODAY);
-    const prompt = buildTriagePrompt([oldSeeded, committed, manualMcat], 7);
+    const plan = buildDayPlan([oldSeeded, committed, active, manualMcat], 7, TODAY);
+    const prompt = buildTriagePrompt([oldSeeded, committed, active, manualMcat], 7);
 
     expect(isTaskVisibleInGeneralSurfaces(oldSeeded)).toBe(false);
     expect(isTaskVisibleInGeneralSurfaces(committed)).toBe(true);
+    expect(isTaskVisibleInGeneralSurfaces(active)).toBe(true);
     expect(isTaskVisibleInGeneralSurfaces(manualMcat)).toBe(true);
     expect(views.committedToday.map((t) => t.task_code)).toEqual([
       "TASK-MCAT-NEW",
+      "TASK-MCAT-ACTIVE",
       "TASK-MCAT-MAN",
     ]);
     expect(views.trustProtectors.map((t) => t.task_code)).not.toContain("TASK-MCAT-OLD");
-    expect(buildExportablePlanningSet([oldSeeded, committed, manualMcat], { today: TODAY }).map((t) => t.task_code)).toEqual([
+    expect(buildExportablePlanningSet([oldSeeded, committed, active, manualMcat], { today: TODAY }).map((t) => t.task_code)).toEqual([
       "TASK-MCAT-NEW",
+      "TASK-MCAT-ACTIVE",
       "TASK-MCAT-MAN",
     ]);
     expect([...plan.mustDo, ...plan.shouldDo].map((t) => t.task_code)).not.toContain(
@@ -177,5 +192,6 @@ describe("task system Phase 1A contract", () => {
     );
     expect(prompt).not.toContain("TASK-MCAT-OLD");
     expect(prompt).toContain("TASK-MCAT-NEW");
+    expect(prompt).toContain("TASK-MCAT-ACTIVE");
   });
 });
