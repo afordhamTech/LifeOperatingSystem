@@ -35,8 +35,8 @@ export function getBlockedSyncStatus({
 
 export function getBlockedSyncMessage(status: Extract<PersistenceSyncStatus, "local" | "waiting">) {
   return status === "local"
-    ? "Supabase is not configured. This is a local draft only."
-    : "Waiting for Supabase to load before saving.";
+    ? "Sign-in is unavailable right now. Changes stay as a local draft."
+    : "Loading your saved data before saving changes…";
 }
 
 export async function runSupabasePersistence<T>({
@@ -60,10 +60,18 @@ export async function runSupabasePersistence<T>({
   }
 
   try {
+    const data = await operation();
+    const globalScope = (globalThis as { window?: { dispatchEvent: (e: Event) => boolean } });
+    if (globalScope.window?.dispatchEvent) {
+      // Notify the canonical AI prompt context that Lifeee data changed so it
+      // can refetch. Keeps the prompt drawer in sync after writes from any
+      // page without forcing every caller to wire its own invalidation.
+      globalScope.window.dispatchEvent(new Event("lifeee:prompt-context-invalidate"));
+    }
     return {
       ok: true,
       status: "saved",
-      data: await operation(),
+      data,
     };
   } catch (error) {
     return {

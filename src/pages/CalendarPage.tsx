@@ -60,6 +60,7 @@ import {
   type RealismReport,
   type PlanningSnapshot,
 } from "@/lib/planning-engine";
+import { mergeLocalDraftsWithRemote } from "@/lib/local-draft-merge";
 import {
   buildDailyPlanPayload,
   createLifeeeId,
@@ -174,6 +175,9 @@ export default function CalendarPage() {
   const [schedulePreview, setSchedulePreview] = useState<ScheduleImportPreview | null>(null);
   const [replaceExistingImported, setReplaceExistingImported] = useState(false);
   const [importNotice, setImportNotice] = useState<string | null>(null);
+  // Snapshot of scheduleImportText at the moment the current preview was built.
+  // If the user later edits the textarea without re-parsing, Apply prompts.
+  const [previewTextSnapshot, setPreviewTextSnapshot] = useState<string | null>(null);
 
   const [draft, setDraft] = useState<Omit<CalendarAnchor, "id" | "created_at" | "updated_at">>({
     title: "",
@@ -226,26 +230,60 @@ export default function CalendarPage() {
           fetchTimeBlocks(userId),
         ]);
         const localAnchors = loadAnchors();
+        const localTasks = loadTasks();
         const localTimeBlocks = loadTimeBlocks();
-        const nextAnchors =
-          remoteAnchors.length === 0 && localAnchors.length > 0
-            ? await Promise.all(
-                localAnchors.map((anchor) => upsertCalendarAnchor(userId, anchor)),
+        if (!active) return;
+
+        const mergedAnchors = mergeLocalDraftsWithRemote({
+          remote: remoteAnchors,
+          local: localAnchors,
+        });
+        const mergedTasks = mergeLocalDraftsWithRemote({
+          remote: remoteTasks,
+          local: localTasks,
+        });
+        const mergedTimeBlocks = mergeLocalDraftsWithRemote({
+          remote: remoteTimeBlocks,
+          local: localTimeBlocks,
+        });
+
+        const [uploadedAnchors, uploadedTasks, uploadedTimeBlocks] = await Promise.all([
+          mergedAnchors.itemsToUpload.length > 0
+            ? Promise.all(
+                mergedAnchors.itemsToUpload.map((anchor) => upsertCalendarAnchor(userId, anchor)),
               )
-            : remoteAnchors;
-        const nextTimeBlocks =
-          remoteTimeBlocks.length === 0 && localTimeBlocks.length > 0
-            ? await Promise.all(
-                localTimeBlocks.map((block) => upsertTimeBlock(userId, block)),
+            : Promise.resolve([]),
+          mergedTasks.itemsToUpload.length > 0
+            ? Promise.all(
+                mergedTasks.itemsToUpload.map((task) =>
+                  upsertUniversalTask(userId, task, currentEnergy),
+                ),
               )
-            : remoteTimeBlocks;
+            : Promise.resolve([]),
+          mergedTimeBlocks.itemsToUpload.length > 0
+            ? Promise.all(
+                mergedTimeBlocks.itemsToUpload.map((block) => upsertTimeBlock(userId, block)),
+              )
+            : Promise.resolve([]),
+        ]);
+        const uploadedAnchorById = new Map(uploadedAnchors.map((anchor) => [anchor.id, anchor]));
+        const uploadedTaskById = new Map(uploadedTasks.map((task) => [task.id, task]));
+        const uploadedTimeBlockById = new Map(uploadedTimeBlocks.map((block) => [block.id, block]));
+        const nextAnchors = mergedAnchors.items.map(
+          (anchor) => uploadedAnchorById.get(anchor.id) ?? anchor,
+        );
+        const nextTasks = mergedTasks.items.map((task) => uploadedTaskById.get(task.id) ?? task);
+        const nextTimeBlocks = mergedTimeBlocks.items.map(
+          (block) => uploadedTimeBlockById.get(block.id) ?? block,
+        );
 
         if (!active) return;
         remoteLoadedRef.current = true;
         setAnchors(nextAnchors);
-        setTasks(remoteTasks);
+        setTasks(nextTasks);
         setTimeBlocks(nextTimeBlocks);
         saveAnchors(nextAnchors);
+        saveTasks(nextTasks);
         saveTimeBlocks(nextTimeBlocks);
         setSyncStatus("saved");
       } catch (error) {
@@ -261,7 +299,7 @@ export default function CalendarPage() {
     return () => {
       active = false;
     };
-  }, [hasSupabaseConfig, sessionLoading, userId]);
+  }, [currentEnergy, hasSupabaseConfig, sessionLoading, userId]);
 
   const onDayAnchors = useMemo(
     () =>
@@ -562,6 +600,14 @@ export default function CalendarPage() {
     });
   };
 
+  // Recompute preview when inputs that affect conflict detection change:
+  // the replace-existing toggle, active date, tasks/anchors/timeBlocks.
+  useEffect(() => {
+    if (!scheduleEditableRows || !schedulePreview) return;
+    setSchedulePreview(computePreviewForRows(scheduleEditableRows, scheduleParsed));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [replaceExistingImported, activeDate, tasks, onDayAnchors, onDayTimeBlocks]);
+
   const parseScheduleImportText = () => {
     if (scheduleEditableRows && scheduleEditableRows.some((row) => row.edited)) {
       const ok =
@@ -577,6 +623,7 @@ export default function CalendarPage() {
     setScheduleParsed(parsed);
     setScheduleEditableRows(rows);
     setSchedulePreview(preview);
+    setPreviewTextSnapshot(scheduleImportText);
     setImportNotice(
       parsed.unparsed.length > 0
         ? `${parsed.unparsed.length} line${parsed.unparsed.length === 1 ? "" : "s"} could not be parsed.`
@@ -595,6 +642,7 @@ export default function CalendarPage() {
     }
     const preview = computePreviewForRows(rows, parsed);
     setSchedulePreview(preview);
+    setPreviewTextSnapshot(scheduleImportText);
     setImportNotice(
       preview.hasBlockingIssues
         ? "Preview has warnings. Apply non-conflicting rows only unless you explicitly continue."
@@ -656,7 +704,9 @@ export default function CalendarPage() {
 
   const syncScheduleEditsToText = () => {
     if (!scheduleEditableRows) return;
-    setScheduleImportText(serializeEditableRowsToScheduleText(scheduleEditableRows));
+    const nextText = serializeEditableRowsToScheduleText(scheduleEditableRows, scheduleParsed);
+    setScheduleImportText(nextText);
+    setPreviewTextSnapshot(nextText);
     setImportNotice("Edited rows synced back to text. Re-parse to make the text the source of truth.");
   };
 
@@ -665,6 +715,7 @@ export default function CalendarPage() {
     setScheduleParsed(null);
     setScheduleEditableRows(null);
     setSchedulePreview(null);
+    setPreviewTextSnapshot(null);
     setImportNotice(null);
   };
 
@@ -673,16 +724,42 @@ export default function CalendarPage() {
     setScheduleParsed(null);
     setScheduleEditableRows(null);
     setSchedulePreview(null);
+    setPreviewTextSnapshot(null);
   };
 
   const applyScheduleImport = async (mode: "non-conflicting" | "include-soft-conflicts") => {
     let parsed = scheduleParsed;
     let editableRows = scheduleEditableRows;
+    let activePreview = schedulePreview;
+    // If the textarea was edited since the current preview was built, ask
+    // the user whether to re-parse from the current text (most recent intent)
+    // or apply the existing preview rows.
+    if (
+      parsed &&
+      editableRows &&
+      previewTextSnapshot != null &&
+      scheduleImportText !== previewTextSnapshot
+    ) {
+      const reparse =
+        typeof window === "undefined" ||
+        window.confirm(
+          "The text has changed since the last preview. Re-parse from the current text? (Cancel to apply the existing preview rows instead.)",
+        );
+      if (reparse) {
+        parsed = parseScheduleImport(scheduleImportText);
+        editableRows = editableRowsFromParsed(parsed);
+        activePreview = computePreviewForRows(editableRows, parsed);
+        setScheduleParsed(parsed);
+        setScheduleEditableRows(editableRows);
+        setSchedulePreview(activePreview);
+        setPreviewTextSnapshot(scheduleImportText);
+      }
+    }
     if (!parsed || !editableRows) {
       parsed = parseScheduleImport(scheduleImportText);
       editableRows = editableRowsFromParsed(parsed);
     }
-    const preview = schedulePreview ?? computePreviewForRows(editableRows, parsed);
+    const preview = activePreview ?? computePreviewForRows(editableRows, parsed);
     const rows = schedulePreviewRowsToApply(preview, mode);
     if (rows.length === 0) {
       setImportNotice("No applicable schedule rows. Fix invalid lines or task codes first.");
@@ -750,13 +827,38 @@ export default function CalendarPage() {
       if (replaceExistingImported) {
         await deleteImportedTimeBlocksForDate(userId, activeDate);
       }
+      // Persist what we actually applied, not just the original pasted text.
+      // raw_text reflects edited rows; original pasted text is kept in
+      // parsed_json.original_raw_text. parsed_json.applied_blocks captures the
+      // rows that were turned into time blocks. Realism is re-evaluated from
+      // the edited rows so the audit reflects the real plan.
+      const appliedRawText = serializeEditableRowsToScheduleText(editableRows, parsed);
+      const appliedRealismReport = evaluateImportRealism({
+        blocks: rows.map((row) => ({
+          start_time: row.start,
+          end_time: row.end,
+          title: row.imported_title || row.matched_task_title || row.task_code,
+          block_type: row.block_type,
+        })),
+        snapshot: planningSnapshot,
+        anchors: onDayAnchors,
+        dayDate: activeDate,
+      });
+      const auditParsedJson = {
+        ...parsed,
+        applied_blocks: rows,
+        edited_rows: editableRows,
+        original_raw_text: scheduleImportText,
+        applied_realism: appliedRealismReport,
+      };
       await insertScheduleImport(userId, {
         id: importBatchId,
         date: activeDate,
-        raw_text: scheduleImportText,
-        parsed_json: parsed,
+        raw_text: appliedRawText,
+        parsed_json: auditParsedJson,
         applied: false,
-        plan_realism_score: preview.planRealism.score,
+        plan_realism_score:
+          appliedRealismReport.score ?? preview.planRealism.score,
         risks: preview.risks,
         unscheduled: preview.unscheduled,
       });
@@ -774,12 +876,12 @@ export default function CalendarPage() {
       });
       await markScheduleImportApplied(userId, importBatchId);
       setSyncStatus("saved");
-      setImportNotice(`${rows.length} schedule block${rows.length === 1 ? "" : "s"} saved to Supabase.`);
+      setImportNotice(`${rows.length} schedule block${rows.length === 1 ? "" : "s"} saved.`);
       clearAppliedScheduleImport();
     } catch (error) {
       setSyncStatus("error");
       setSyncError(error instanceof Error ? error.message : "Unable to apply imported schedule.");
-      setImportNotice("Import failed before Supabase confirmed the write.");
+      setImportNotice("Import failed before changes were saved.");
     }
   };
 

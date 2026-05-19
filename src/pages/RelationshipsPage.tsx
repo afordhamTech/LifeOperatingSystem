@@ -10,6 +10,7 @@ import {
   type RelationshipEntry,
   upsertRelationshipEntry,
 } from "@/lib/lifeee-persistence";
+import { mergeLocalDraftsWithRemote } from "@/lib/local-draft-merge";
 import { Users, Plus, Bell } from "lucide-react";
 import {
   EmptyStateCard,
@@ -93,15 +94,21 @@ export default function RelationshipsPage() {
         const remoteEntries = await fetchRelationshipEntries(userId);
         if (!active) return;
 
-        if (remoteEntries.length === 0 && localEntries.length > 0) {
-          const uploaded = await Promise.all(localEntries.map((entry) => upsertRelationshipEntry(userId, entry)));
-          if (!active) return;
-          setEntries(uploaded);
-          writeLocalRelationships(uploaded);
-        } else {
-          setEntries(remoteEntries);
-          writeLocalRelationships(remoteEntries);
-        }
+        const merged = mergeLocalDraftsWithRemote<RelationshipEntry>({
+          remote: remoteEntries,
+          local: localEntries,
+        });
+        const uploaded =
+          merged.itemsToUpload.length > 0
+            ? await Promise.all(
+                merged.itemsToUpload.map((entry) => upsertRelationshipEntry(userId, entry)),
+              )
+            : [];
+        const uploadedById = new Map(uploaded.map((entry) => [entry.id, entry]));
+        const nextEntries = merged.items.map((entry) => uploadedById.get(entry.id) ?? entry);
+        if (!active) return;
+        setEntries(nextEntries);
+        writeLocalRelationships(nextEntries);
 
         remoteLoadedRef.current = true;
         setSyncStatus("saved");
@@ -128,6 +135,7 @@ export default function RelationshipsPage() {
 
   const handleLog = async () => {
     if (!form.personName.trim()) return;
+    const now = new Date().toISOString();
     const entry: RelationshipEntry = {
       id: createLifeeeId(),
       personName: form.personName.trim(),
@@ -138,6 +146,8 @@ export default function RelationshipsPage() {
       notes: [form.notes.trim(), form.nextAction.trim() ? `Next action: ${form.nextAction.trim()}` : ""]
         .filter(Boolean)
         .join("\n"),
+      created_at: now,
+      updated_at: now,
     };
     const optimistic = [entry, ...entries];
     setEntries(optimistic);
@@ -171,7 +181,7 @@ export default function RelationshipsPage() {
   };
 
   const resolveFollowUp = async (entry: RelationshipEntry) => {
-    const updated = { ...entry, followUpNeeded: false };
+    const updated = { ...entry, followUpNeeded: false, updated_at: new Date().toISOString() };
     const next = entries.map((item) => (item.id === entry.id ? updated : item));
     setEntries(next);
     writeLocalRelationships(next);

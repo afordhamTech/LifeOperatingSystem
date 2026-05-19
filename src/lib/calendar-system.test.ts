@@ -130,6 +130,68 @@ describe("calendar planning export contract", () => {
     expect(prompt).toContain("preserve task codes exactly");
   });
 
+  it("includes active or committed MCAT tasks but not old uncommitted Phase 0 seed tasks", () => {
+    const oldSeeded = task({
+      title: "MCAT old planned flood item",
+      task_code: "TASK-MCAT-OLD",
+      task_type: "MCAT",
+      status: "today",
+      daily_role: "Must Do",
+      source: "mcat_phase_0_seed",
+      template_key: "mcat_phase_0_foundation_v1",
+      template_day_index: 12,
+      estimated_minutes: 60,
+      priority: "high",
+    });
+    const committed = task({
+      title: "MCAT committed passage",
+      task_code: "TASK-MCAT-NEW",
+      task_type: "MCAT",
+      status: "today",
+      daily_role: "Must Do",
+      source: "mcat_committed_study",
+      template_key: "mcat_phase_0_foundation_v1",
+      template_day_index: 12,
+      estimated_minutes: 60,
+      priority: "high",
+    });
+    const active = task({
+      title: "MCAT active queue item",
+      task_code: "TASK-MCAT-ACTIVE",
+      task_type: "MCAT",
+      status: "today",
+      daily_role: "Must Do",
+      source: "mcat_active_study",
+      template_key: "mcat_phase_0_foundation_v1",
+      template_day_index: 13,
+      estimated_minutes: 60,
+      priority: "high",
+    });
+    const anchors = [anchor({ title: "Open morning", start_time: "08:00", end_time: "08:30" })];
+    const prompt = buildCalendarPlanningPrompt({
+      date: TODAY,
+      currentTime: "2026-05-14 07:45",
+      operatingMode: "Calendar Planning",
+      anchors,
+      available: calculateAvailableTime(anchors),
+      plan: buildDayPlan([oldSeeded, committed, active], 7, TODAY),
+      currentEnergy: 7,
+      sleepReadiness: 7,
+      academicPressure: 3,
+      workoutReadiness: 6,
+      mcatNextMove:
+        "Phase 0 active · today's recommended MCAT move exists and should be started before scheduling.",
+    });
+
+    expect(prompt).toContain("TASK-MCAT-NEW");
+    expect(prompt).toContain("MCAT committed passage");
+    expect(prompt).toContain("TASK-MCAT-ACTIVE");
+    expect(prompt).toContain("MCAT active queue item");
+    expect(prompt).not.toContain("TASK-MCAT-OLD");
+    expect(prompt).not.toContain("MCAT old planned flood item");
+    expect(prompt).toContain("today's recommended MCAT move exists");
+  });
+
   it("builds a validation summary with blocking missing-code checks and non-blocking metadata warnings", () => {
     const tasks = [
       {

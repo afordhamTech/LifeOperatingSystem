@@ -18,7 +18,7 @@ describe("persistence runner", () => {
     expect(result).toEqual({
       ok: false,
       status: "waiting",
-      error: "Waiting for Supabase to load before saving.",
+      error: "Loading your saved data before saving changes…",
     });
     expect(operation).not.toHaveBeenCalled();
   });

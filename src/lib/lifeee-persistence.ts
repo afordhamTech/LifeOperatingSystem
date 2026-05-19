@@ -23,6 +23,11 @@ import {
   type DayPlan,
   type Task,
 } from "@/lib/task-system";
+import {
+  normalizeMcatPlanOccurrence,
+  type McatPlanOccurrence,
+  type McatPlanOccurrenceStatus,
+} from "@/lib/mcat-plan-occurrences";
 import { supabase } from "@/lib/supabase-client";
 
 export type LifeeeSyncStatus =
@@ -255,6 +260,7 @@ export type RelationshipEntry = {
   followUpNeeded: boolean;
   notes: string;
   created_at?: string;
+  updated_at?: string;
 };
 
 export type SubscriptionItem = {
@@ -317,12 +323,12 @@ export type SubstanceEntry = {
 };
 
 export function getSyncLabel(status: LifeeeSyncStatus) {
-  if (status === "loading") return "Loading Supabase";
+  if (status === "loading") return "Loading";
   if (status === "saving") return "Saving";
   if (status === "saved") return "Saved";
   if (status === "waiting") return "Draft only";
   if (status === "error") return "Sync failed";
-  if (status === "placeholder") return "Placeholder only";
+  if (status === "placeholder") return "Local only";
   return "Draft only";
 }
 
@@ -877,6 +883,31 @@ export type McatPlanInstance = {
   updated_at: string;
 };
 
+export type McatPlanOccurrenceRow = {
+  id: string;
+  user_id: string;
+  plan_instance_id: string | null;
+  template_key: string;
+  template_day_index: number;
+  template_week_index: number;
+  planned_date: string;
+  learning_type: string;
+  topic: string | null;
+  title: string;
+  description: string | null;
+  estimated_minutes: number;
+  status: McatPlanOccurrenceStatus | string;
+  started_at: string | null;
+  completed_at: string | null;
+  skipped_at: string | null;
+  skipped_reason: string | null;
+  moved_from_date: string | null;
+  linked_task_id: string | null;
+  generated_from: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export async function fetchActiveMcatPlanInstance(input: { userId: string; templateKey: string }) {
   const client = requireSupabase();
   const { data, error } = await client
@@ -914,6 +945,125 @@ export async function createMcatPlanInstance(input: {
     .single();
   if (error) throw error;
   return data as McatPlanInstance;
+}
+
+function rowToMcatPlanOccurrence(row: McatPlanOccurrenceRow): McatPlanOccurrence {
+  return normalizeMcatPlanOccurrence({
+    id: row.id,
+    user_id: row.user_id,
+    plan_instance_id: row.plan_instance_id,
+    template_key: row.template_key,
+    template_day_index: row.template_day_index,
+    template_week_index: row.template_week_index,
+    planned_date: row.planned_date,
+    learning_type: row.learning_type,
+    topic: row.topic,
+    title: row.title,
+    description: row.description,
+    estimated_minutes: row.estimated_minutes,
+    status: row.status as McatPlanOccurrenceStatus,
+    started_at: row.started_at,
+    completed_at: row.completed_at,
+    skipped_at: row.skipped_at,
+    skipped_reason: row.skipped_reason,
+    moved_from_date: row.moved_from_date,
+    linked_task_id: row.linked_task_id,
+    generated_from: row.generated_from ?? {},
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  });
+}
+
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value,
+  );
+}
+
+function occurrenceToRow(userId: string, occurrence: McatPlanOccurrence) {
+  return {
+    ...(isUuid(occurrence.id) ? { id: occurrence.id } : {}),
+    user_id: userId,
+    plan_instance_id: occurrence.plan_instance_id,
+    template_key: occurrence.template_key,
+    template_day_index: occurrence.template_day_index,
+    template_week_index: occurrence.template_week_index,
+    planned_date: occurrence.planned_date,
+    learning_type: occurrence.learning_type,
+    topic: occurrence.topic,
+    title: occurrence.title,
+    description: occurrence.description,
+    estimated_minutes: occurrence.estimated_minutes,
+    status: occurrence.status,
+    started_at: occurrence.started_at,
+    completed_at: occurrence.completed_at,
+    skipped_at: occurrence.skipped_at,
+    skipped_reason: occurrence.skipped_reason,
+    moved_from_date: occurrence.moved_from_date,
+    linked_task_id: occurrence.linked_task_id,
+    generated_from: occurrence.generated_from,
+  };
+}
+
+export async function fetchMcatPlanOccurrences(input: {
+  userId: string;
+  planInstanceId: string;
+}) {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("mcat_plan_occurrences")
+    .select("*")
+    .eq("user_id", input.userId)
+    .eq("plan_instance_id", input.planInstanceId)
+    .order("template_day_index", { ascending: true });
+
+  if (error) throw error;
+  return ((data ?? []) as McatPlanOccurrenceRow[]).map(rowToMcatPlanOccurrence);
+}
+
+export async function upsertMcatPlanOccurrences(
+  userId: string,
+  occurrences: McatPlanOccurrence[],
+) {
+  if (occurrences.length === 0) return [];
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("mcat_plan_occurrences")
+    .upsert(occurrences.map((occurrence) => occurrenceToRow(userId, occurrence)), {
+      onConflict: "user_id,plan_instance_id,template_key,template_day_index",
+    })
+    .select("*")
+    .order("template_day_index", { ascending: true });
+
+  if (error) throw error;
+  return ((data ?? []) as McatPlanOccurrenceRow[]).map(rowToMcatPlanOccurrence);
+}
+
+export async function updateMcatPlanOccurrence(
+  userId: string,
+  occurrence: McatPlanOccurrence,
+) {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("mcat_plan_occurrences")
+    .update({
+      status: occurrence.status,
+      started_at: occurrence.started_at,
+      completed_at: occurrence.completed_at,
+      skipped_at: occurrence.skipped_at,
+      skipped_reason: occurrence.skipped_reason,
+      moved_from_date: occurrence.moved_from_date,
+      planned_date: occurrence.planned_date,
+      linked_task_id: occurrence.linked_task_id,
+      generated_from: occurrence.generated_from,
+    })
+    .eq("id", occurrence.id)
+    .eq("user_id", userId)
+    .select("*")
+    .single();
+
+  if (error) throw error;
+  return rowToMcatPlanOccurrence(data as McatPlanOccurrenceRow);
 }
 
 export type UserRoutineInstance = {
@@ -1747,6 +1897,7 @@ export async function fetchRelationshipEntries(userId: string) {
     followUpNeeded: Boolean(row.follow_up_needed),
     notes: row.notes ?? "",
     created_at: row.created_at,
+    updated_at: row.updated_at,
   } satisfies RelationshipEntry));
 }
 

@@ -31,6 +31,9 @@ export type PromptBuilderContext = {
   mcatSummary?: string;
   workoutSummary?: string;
   nutritionSummary?: string;
+  moneySummary?: string;
+  healthSummary?: string;
+  depthLearningSummary?: string;
   weeklyReviewSummary?: string;
   executionTruthSummary?: string;
   planningSummary?: string;
@@ -91,6 +94,9 @@ function commonContext(context: PromptBuilderContext) {
     line("MCAT", context.mcatSummary),
     line("Workout", context.workoutSummary),
     line("Nutrition", context.nutritionSummary),
+    line("Money", context.moneySummary),
+    line("Health", context.healthSummary),
+    line("Depth & Learning", context.depthLearningSummary),
     line("Weekly review", context.weeklyReviewSummary),
     line("Execution truth", context.executionTruthSummary),
     line("Reality-constrained planning", context.planningSummary),

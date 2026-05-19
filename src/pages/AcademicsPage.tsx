@@ -21,8 +21,10 @@ import {
   deleteAcademicTask,
   fetchAcademicTasks,
   upsertAcademicTask,
+  upsertUniversalTask,
   type AcademicTaskPayload,
 } from "@/lib/lifeee-persistence";
+import { makeTask } from "@/lib/task-system";
 import {
   CollapsibleSection,
   EmptyStateCard,
@@ -124,6 +126,37 @@ function academicNotesFromForm(form: AcademicTaskForm) {
   return notes ? `${typeLine}\n${notes}` : typeLine;
 }
 
+// Bridge academic tasks into universal_tasks so they participate in the
+// canonical task system (smart views, Daily OS, Calendar Planning exports).
+// Identity is derived from the academic task id so re-saves update in place.
+function buildUniversalTaskFromAcademic(row: AcademicTaskRow) {
+  const due = row.due_date ? row.due_date.slice(0, 10) : null;
+  const estimatedMinutes = Math.max(15, Math.round((row.estimated_hours ?? 1) * 60));
+  const score = row.priority_score ?? 0;
+  const priority: "low" | "medium" | "high" | "critical" =
+    score >= 8 ? "critical" : score >= 6 ? "high" : score >= 4 ? "medium" : "low";
+  const status: "completed" | "today" | "inbox" =
+    row.status === "completed" ? "completed" : row.status === "in_progress" ? "today" : "inbox";
+  return makeTask({
+    id: `academic_${row.id}`,
+    title: row.task_name,
+    description: row.notes ?? "",
+    task_type: "Academic",
+    due_date: due,
+    estimated_minutes: estimatedMinutes,
+    priority,
+    status,
+    source: "academic",
+    generated_from: {
+      source: "academic",
+      academic_task_id: row.id,
+      class_name: row.class_name,
+      grade_impact: row.grade_impact,
+      difficulty: row.difficulty,
+    },
+  });
+}
+
 function taskPayloadFromRow(task: AcademicTaskRow): AcademicTaskPayload {
   return {
     id: task.id,
@@ -167,8 +200,8 @@ export default function AcademicsPage() {
         setIsLoading(false);
         setNotice(
           supabaseConfigured
-            ? "No Supabase session yet. Tasks stay in local draft mode until auth is connected."
-            : "Supabase env vars are missing. Tasks stay in local draft mode.",
+            ? "Not signed in. Tasks stay as a local draft until you sign in."
+            : "Sign-in is unavailable right now. Tasks stay as a local draft.",
         );
         setSyncStatus(supabaseConfigured ? "waiting" : "local");
         return;
@@ -185,7 +218,7 @@ export default function AcademicsPage() {
 
         setTasks(data);
         remoteLoadedRef.current = true;
-        setNotice("Loaded from Supabase.");
+        setNotice("Loaded saved data.");
         setSyncStatus("saved");
       } catch (loadError) {
         if (!active) return;
@@ -257,8 +290,12 @@ export default function AcademicsPage() {
       const savedTask = result.data;
       setTasks((current) => [savedTask, ...current]);
       setForm(createDefaultForm());
-      setNotice("Task saved to Supabase.");
+      setNotice("Task saved.");
       setSyncStatus(result.status);
+      // Bridge to canonical task system; best-effort, never blocks the user.
+      void upsertUniversalTask(userId, buildUniversalTaskFromAcademic(savedTask), 6).catch(
+        () => undefined,
+      );
     } else if (!result.ok) {
       setError(result.error);
       setSyncStatus(result.status);
@@ -291,6 +328,10 @@ export default function AcademicsPage() {
 
     if (result.ok) {
       setSyncStatus(result.status);
+      // Keep bridged universal_task in sync (status + metadata).
+      void upsertUniversalTask(userId, buildUniversalTaskFromAcademic(nextTask), 6).catch(
+        () => undefined,
+      );
     } else {
       setError(result.error);
       setSyncStatus(result.status);
@@ -383,7 +424,7 @@ export default function AcademicsPage() {
                 </datalist>
                 {form.className.trim() && !courseOptions.includes(form.className.trim()) ? (
                   <div className="mt-1 text-[10px] text-[#8c8478]">
-                    Quick-create course on save: {form.className.trim()}
+                    Class name will be saved on this item: {form.className.trim()}
                   </div>
                 ) : null}
               </div>
@@ -543,13 +584,13 @@ export default function AcademicsPage() {
             ) : null}
             {supabaseConfigured && !userId ? (
               <div className="mb-3 rounded border border-[#6b87ae]/30 bg-[#6b87ae]/10 px-3 py-2 text-xs text-[#6b87ae]">
-                Supabase is configured, but there is no session yet. Draft mode is
+                Not signed in yet. Draft mode is
                 still available.
               </div>
             ) : null}
             {!supabaseConfigured ? (
               <div className="mb-3 rounded border border-[#c39a4e]/30 bg-[#c39a4e]/10 px-3 py-2 text-xs text-[#c39a4e]">
-                Supabase env vars are missing. Tasks stay local until you add them.
+                Sign-in is unavailable right now. Tasks stay local until you sign in.
               </div>
             ) : null}
             <div className="space-y-1">

@@ -122,7 +122,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
   const { session: supabaseSession } = useSupabaseSession();
   const sharedPromptContext = useSharedPromptContext();
   const canonicalPromptContext = useCanonicalPromptContext();
-  // Canonical Supabase-backed state wins for the data fields it owns; page
+  // Canonical Saved state wins for the data fields it owns; page
   // pushes (e.g. Dashboard decision summaries) survive for keys canonical
   // does not produce.
   const promptContext = { ...sharedPromptContext, ...canonicalPromptContext };
@@ -195,6 +195,8 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
       <button
         onClick={() => setMobileOpen(!mobileOpen)}
         className="fixed left-4 top-4 z-50 rounded-xl border border-border bg-card/95 p-2 text-foreground shadow-sm backdrop-blur lg:hidden"
+        aria-label={mobileOpen ? "Close navigation menu" : "Open navigation menu"}
+        aria-expanded={mobileOpen}
       >
         {mobileOpen ? <X size={18} /> : <Menu size={18} />}
       </button>
@@ -220,6 +222,8 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
           <button
             onClick={toggleSidebar}
             className="hidden rounded-lg p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:flex"
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-expanded={!collapsed}
           >
             {collapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
           </button>

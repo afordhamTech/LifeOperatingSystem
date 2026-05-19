@@ -33,12 +33,6 @@ const defaultForm: DailyLogForm = {
   notes: "",
 };
 
-const migrationTodos = [
-  "Auth: replace the current Kimi flow with Supabase Auth or a server-side bridge.",
-  "Modules: wire sleep, academics, workout, nutrition, and weekly reviews next.",
-  "Backend: remove the MySQL/Drizzle placeholder layer after the Supabase routes land.",
-];
-
 function rowToForm(
   row: Pick<
     DailyLogRow,
@@ -93,7 +87,7 @@ export default function DailyLogPanel() {
       if (!supabase) {
         if (active) {
           setIsLoading(false);
-          setNotice("Supabase env vars are missing. Using local draft mode.");
+          setNotice("Sign-in is unavailable right now. Using local draft mode.");
         }
         return;
       }
@@ -102,7 +96,7 @@ export default function DailyLogPanel() {
         if (active) {
           setIsLoading(false);
           setForm(defaultForm);
-          setNotice("Sign in with Supabase later to sync this log.");
+          setNotice("Sign in later to sync this log.");
         }
         return;
       }
@@ -139,7 +133,7 @@ export default function DailyLogPanel() {
             >,
           ),
         );
-        setNotice("Loaded from Supabase.");
+        setNotice("Loaded saved data.");
       } else {
         setForm(defaultForm);
       }
@@ -199,7 +193,7 @@ export default function DailyLogPanel() {
           >,
         ),
       );
-      setNotice("Daily log saved to Supabase.");
+      setNotice("Daily log saved.");
     } else {
       setNotice("Daily log saved.");
     }
@@ -208,7 +202,7 @@ export default function DailyLogPanel() {
   };
 
   const statusLabel = canPersist
-    ? "Supabase-backed"
+    ? "Saved"
     : supabaseConfigured
       ? "Waiting for auth"
       : "Local draft mode";
@@ -227,8 +221,7 @@ export default function DailyLogPanel() {
             </span>
           </div>
           <p className="text-xs text-[#6f685f] mt-1">
-            Capture the plan for today. This is the first Supabase-backed page
-            in the migration.
+            Capture the plan for today.
           </p>
         </div>
         <div className="flex items-center gap-2 text-xs text-[#6f685f]">
@@ -240,7 +233,7 @@ export default function DailyLogPanel() {
       {sessionLoading ? (
         <div className="flex items-center gap-2 text-sm text-[#6f685f]">
           <Loader2 size={14} className="animate-spin" />
-          Checking Supabase session...
+          Checking sign-in…
         </div>
       ) : null}
 
@@ -248,7 +241,7 @@ export default function DailyLogPanel() {
         <div className="flex items-start gap-2 rounded border border-[#c39a4e]/30 bg-[#c39a4e]/10 px-3 py-2 text-xs text-[#c39a4e]">
           <CloudOff size={14} className="mt-0.5" />
           <span>
-            Supabase env vars are missing. The form still works locally, but
+            Sign-in is unavailable right now. The form still works locally, but
             saving to the database is disabled.
           </span>
         </div>
@@ -258,7 +251,7 @@ export default function DailyLogPanel() {
         <div className="flex items-start gap-2 rounded border border-[#6b87ae]/30 bg-[#6b87ae]/10 px-3 py-2 text-xs text-[#6b87ae]">
           <ShieldAlert size={14} className="mt-0.5" />
           <span>
-            No Supabase session yet. You can still draft the log here, and it
+            Not signed in yet. You can still draft the log here, and it
             will be ready to sync after auth is connected.
           </span>
         </div>
@@ -347,8 +340,8 @@ export default function DailyLogPanel() {
             </button>
             <span className="text-xs text-[#6f685f]">
               {canPersist
-                ? "RLS will scope this row to the signed-in Supabase user."
-                : "Saving is disabled until Supabase auth is connected."}
+                ? "Saved entries are private to your account."
+                : "Saving is disabled until you sign in."}
             </span>
           </div>
         </div>
@@ -376,17 +369,6 @@ export default function DailyLogPanel() {
               <SummaryLine label="Energy" value={`${form.energy}/10`} />
               <SummaryLine label="Mood" value={`${form.mood}/10`} />
             </div>
-          </div>
-
-          <div className="rounded border border-[#ddd4c6] bg-[#f8f4ed] p-3">
-            <div className="text-xs font-medium uppercase tracking-wider text-[#6f685f]">
-              Migration TODO
-            </div>
-            <ul className="mt-2 space-y-1 text-xs text-[#6f685f]">
-              {migrationTodos.map((item) => (
-                <li key={item}>- {item}</li>
-              ))}
-            </ul>
           </div>
         </div>
       </div>

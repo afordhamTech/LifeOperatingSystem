@@ -2,6 +2,7 @@
 // Lifeee must track what actually happened, not just what was planned.
 
 import type { ExecutionStatus, TimeBlock } from "@/lib/calendar-system";
+import type { Task } from "@/lib/task-system";
 
 // ── Plan change reasons (Plan Lock) ─────────────────────────────────────────
 export const PLAN_CHANGE_REASONS = [
@@ -150,4 +151,63 @@ export const ANTI_DRIFT_WARNING =
 // A block "needs execution attention" if it is scheduled but not yet resolved.
 export function blockNeedsAttention(block: TimeBlock): boolean {
   return block.execution_status === "not_started" || block.execution_status === "in_progress";
+}
+
+export type BlockResolutionDraft = {
+  nextStatus: ExecutionStatus;
+  requiresReason: boolean;
+  missedReason: string;
+  requiresLinkedTaskDecision: boolean;
+  linkedTaskTitle: string | null;
+  canApplyImmediately: boolean;
+};
+
+export function createBlockResolutionDraft(input: {
+  block: TimeBlock;
+  nextStatus: ExecutionStatus;
+  linkedTask: Task | null;
+}): BlockResolutionDraft {
+  const { block, nextStatus, linkedTask } = input;
+  const highStakes =
+    linkedTask?.priority === "high" ||
+    linkedTask?.priority === "critical" ||
+    linkedTask?.consequence_level === "high" ||
+    linkedTask?.consequence_level === "critical";
+  const requiresReason = nextStatus === "missed" || (nextStatus === "skipped" && highStakes);
+  const requiresLinkedTaskDecision =
+    nextStatus === "done" && Boolean(linkedTask) && linkedTask?.status !== "done";
+
+  return {
+    nextStatus,
+    requiresReason,
+    missedReason: block.missed_reason?.trim() || MISSED_REASONS[0],
+    requiresLinkedTaskDecision,
+    linkedTaskTitle: linkedTask?.title ?? null,
+    canApplyImmediately: !requiresReason && !requiresLinkedTaskDecision,
+  };
+}
+
+export type ShutdownRitualDraft = {
+  notes: string;
+  lesson: string;
+  firstMove: string;
+  target: string;
+};
+
+export function createShutdownRitualDraft(
+  shutdown:
+    | {
+        shutdown_notes?: string | null;
+        anti_drift_lesson?: string | null;
+        tomorrow_first_move?: string | null;
+        tomorrow_shutdown_target?: string | null;
+      }
+    | null,
+): ShutdownRitualDraft {
+  return {
+    notes: shutdown?.shutdown_notes ?? "",
+    lesson: shutdown?.anti_drift_lesson ?? "",
+    firstMove: shutdown?.tomorrow_first_move ?? "",
+    target: shutdown?.tomorrow_shutdown_target ?? "",
+  };
 }

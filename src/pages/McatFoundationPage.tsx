@@ -81,19 +81,35 @@ import {
   MCAT_PHASE_REGISTRY,
   MCAT_PREP_SYSTEM_TAGLINE,
   MCAT_PHASE_0_SOURCE,
-  getMcatPhase0TaskForDate,
-  summarizeMcatPhase0SeedStatus,
-  getMissingMcatPhase0Tasks,
-  type McatPhase0SeedSummary,
 } from "@/lib/mcat-phase-0-template";
+import {
+  MCAT_ACTIVE_STUDY_SOURCE,
+  MCAT_COMMITTED_STUDY_SOURCE,
+  buildMcatTodayCommand,
+  completeMcatPlanOccurrenceQueue,
+  formatMcatAccuracyTrendLabel,
+  generateMcatPhase0PlanOccurrences,
+  moveMcatPlanOccurrenceQueue,
+  pickTodayMcatOccurrence,
+  skipMcatPlanOccurrenceQueue,
+  startMcatPlanOccurrenceQueue,
+  summarizeMcatPlanOccurrenceStatus,
+  type McatPlanOccurrence,
+  type McatPlanOccurrenceSummary,
+  type McatTodayCommand,
+} from "@/lib/mcat-plan-occurrences";
 import {
   createMcatPlanInstance,
   fetchActiveMcatPlanInstance,
+  fetchMcatPlanOccurrences,
+  fetchUniversalTasks,
   fetchUniversalTasksByTemplate,
+  updateMcatPlanOccurrence,
+  upsertMcatPlanOccurrences,
   upsertUniversalTask,
   type McatPlanInstance,
 } from "@/lib/lifeee-persistence";
-import { loadTasks, makeTask, saveTasks, type Task } from "@/lib/task-system";
+import { loadTasks, saveTasks, type Task } from "@/lib/task-system";
 import { supabase } from "@/lib/supabase-client";
 import { useSupabaseSession } from "@/hooks/useSupabaseSession";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -106,7 +122,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { CollapsibleSection, NextActionCard, PageDecisionHeader } from "@/components/ui-kit";
+import { CollapsibleSection, PageDecisionHeader } from "@/components/ui-kit";
 import { cn } from "@/lib/utils";
 
 const DAILY_GOAL_MINUTES = 60;
@@ -206,6 +222,7 @@ const MCAT_SYNC_DEBOUNCE_MS = 700;
 
 type McatSyncStatus = "local" | "loading" | "saving" | "synced" | "error";
 type McatPhaseSeedStatus = "idle" | "loading" | "seeding" | "saved" | "error";
+type McatQueueActionStatus = "idle" | "working" | "saved" | "error";
 
 type McatRemoteRow = {
   state: unknown;
@@ -232,10 +249,10 @@ function shouldUseRemoteSnapshot(
 
 function syncLabel(status: McatSyncStatus, hasConfig: boolean, userId: string | null) {
   if (!hasConfig) return "Local only";
-  if (status === "loading") return userId ? "Loading Supabase" : "Checking auth";
+  if (status === "loading") return userId ? "Loading" : "Checking auth";
   if (!userId) return "Sign in to sync";
-  if (status === "saving") return "Saving Supabase";
-  if (status === "synced") return "Supabase synced";
+  if (status === "saving") return "Saving";
+  if (status === "synced") return "Synced";
   if (status === "error") return "Sync error";
   return "Local only";
 }
@@ -257,6 +274,24 @@ function mergeTasksIntoLocalCache(tasks: Task[]) {
 function sortTemplateTasks(tasks: Task[]) {
   return [...tasks].sort(
     (a, b) => (a.template_day_index ?? 999) - (b.template_day_index ?? 999),
+  );
+}
+
+function sortTemplateOccurrences(occurrences: McatPlanOccurrence[]) {
+  return [...occurrences].sort((a, b) => a.template_day_index - b.template_day_index);
+}
+
+function didOccurrenceQueueStateChange(before: McatPlanOccurrence, after: McatPlanOccurrence) {
+  return (
+    before.status !== after.status ||
+    before.started_at !== after.started_at ||
+    before.completed_at !== after.completed_at ||
+    before.skipped_at !== after.skipped_at ||
+    before.skipped_reason !== after.skipped_reason ||
+    before.moved_from_date !== after.moved_from_date ||
+    before.planned_date !== after.planned_date ||
+    before.linked_task_id !== after.linked_task_id ||
+    JSON.stringify(before.generated_from) !== JSON.stringify(after.generated_from)
   );
 }
 
@@ -361,45 +396,45 @@ function McatPhase0ScheduleCard({
   hasSupabaseConfig,
   userId,
   sessionLoading,
-  todayPreviewTitle,
-  todaySeededTask,
+  todayOccurrence,
+  todayCommittedTask,
+  legacySeededTaskCount,
   activePlan,
   todayKey,
   onSeed,
 }: {
-  summary: McatPhase0SeedSummary;
+  summary: McatPlanOccurrenceSummary;
   seedStatus: McatPhaseSeedStatus;
   seedMessage: string | null;
   seedError: string | null;
   hasSupabaseConfig: boolean;
   userId: string | null;
   sessionLoading: boolean;
-  todayPreviewTitle: string | null;
-  todaySeededTask: Task | null;
+  todayOccurrence: McatPlanOccurrence | null;
+  todayCommittedTask: Task | null;
+  legacySeededTaskCount: number;
   activePlan: McatPlanInstance | null;
   todayKey: string;
   onSeed: () => void;
 }) {
   const authMessage = !hasSupabaseConfig
-    ? "Supabase is not configured for saved MCAT task seeding."
+    ? "Saved MCAT plan storage is unavailable right now."
     : !userId
-      ? "Log in to seed MCAT tasks to your plan."
+      ? "Log in to start the MCAT plan."
       : null;
   const canSeed =
     Boolean(userId) &&
     hasSupabaseConfig &&
     !sessionLoading &&
-    !summary.isFullySeeded &&
+    summary.generatedPlanDayCount < summary.totalPlanDayCount &&
     seedStatus !== "loading" &&
-    seedStatus !== "seeding" &&
-    seedStatus !== "error";
+    seedStatus !== "seeding";
   const seedButtonLabel =
     seedStatus === "error"
-      ? "Seed unavailable"
-      : summary.hasPartialSeed
-        ? "Seed missing tasks"
-        : "Seed Phase 0 Tasks";
-  const remainingHours = Math.round((summary.remainingPlannedMinutes / 60) * 10) / 10;
+      ? "Retry plan start"
+      : summary.generatedPlanDayCount > 0
+        ? "Repair Phase 0 Plan"
+        : "Start Phase 0 Plan";
 
   return (
     <section className="card-surface p-4">
@@ -407,7 +442,7 @@ function McatPhase0ScheduleCard({
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <BookOpenCheck size={16} className="text-primary" />
-            <h2 className="text-sm font-semibold text-foreground">MCAT Phase 0 Schedule</h2>
+            <h2 className="text-sm font-semibold text-foreground">MCAT Phase 0 Queue</h2>
             <span className="rounded-full border border-border bg-muted/40 px-2 py-0.5 text-[11px] text-muted-foreground">
               {summary.statusLabel}
             </span>
@@ -418,7 +453,7 @@ function McatPhase0ScheduleCard({
           <p className="mt-2 text-sm text-muted-foreground">
             {activePlan
               ? `${activePlan.seed_start_date} → ${activePlan.seed_end_date} · 78 total hours · ${activePlan.phase_name}`
-              : `Starts today when seeded · 70 days · 78 total hours · ${MCAT_PHASE_0_TEMPLATE.phase_name}`}
+              : `Starts today when started · 70 days · 78 total hours · ${MCAT_PHASE_0_TEMPLATE.phase_name}`}
           </p>
           <p className="mt-1 text-xs italic text-muted-foreground">{MCAT_PREP_SYSTEM_TAGLINE}</p>
           {!activePlan ? (
@@ -426,31 +461,33 @@ function McatPhase0ScheduleCard({
               Week 1 begins on {todayKey}.
             </p>
           ) : null}
-          <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+          <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-6">
             <MiniMetric
-              label="Current week"
+              label="Current item"
               value={
-                summary.currentWeekTargetMinutes
-                  ? `Week ${summary.currentWeekIndex}: ${summary.currentWeekTargetMinutes / 60}h`
-                  : "Outside phase"
+                todayOccurrence
+                  ? `Day ${todayOccurrence.template_day_index}`
+                  : "Not started"
               }
             />
             <MiniMetric
-              label="Generated"
-              value={`${summary.seededTaskCount}/${summary.totalTaskCount}`}
+              label="Plan days"
+              value={`${summary.generatedPlanDayCount}/${summary.totalPlanDayCount} plan days`}
             />
-            <MiniMetric label="Completed" value={`${summary.completedTaskCount}`} />
+            <MiniMetric
+              label="In progress"
+              value={todayOccurrence?.status === "in_progress" ? todayOccurrence.title : "None"}
+            />
+            <MiniMetric label="Completed" value={`${summary.completedCount}/${summary.totalPlanDayCount}`} />
             <MiniMetric label="Remaining" value={`${summary.remainingPlannedMinutes}m`} />
-            <MiniMetric label="Hours left" value={`${remainingHours}h`} />
+            <MiniMetric label="Committed to Daily OS" value={`${summary.committedTaskCount}`} />
           </div>
           <div className="mt-3 text-xs text-muted-foreground">
-            {todaySeededTask
-              ? `Today's seeded task: ${todaySeededTask.task_code} · ${todaySeededTask.title}`
-              : !activePlan && todayPreviewTitle
-                ? `Today's preview task if seeded now: ${todayPreviewTitle}`
-                : todayPreviewTitle
-                  ? `Today's planned task: ${todayPreviewTitle}`
-                  : "No Phase 0 task is due today."}
+            {todayCommittedTask
+              ? `Current Daily OS task: ${todayCommittedTask.task_code} · ${todayCommittedTask.title}`
+              : todayOccurrence
+                ? `Today's plan move: ${todayOccurrence.title}`
+                : "No Phase 0 plan move is due today."}
           </div>
         </div>
 
@@ -466,21 +503,14 @@ function McatPhase0ScheduleCard({
           </button>
           <Link
             to="/tasks"
-            className="inline-flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted"
-          >
-            <Clipboard size={14} />
-            View in Tasks
-          </Link>
-          <Link
-            to="/tasks"
-            aria-disabled={!todaySeededTask}
+            aria-disabled={!todayCommittedTask}
             className={cn(
               "inline-flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted",
-              !todaySeededTask && "pointer-events-none opacity-50",
+              !todayCommittedTask && "pointer-events-none opacity-50",
             )}
           >
             <CalendarClock size={14} />
-            View Today's MCAT Task
+            View current task
           </Link>
         </div>
       </div>
@@ -500,9 +530,9 @@ function McatPhase0ScheduleCard({
           {seedError}
         </div>
       ) : null}
-      {summary.duplicateTemplateDayCount > 0 ? (
-        <div className="mt-3 rounded-md border border-destructive/25 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-          {summary.duplicateTemplateDayCount} duplicate seeded day record(s) were detected. Existing tasks were not deleted or overwritten.
+      {legacySeededTaskCount > 0 ? (
+        <div className="mt-3 rounded-md border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+          Old MCAT seeded tasks detected: {legacySeededTaskCount}. They are hidden from normal task planning unless you commit/adopt one.
         </div>
       ) : null}
     </section>
@@ -518,17 +548,125 @@ function MiniMetric({ label, value }: { label: string; value: string }) {
   );
 }
 
+function McatTodayCommandCard({
+  command,
+  canUseQueue,
+  queueStatus,
+  queueMessage,
+  onStartNow,
+  onDone,
+  onSkip,
+  onMove,
+  onViewDetails,
+}: {
+  command: McatTodayCommand;
+  canUseQueue: boolean;
+  queueStatus: McatQueueActionStatus;
+  queueMessage: string | null;
+  onStartNow: () => void;
+  onDone: () => void;
+  onSkip: () => void;
+  onMove: () => void;
+  onViewDetails: () => void;
+}) {
+  const occurrenceStatus = command.occurrence?.status ?? "planned";
+  const isWorking = queueStatus === "working";
+  const isIncomplete = occurrenceStatus !== "completed" && occurrenceStatus !== "skipped";
+  const canStart = canUseQueue && isIncomplete && occurrenceStatus !== "in_progress";
+  const canDone = canUseQueue && occurrenceStatus === "in_progress";
+
+  return (
+    <section className="card-elevated border-primary/25 bg-primary/5 p-5">
+      <div className="mb-4 rounded-md border border-primary/20 bg-background/80 px-3 py-2 text-xs font-semibold text-primary">
+        {command.disciplineText}
+      </div>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0 flex-1">
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            {command.heading}
+          </div>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            <span className="rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">
+              {command.dayLabel}
+            </span>
+            <span className="rounded-full border border-border bg-background px-2 py-0.5 text-[11px] font-semibold capitalize text-muted-foreground">
+              {command.statusLabel}
+            </span>
+          </div>
+          <h2 className="mt-2 text-xl font-semibold text-foreground">Do this now: {command.action}</h2>
+          <div className="mt-3 grid gap-3 md:grid-cols-3">
+            <MiniMetric label="Time" value={`${command.estimatedMinutes}m`} />
+            <div className="rounded-md border border-border bg-background/70 p-2 md:col-span-2">
+              <div className="text-[10px] uppercase text-muted-foreground">Why this</div>
+              <div className="mt-1 text-sm text-foreground">{command.why}</div>
+            </div>
+          </div>
+          <div className="mt-3 rounded-md border border-border bg-background/70 p-3">
+            <div className="text-[10px] uppercase text-muted-foreground">Success</div>
+            <div className="mt-1 text-sm text-foreground">{command.successCondition}</div>
+          </div>
+        </div>
+        <div className="flex shrink-0 flex-wrap gap-2 lg:max-w-[240px] lg:justify-end">
+          {canDone ? (
+            <button className="btn-primary flex items-center gap-2" onClick={onDone} disabled={isWorking}>
+              <CheckCircle2 size={15} />
+              {isWorking ? "Saving..." : "Mark Done"}
+            </button>
+          ) : (
+            <button className="btn-primary flex items-center gap-2" onClick={onStartNow} disabled={!canStart || isWorking}>
+              <Play size={15} />
+              {isWorking ? "Starting..." : occurrenceStatus === "completed" ? "Done for this item" : "Start Now"}
+            </button>
+          )}
+          <button className="btn-secondary flex items-center gap-2" onClick={onSkip} disabled={!canUseQueue || !isIncomplete || isWorking}>
+            <X size={15} />
+            Skip
+          </button>
+          <button className="btn-secondary flex items-center gap-2" onClick={onMove} disabled={!canUseQueue || !isIncomplete || isWorking}>
+            <CalendarClock size={15} />
+            Move
+          </button>
+          <button className="btn-secondary flex items-center gap-2" onClick={onViewDetails}>
+            <BookOpenCheck size={15} />
+            View details
+          </button>
+        </div>
+      </div>
+      {queueMessage ? (
+        <div
+          className={cn(
+            "mt-4 rounded-md border px-3 py-2 text-xs",
+            queueStatus === "error"
+              ? "border-destructive/25 bg-destructive/10 text-destructive"
+              : "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+          )}
+        >
+          {queueMessage}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 export default function McatFoundationPage() {
   const { hasSupabaseConfig, isLoading: sessionLoading, userId } = useSupabaseSession();
   const [state, setState] = useState<McatFoundationState>(() => loadMcatFoundationState());
   const [activeSession, setActiveSession] = useState<ActiveMcatSession | null>(() => loadActiveSession());
   const [syncStatus, setSyncStatus] = useState<McatSyncStatus>("local");
   const [syncError, setSyncError] = useState<string | null>(null);
-  const [seededPhaseTasks, setSeededPhaseTasks] = useState<Task[]>([]);
+  const [phase0Occurrences, setPhase0Occurrences] = useState<McatPlanOccurrence[]>([]);
+  const [legacySeededPhaseTasks, setLegacySeededPhaseTasks] = useState<Task[]>([]);
+  const [committedMcatTasks, setCommittedMcatTasks] = useState<Task[]>([]);
   const [activePhase0Plan, setActivePhase0Plan] = useState<McatPlanInstance | null>(null);
   const [phaseSeedStatus, setPhaseSeedStatus] = useState<McatPhaseSeedStatus>("idle");
   const [phaseSeedMessage, setPhaseSeedMessage] = useState<string | null>(null);
   const [phaseSeedError, setPhaseSeedError] = useState<string | null>(null);
+  const [queueStatus, setQueueStatus] = useState<McatQueueActionStatus>("idle");
+  const [queueMessage, setQueueMessage] = useState<string | null>(null);
+  const [skipDialogOpen, setSkipDialogOpen] = useState(false);
+  const [skipReason, setSkipReason] = useState("");
+  const [moveDialogOpen, setMoveDialogOpen] = useState(false);
+  const [moveDate, setMoveDate] = useState(todayKey);
   const stateRef = useRef(state);
   const activeSessionRef = useRef(activeSession);
   const remoteLoadedForUserRef = useRef<string | null>(null);
@@ -674,10 +812,12 @@ export default function McatFoundationPage() {
   useEffect(() => {
     let active = true;
 
-    const loadSeededTasks = async () => {
+    const loadPhase0Plan = async () => {
       if (sessionLoading) return;
       if (!supabase || !hasSupabaseConfig || !userId) {
-        setSeededPhaseTasks([]);
+        setPhase0Occurrences([]);
+        setLegacySeededPhaseTasks([]);
+        setCommittedMcatTasks([]);
         setActivePhase0Plan(null);
         setPhaseSeedStatus("idle");
         setPhaseSeedError(null);
@@ -687,10 +827,20 @@ export default function McatFoundationPage() {
       setPhaseSeedStatus("loading");
       setPhaseSeedError(null);
       try {
-        const [tasks, plan] = await Promise.all([
+        const [legacyTasks, committedTasks, activeTasks, plan] = await Promise.all([
           fetchUniversalTasksByTemplate({
             userId,
             source: MCAT_PHASE_0_SOURCE,
+            templateKey: MCAT_PHASE_0_TEMPLATE_KEY,
+          }),
+          fetchUniversalTasksByTemplate({
+            userId,
+            source: MCAT_COMMITTED_STUDY_SOURCE,
+            templateKey: MCAT_PHASE_0_TEMPLATE_KEY,
+          }),
+          fetchUniversalTasksByTemplate({
+            userId,
+            source: MCAT_ACTIVE_STUDY_SOURCE,
             templateKey: MCAT_PHASE_0_TEMPLATE_KEY,
           }),
           fetchActiveMcatPlanInstance({
@@ -698,18 +848,23 @@ export default function McatFoundationPage() {
             templateKey: MCAT_PHASE_0_TEMPLATE_KEY,
           }),
         ]);
+        const occurrences = plan
+          ? await fetchMcatPlanOccurrences({ userId, planInstanceId: plan.id })
+          : [];
         if (!active) return;
-        setSeededPhaseTasks(sortTemplateTasks(tasks));
+        setLegacySeededPhaseTasks(sortTemplateTasks(legacyTasks));
+        setCommittedMcatTasks(sortTemplateTasks([...committedTasks, ...activeTasks]));
+        setPhase0Occurrences(sortTemplateOccurrences(occurrences));
         setActivePhase0Plan(plan);
         setPhaseSeedStatus("saved");
       } catch (error) {
         if (!active) return;
         setPhaseSeedStatus("error");
-        setPhaseSeedError(readErrorMessage(error, "Unable to load MCAT Phase 0 tasks."));
+        setPhaseSeedError(readErrorMessage(error, "Unable to load MCAT Phase 0 plan."));
       }
     };
 
-    void loadSeededTasks();
+    void loadPhase0Plan();
 
     return () => {
       active = false;
@@ -784,7 +939,6 @@ export default function McatFoundationPage() {
     () => state.topics.find((topic) => topic.title === todayMove.topic) ?? studyNowTopic,
     [state.topics, studyNowTopic, todayMove.topic],
   );
-  const todayMoveReason = topicRecommendationReason(todayMoveTopic);
   const streak = useMemo(() => getStudyStreak(state), [state]);
   const todayMinutes = useMemo(() => getDailyMinutes(state, todayKey), [state]);
   const dailySeries = useMemo(() => getDailyMinutesSeries(state, 14), [state]);
@@ -1013,31 +1167,67 @@ export default function McatFoundationPage() {
     });
   };
 
-  const effectiveSeedStartDate = activePhase0Plan?.seed_start_date ?? todayKey;
+  // Prefer the active plan instance; otherwise recover from old generated task
+  // metadata; otherwise the earliest old due_date; finally fall back to today.
+  const recoveredSeedStartDate = useMemo(() => {
+    if (activePhase0Plan?.seed_start_date) return activePhase0Plan.seed_start_date;
+    if (!legacySeededPhaseTasks.length) return null;
+    for (const task of legacySeededPhaseTasks) {
+      const meta = task.generated_from as { seed_start_date?: unknown } | null | undefined;
+      const candidate = meta && typeof meta.seed_start_date === "string" ? meta.seed_start_date : null;
+      if (candidate) return candidate;
+    }
+    const earliest = legacySeededPhaseTasks
+      .map((task) => task.due_date)
+      .filter((d): d is string => Boolean(d))
+      .sort()[0];
+    return earliest ?? null;
+  }, [activePhase0Plan, legacySeededPhaseTasks]);
+  const effectiveSeedStartDate = recoveredSeedStartDate ?? todayKey;
   const phase0SeedSummary = useMemo(
     () =>
-      summarizeMcatPhase0SeedStatus(seededPhaseTasks, effectiveSeedStartDate, {
+      summarizeMcatPlanOccurrenceStatus(phase0Occurrences, {
         today: todayKey,
       }),
-    [seededPhaseTasks, effectiveSeedStartDate],
+    [phase0Occurrences],
   );
-  const todayPhase0Preview = useMemo(
-    () =>
-      getMcatPhase0TaskForDate(effectiveSeedStartDate, todayKey, {
+  const previewOccurrence = useMemo(
+    () => {
+      const generated = generateMcatPhase0PlanOccurrences(effectiveSeedStartDate, {
         today: todayKey,
         planInstanceId: activePhase0Plan?.id ?? null,
-      }),
+      });
+      return pickTodayMcatOccurrence(generated, todayKey);
+    },
     [effectiveSeedStartDate, activePhase0Plan?.id],
   );
-  const todaySeededTask = useMemo(
-    () => seededPhaseTasks.find((task) => task.due_date === todayKey) ?? null,
-    [seededPhaseTasks],
+  const todayPlanOccurrence = useMemo(
+    () => pickTodayMcatOccurrence(phase0Occurrences, todayKey) ?? previewOccurrence,
+    [phase0Occurrences, previewOccurrence],
+  );
+  const todayCommittedTask = useMemo(
+    () =>
+      committedMcatTasks.find((task) => task.id === todayPlanOccurrence?.linked_task_id) ??
+      committedMcatTasks.find((task) => task.due_date === todayKey) ??
+      null,
+    [committedMcatTasks, todayPlanOccurrence?.linked_task_id],
+  );
+  const todayCommand = useMemo(
+    () =>
+      buildMcatTodayCommand({
+        occurrence: todayPlanOccurrence,
+        fallbackTitle: todayMove.title,
+        fallbackDetail: todayMove.detail,
+        hasActiveSession: Boolean(activeSession),
+        hasLoggedToday: todaySessions.length > 0 || todayCars.length > 0,
+      }),
+    [activeSession, todayCars.length, todayMove.detail, todayMove.title, todayPlanOccurrence, todaySessions.length],
   );
 
   const handleSeedPhase0Tasks = async () => {
     if (!hasSupabaseConfig || !userId) {
       setPhaseSeedMessage(null);
-      setPhaseSeedError("Log in to seed MCAT tasks to your plan.");
+      setPhaseSeedError("Log in to start the MCAT Phase 0 plan.");
       return;
     }
 
@@ -1066,40 +1256,249 @@ export default function McatFoundationPage() {
       }
       const seedStartDate = plan.seed_start_date;
 
-      const existingTasks = await fetchUniversalTasksByTemplate({
+      const existingOccurrences = await fetchMcatPlanOccurrences({
         userId,
-        source: MCAT_PHASE_0_SOURCE,
-        templateKey: MCAT_PHASE_0_TEMPLATE_KEY,
-      });
-      const missingPayloads = getMissingMcatPhase0Tasks(existingTasks, seedStartDate, {
-        today: todayKey,
         planInstanceId: plan.id,
       });
+      const existingDays = new Set(existingOccurrences.map((occurrence) => occurrence.template_day_index));
+      const missingOccurrences = generateMcatPhase0PlanOccurrences(seedStartDate, {
+        today: todayKey,
+        planInstanceId: plan.id,
+      }).filter((occurrence) => !existingDays.has(occurrence.template_day_index));
 
-      if (missingPayloads.length === 0) {
-        setSeededPhaseTasks(sortTemplateTasks(existingTasks));
+      if (missingOccurrences.length === 0) {
+        setPhase0Occurrences(sortTemplateOccurrences(existingOccurrences));
         setPhaseSeedStatus("saved");
-        setPhaseSeedMessage("MCAT Phase 0 tasks already seeded.");
+        setPhaseSeedMessage("MCAT Phase 0 plan already started.");
         return;
       }
 
-      const savedTasks = await Promise.all(
-        missingPayloads.map((payload) =>
-          upsertUniversalTask(userId, makeTask(payload), 6),
+      const savedOccurrences = await upsertMcatPlanOccurrences(userId, missingOccurrences);
+      const nextOccurrences = sortTemplateOccurrences([
+        ...existingOccurrences,
+        ...savedOccurrences.filter(
+          (saved) =>
+            !existingOccurrences.some(
+              (existing) => existing.template_day_index === saved.template_day_index,
+            ),
         ),
-      );
-      const nextTasks = sortTemplateTasks([...existingTasks, ...savedTasks]);
-      setSeededPhaseTasks(nextTasks);
-      mergeTasksIntoLocalCache(savedTasks);
+      ]);
+      setPhase0Occurrences(nextOccurrences);
       setPhaseSeedStatus("saved");
       setPhaseSeedMessage(
-        savedTasks.length === 70
-          ? "Seeded 70 MCAT Phase 0 tasks into universal_tasks."
-          : `Seeded ${savedTasks.length} missing MCAT Phase 0 task(s).`,
+        savedOccurrences.length === 70
+          ? "Generated 70 MCAT Phase 0 plan days."
+          : `Generated ${savedOccurrences.length} missing MCAT Phase 0 plan day(s).`,
       );
     } catch (error) {
       setPhaseSeedStatus("error");
-      setPhaseSeedError(readErrorMessage(error, "Unable to seed MCAT Phase 0 tasks."));
+      setPhaseSeedError(readErrorMessage(error, "Unable to start MCAT Phase 0 plan."));
+    }
+  };
+
+  const persistOccurrenceChanges = async (
+    beforeOccurrences: McatPlanOccurrence[],
+    nextOccurrences: McatPlanOccurrence[],
+  ) => {
+    if (!userId) return sortTemplateOccurrences(nextOccurrences);
+    const beforeById = new Map(beforeOccurrences.map((occurrence) => [occurrence.id, occurrence]));
+    const changed = nextOccurrences.filter((occurrence) => {
+      const before = beforeById.get(occurrence.id);
+      return !before || didOccurrenceQueueStateChange(before, occurrence);
+    });
+    if (changed.length === 0) return sortTemplateOccurrences(nextOccurrences);
+    const saved = await Promise.all(
+      changed.map((occurrence) => updateMcatPlanOccurrence(userId, occurrence)),
+    );
+    const savedById = new Map(saved.map((occurrence) => [occurrence.id, occurrence]));
+    return sortTemplateOccurrences(
+      nextOccurrences.map((occurrence) => savedById.get(occurrence.id) ?? occurrence),
+    );
+  };
+
+  const handleStartCurrentOccurrence = async () => {
+    if (!hasSupabaseConfig || !userId) {
+      setQueueStatus("error");
+      setQueueMessage("Log in to start the MCAT queue and link the active Daily OS task.");
+      return;
+    }
+    if (!todayPlanOccurrence || !activePhase0Plan || phase0Occurrences.length === 0) {
+      setQueueStatus("error");
+      setQueueMessage("Start the Phase 0 plan before starting the current item.");
+      return;
+    }
+
+    setQueueStatus("working");
+    setQueueMessage(null);
+    try {
+      const existingTasks = await fetchUniversalTasks(userId);
+      const result = startMcatPlanOccurrenceQueue({
+        occurrences: phase0Occurrences,
+        occurrenceId: todayPlanOccurrence.id,
+        existingTasks,
+        today: todayKey,
+      });
+      const savedTask = await upsertUniversalTask(userId, result.task, 6);
+      const nextOccurrences = result.occurrences.map((occurrence) =>
+        occurrence.id === result.occurrence.id
+          ? {
+              ...occurrence,
+              linked_task_id: savedTask.id,
+              generated_from: {
+                ...occurrence.generated_from,
+                active_task_id: savedTask.id,
+              },
+            }
+          : occurrence,
+      );
+      const savedOccurrences = await persistOccurrenceChanges(phase0Occurrences, nextOccurrences);
+      setPhase0Occurrences(savedOccurrences);
+      setCommittedMcatTasks((current) =>
+        sortTemplateTasks([
+          savedTask,
+          ...current.filter((task) => task.id !== savedTask.id),
+        ]),
+      );
+      setLegacySeededPhaseTasks((current) =>
+        current.filter((task) => task.id !== savedTask.id),
+      );
+      mergeTasksIntoLocalCache([savedTask]);
+      if (commandTopicId) startSession(commandTopicId);
+      setQueueStatus("saved");
+      setQueueMessage("Started. Active Daily OS task linked.");
+    } catch (error) {
+      setQueueStatus("error");
+      setQueueMessage(readErrorMessage(error, "Unable to start the MCAT queue item."));
+    }
+  };
+
+  const handleCompleteCurrentOccurrence = async () => {
+    if (!hasSupabaseConfig || !userId) {
+      setQueueStatus("error");
+      setQueueMessage("Log in to complete the MCAT queue item.");
+      return;
+    }
+    if (!todayPlanOccurrence || phase0Occurrences.length === 0) {
+      setQueueStatus("error");
+      setQueueMessage("No active MCAT queue item is available.");
+      return;
+    }
+
+    setQueueStatus("working");
+    setQueueMessage(null);
+    try {
+      const existingTasks = await fetchUniversalTasks(userId);
+      const result = completeMcatPlanOccurrenceQueue({
+        occurrences: phase0Occurrences,
+        occurrenceId: todayPlanOccurrence.id,
+        existingTasks,
+      });
+      const savedTask = result.task ? await upsertUniversalTask(userId, result.task, 6) : null;
+      const savedOccurrences = await persistOccurrenceChanges(phase0Occurrences, result.occurrences);
+      setPhase0Occurrences(savedOccurrences);
+      if (savedTask) {
+        setCommittedMcatTasks((current) =>
+          sortTemplateTasks([
+            savedTask,
+            ...current.filter((task) => task.id !== savedTask.id),
+          ]),
+        );
+        mergeTasksIntoLocalCache([savedTask]);
+      }
+      if (activeSession) {
+        const elapsed = activeSessionElapsedMs(activeSession);
+        const minutes = Math.max(1, Math.round(elapsed / 60000));
+        const topicId = activeSession.topicId;
+        setState((current) => ({
+          ...current,
+          sessions: [
+            {
+              id: makeId("mcat-session"),
+              date: todayKey,
+              topicId,
+              minutes,
+              questionsAttempted: 0,
+              questionsCorrect: 0,
+              confidenceBefore: sessionForm.confidenceBefore,
+              confidenceAfter: sessionForm.confidenceAfter,
+              mistakeTypes: [],
+              notes: `Completed queue item: ${todayPlanOccurrence.title}`,
+              flashcardsMade: 0,
+            },
+            ...current.sessions,
+          ],
+          topics: current.topics.map((topic) =>
+            topic.id === topicId
+              ? { ...topic, lastReviewed: todayKey, status: nextStatusAfterSession(sessionForm) }
+              : topic,
+          ),
+        }));
+        setActiveSession(null);
+      }
+      setQueueStatus("saved");
+      setQueueMessage(
+        result.nextOccurrence
+          ? `Completed. Next command: ${result.nextOccurrence.title}`
+          : "Completed. Phase 0 queue is finished.",
+      );
+    } catch (error) {
+      setQueueStatus("error");
+      setQueueMessage(readErrorMessage(error, "Unable to complete the MCAT queue item."));
+    }
+  };
+
+  const handleConfirmSkipOccurrence = async () => {
+    if (!hasSupabaseConfig || !userId || !todayPlanOccurrence) {
+      setQueueStatus("error");
+      setQueueMessage("Start the Phase 0 plan before skipping a queue item.");
+      return;
+    }
+    setQueueStatus("working");
+    setQueueMessage(null);
+    try {
+      const result = skipMcatPlanOccurrenceQueue({
+        occurrences: phase0Occurrences,
+        occurrenceId: todayPlanOccurrence.id,
+        reason: skipReason,
+      });
+      const savedOccurrences = await persistOccurrenceChanges(phase0Occurrences, result.occurrences);
+      setPhase0Occurrences(savedOccurrences);
+      setSkipReason("");
+      setSkipDialogOpen(false);
+      setQueueStatus("saved");
+      setQueueMessage(
+        result.nextOccurrence
+          ? `Skipped. Next command: ${result.nextOccurrence.title}`
+          : "Skipped. No remaining Phase 0 queue items.",
+      );
+    } catch (error) {
+      setQueueStatus("error");
+      setQueueMessage(readErrorMessage(error, "Unable to skip the MCAT queue item."));
+    }
+  };
+
+  const handleConfirmMoveOccurrence = async () => {
+    if (!hasSupabaseConfig || !userId || !todayPlanOccurrence) {
+      setQueueStatus("error");
+      setQueueMessage("Start the Phase 0 plan before moving a queue item.");
+      return;
+    }
+    setQueueStatus("working");
+    setQueueMessage(null);
+    try {
+      const result = moveMcatPlanOccurrenceQueue({
+        occurrences: phase0Occurrences,
+        occurrenceId: todayPlanOccurrence.id,
+        plannedDate: moveDate || todayPlanOccurrence.planned_date,
+      });
+      const savedOccurrences = await persistOccurrenceChanges(phase0Occurrences, result.occurrences);
+      setPhase0Occurrences(savedOccurrences);
+      setMoveDialogOpen(false);
+      setQueueStatus("saved");
+      setQueueMessage(`Moved current item to ${result.occurrence.planned_date}.`);
+    } catch (error) {
+      setQueueStatus("error");
+      setQueueMessage(readErrorMessage(error, "Unable to move the MCAT queue item."));
     }
   };
 
@@ -1116,6 +1515,14 @@ export default function McatFoundationPage() {
       : !hasSupabaseConfig || !userId
         ? "local"
         : syncStatus;
+  const commandTopicId = todayMoveTopic?.id ?? studyNowTopic?.id ?? firstTopicId;
+  const canUseMcatQueue = Boolean(
+    activePhase0Plan &&
+      phase0Occurrences.length > 0 &&
+      todayPlanOccurrence &&
+      hasSupabaseConfig &&
+      userId,
+  );
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -1134,31 +1541,22 @@ export default function McatFoundationPage() {
         </span>
       </PageDecisionHeader>
 
-      <NextActionCard
-        label="Today's Move"
-        title={todayMove.topic}
-        detail={
-          <span>
-            {todayMove.detail} Why it matters: {todayMoveReason}
-          </span>
-        }
-      />
-
-      <McatRoadmapCard />
-
-      <McatPhase0ScheduleCard
-        summary={phase0SeedSummary}
-        seedStatus={phaseSeedStatus}
-        seedMessage={phaseSeedMessage}
-        seedError={phaseSeedError}
-        hasSupabaseConfig={hasSupabaseConfig}
-        userId={userId}
-        sessionLoading={sessionLoading}
-        todayPreviewTitle={todayPhase0Preview?.title ?? null}
-        todaySeededTask={todaySeededTask}
-        activePlan={activePhase0Plan}
-        todayKey={todayKey}
-        onSeed={handleSeedPhase0Tasks}
+      <McatTodayCommandCard
+        command={todayCommand}
+        canUseQueue={canUseMcatQueue}
+        queueStatus={queueStatus}
+        queueMessage={queueMessage}
+        onStartNow={handleStartCurrentOccurrence}
+        onDone={handleCompleteCurrentOccurrence}
+        onSkip={() => {
+          setSkipReason("");
+          setSkipDialogOpen(true);
+        }}
+        onMove={() => {
+          setMoveDate(todayPlanOccurrence?.planned_date ?? todayKey);
+          setMoveDialogOpen(true);
+        }}
+        onViewDetails={() => commandTopicId && setTopicDetailId(commandTopicId)}
       />
 
       <ActiveSessionCard
@@ -1176,8 +1574,28 @@ export default function McatFoundationPage() {
             current ? { ...current, topicId } : current,
           )
         }
-        defaultTopicId={todayMoveTopic?.id ?? studyNowTopic?.id ?? firstTopicId}
+        defaultTopicId={commandTopicId}
       />
+
+      <McatPhase0ScheduleCard
+        summary={phase0SeedSummary}
+        seedStatus={phaseSeedStatus}
+        seedMessage={phaseSeedMessage}
+        seedError={phaseSeedError}
+        hasSupabaseConfig={hasSupabaseConfig}
+        userId={userId}
+        sessionLoading={sessionLoading}
+        todayOccurrence={todayPlanOccurrence}
+        todayCommittedTask={todayCommittedTask}
+        legacySeededTaskCount={legacySeededPhaseTasks.length}
+        activePlan={activePhase0Plan}
+        todayKey={todayKey}
+        onSeed={handleSeedPhase0Tasks}
+      />
+
+      <CollapsibleSection title="Roadmap" subtitle="Phase gates and locked future phases" defaultOpen={false}>
+        <McatRoadmapCard />
+      </CollapsibleSection>
 
       <CollapsibleSection title="Metrics" subtitle="Study pace, accuracy, CARS, and cards" defaultOpen={false}>
         <section className="grid grid-cols-2 gap-3 md:grid-cols-5">
@@ -1197,10 +1615,14 @@ export default function McatFoundationPage() {
           <HeroStat
             icon={<TrendingUp size={14} />}
             label="Week accuracy"
-            value={summary.questionsAttempted > 0 ? `${summary.accuracy}%` : "—"}
+            value={summary.questionsAttempted > 0 ? `${summary.accuracy}%` : "Not enough data yet"}
             sub={
-              summary.accuracyTrend !== 0
-                ? `${summary.accuracyTrend > 0 ? "+" : ""}${summary.accuracyTrend}% wow`
+              summary.questionsAttempted > 0
+                ? formatMcatAccuracyTrendLabel({
+                    currentAttempted: summary.questionsAttempted,
+                    previousAttempted: summary.previousQuestionsAttempted,
+                    trend: summary.accuracyTrend,
+                  })
                 : undefined
             }
           />
@@ -1609,6 +2031,59 @@ export default function McatFoundationPage() {
         prefill={logPrefill}
         onSubmit={submitLogSession}
       />
+
+      <Dialog open={skipDialogOpen} onOpenChange={setSkipDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Skip current MCAT item</DialogTitle>
+            <DialogDescription>
+              Skipping advances the Phase 0 queue. Add the reason so the plan stays auditable.
+            </DialogDescription>
+          </DialogHeader>
+          <textarea
+            className="input-dark min-h-24 w-full"
+            placeholder="Why are you skipping this item?"
+            value={skipReason}
+            onChange={(event) => setSkipReason(event.target.value)}
+          />
+          <DialogFooter>
+            <button className="btn-secondary" onClick={() => setSkipDialogOpen(false)}>
+              Cancel
+            </button>
+            <button className="btn-primary" onClick={handleConfirmSkipOccurrence}>
+              Skip and advance
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={moveDialogOpen} onOpenChange={setMoveDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Move current MCAT item</DialogTitle>
+            <DialogDescription>
+              Moving changes the planned date but keeps the item in its chronological Phase 0 position.
+            </DialogDescription>
+          </DialogHeader>
+          <label className="block text-[10px] uppercase tracking-wider text-muted-foreground">
+            Planned date
+            <input
+              className="input-dark mt-1 w-full"
+              type="date"
+              value={moveDate}
+              onChange={(event) => setMoveDate(event.target.value)}
+            />
+          </label>
+          <DialogFooter>
+            <button className="btn-secondary" onClick={() => setMoveDialogOpen(false)}>
+              Cancel
+            </button>
+            <button className="btn-primary" onClick={handleConfirmMoveOccurrence}>
+              Move item
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <TopicDetailDialog
         topicId={topicDetailId}
@@ -2152,16 +2627,19 @@ function CarsTab({
             onChange={(minutes) => setCarsForm((c) => ({ ...c, minutes }))}
           />
           <NumberField
-            label="Attempted"
+            label="Questions attempted"
             value={carsForm.questionsAttempted}
             onChange={(questionsAttempted) => setCarsForm((c) => ({ ...c, questionsAttempted }))}
           />
           <NumberField
-            label="Correct"
+            label="Questions correct"
             value={carsForm.questionsCorrect}
             onChange={(questionsCorrect) => setCarsForm((c) => ({ ...c, questionsCorrect }))}
           />
         </div>
+        <p className="mt-2 text-xs text-muted-foreground">
+          Accuracy is optional. Set questions attempted to 0 if you only want to track passages and miss types.
+        </p>
         <div className="mt-3">
           <div className="mb-2 text-[10px] uppercase tracking-wider text-muted-foreground">CARS miss types</div>
           <div className="flex flex-wrap gap-2">
