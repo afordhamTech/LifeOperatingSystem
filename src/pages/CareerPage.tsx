@@ -14,6 +14,7 @@ import {
   upsertProofItem,
 } from "@/lib/lifeee-persistence";
 import { calcProofScore } from "@/lib/calculations";
+import { mergeLocalDraftsWithRemote } from "@/lib/local-draft-merge";
 import {
   CheckCircle2,
   Circle,
@@ -134,12 +135,13 @@ export default function CareerPage() {
   const toggleChecklist = (item: ProofItem, field: keyof ProofChecklist) => {
     const current = getChecklist(item);
     const nextChecklist = { ...current, [field]: !current[field] };
+    const now = new Date().toISOString();
     setChecklistMap((prev) => {
       const next = { ...prev, [item.id]: nextChecklist };
       writeChecklistMap(next);
       return next;
     });
-    const updated = { ...item, leverageChecklist: nextChecklist };
+    const updated = { ...item, leverageChecklist: nextChecklist, updated_at: now };
     const nextItems = items.map((currentItem) => (currentItem.id === item.id ? updated : currentItem));
     setItems(nextItems);
     writeLocalProofItems(nextItems);
@@ -170,15 +172,19 @@ export default function CareerPage() {
         const remoteItems = await fetchProofItems(userId);
         if (!active) return;
 
-        if (remoteItems.length === 0 && localItems.length > 0) {
-          const uploaded = await Promise.all(localItems.map((item) => upsertProofItem(userId, item)));
-          if (!active) return;
-          setItems(uploaded);
-          writeLocalProofItems(uploaded);
-        } else {
-          setItems(remoteItems);
-          writeLocalProofItems(remoteItems);
-        }
+        const merged = mergeLocalDraftsWithRemote<ProofItem>({
+          remote: remoteItems,
+          local: localItems,
+        });
+        const uploaded =
+          merged.itemsToUpload.length > 0
+            ? await Promise.all(merged.itemsToUpload.map((item) => upsertProofItem(userId, item)))
+            : [];
+        const uploadedById = new Map(uploaded.map((item) => [item.id, item]));
+        const nextItems = merged.items.map((item) => uploadedById.get(item.id) ?? item);
+        if (!active) return;
+        setItems(nextItems);
+        writeLocalProofItems(nextItems);
 
         remoteLoadedRef.current = true;
         setSyncStatus("saved");
@@ -217,6 +223,7 @@ export default function CareerPage() {
   const handleSave = async () => {
     if (!form.projectName.trim()) return;
     const existing = editingId ? items.find((item) => item.id === editingId) : null;
+    const now = new Date().toISOString();
     const item: ProofItem = {
       id: editingId ?? createLifeeeId(),
       projectName: form.projectName.trim(),
@@ -234,6 +241,8 @@ export default function CareerPage() {
       mentorContact: existing?.mentorContact ?? "",
       skillPracticed: existing?.skillPracticed ?? "",
       privacyLayer: form.privacyLayer,
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
     };
     const optimistic = editingId
       ? items.map((current) => (current.id === editingId ? item : current))
@@ -292,7 +301,7 @@ export default function CareerPage() {
     item: ProofItem,
     field: "githubUpdated" | "linkedinUpdated" | "resumeBulletAdded",
   ) => {
-    const updated = { ...item, [field]: !item[field] };
+    const updated = { ...item, [field]: !item[field], updated_at: new Date().toISOString() };
     const next = items.map((current) => (current.id === item.id ? updated : current));
     setItems(next);
     writeLocalProofItems(next);

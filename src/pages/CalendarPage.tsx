@@ -60,6 +60,7 @@ import {
   type RealismReport,
   type PlanningSnapshot,
 } from "@/lib/planning-engine";
+import { mergeLocalDraftsWithRemote } from "@/lib/local-draft-merge";
 import {
   buildDailyPlanPayload,
   createLifeeeId,
@@ -229,26 +230,60 @@ export default function CalendarPage() {
           fetchTimeBlocks(userId),
         ]);
         const localAnchors = loadAnchors();
+        const localTasks = loadTasks();
         const localTimeBlocks = loadTimeBlocks();
-        const nextAnchors =
-          remoteAnchors.length === 0 && localAnchors.length > 0
-            ? await Promise.all(
-                localAnchors.map((anchor) => upsertCalendarAnchor(userId, anchor)),
+        if (!active) return;
+
+        const mergedAnchors = mergeLocalDraftsWithRemote({
+          remote: remoteAnchors,
+          local: localAnchors,
+        });
+        const mergedTasks = mergeLocalDraftsWithRemote({
+          remote: remoteTasks,
+          local: localTasks,
+        });
+        const mergedTimeBlocks = mergeLocalDraftsWithRemote({
+          remote: remoteTimeBlocks,
+          local: localTimeBlocks,
+        });
+
+        const [uploadedAnchors, uploadedTasks, uploadedTimeBlocks] = await Promise.all([
+          mergedAnchors.itemsToUpload.length > 0
+            ? Promise.all(
+                mergedAnchors.itemsToUpload.map((anchor) => upsertCalendarAnchor(userId, anchor)),
               )
-            : remoteAnchors;
-        const nextTimeBlocks =
-          remoteTimeBlocks.length === 0 && localTimeBlocks.length > 0
-            ? await Promise.all(
-                localTimeBlocks.map((block) => upsertTimeBlock(userId, block)),
+            : Promise.resolve([]),
+          mergedTasks.itemsToUpload.length > 0
+            ? Promise.all(
+                mergedTasks.itemsToUpload.map((task) =>
+                  upsertUniversalTask(userId, task, currentEnergy),
+                ),
               )
-            : remoteTimeBlocks;
+            : Promise.resolve([]),
+          mergedTimeBlocks.itemsToUpload.length > 0
+            ? Promise.all(
+                mergedTimeBlocks.itemsToUpload.map((block) => upsertTimeBlock(userId, block)),
+              )
+            : Promise.resolve([]),
+        ]);
+        const uploadedAnchorById = new Map(uploadedAnchors.map((anchor) => [anchor.id, anchor]));
+        const uploadedTaskById = new Map(uploadedTasks.map((task) => [task.id, task]));
+        const uploadedTimeBlockById = new Map(uploadedTimeBlocks.map((block) => [block.id, block]));
+        const nextAnchors = mergedAnchors.items.map(
+          (anchor) => uploadedAnchorById.get(anchor.id) ?? anchor,
+        );
+        const nextTasks = mergedTasks.items.map((task) => uploadedTaskById.get(task.id) ?? task);
+        const nextTimeBlocks = mergedTimeBlocks.items.map(
+          (block) => uploadedTimeBlockById.get(block.id) ?? block,
+        );
 
         if (!active) return;
         remoteLoadedRef.current = true;
         setAnchors(nextAnchors);
-        setTasks(remoteTasks);
+        setTasks(nextTasks);
         setTimeBlocks(nextTimeBlocks);
         saveAnchors(nextAnchors);
+        saveTasks(nextTasks);
         saveTimeBlocks(nextTimeBlocks);
         setSyncStatus("saved");
       } catch (error) {
@@ -264,7 +299,7 @@ export default function CalendarPage() {
     return () => {
       active = false;
     };
-  }, [hasSupabaseConfig, sessionLoading, userId]);
+  }, [currentEnergy, hasSupabaseConfig, sessionLoading, userId]);
 
   const onDayAnchors = useMemo(
     () =>

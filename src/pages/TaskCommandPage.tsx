@@ -72,6 +72,7 @@ import {
   type LifeeeSyncStatus,
   upsertUniversalTask,
 } from "@/lib/lifeee-persistence";
+import { mergeLocalDraftsWithRemote } from "@/lib/local-draft-merge";
 import { useUIMode } from "@/providers/UIModeContext";
 import {
   PageDecisionHeader,
@@ -167,14 +168,22 @@ export default function TaskCommandPage() {
       try {
         const remoteTasks = await fetchUniversalTasks(userId);
         const localTasks = loadTasks();
-        const nextTasks =
-          remoteTasks.length === 0 && localTasks.length > 0
+        if (!active) return;
+
+        const merged = mergeLocalDraftsWithRemote({
+          remote: remoteTasks,
+          local: localTasks,
+        });
+        const uploadedTasks =
+          merged.itemsToUpload.length > 0
             ? await Promise.all(
-                localTasks.map((task) =>
+                merged.itemsToUpload.map((task) =>
                   upsertUniversalTask(userId, task, currentEnergyRef.current),
                 ),
               )
-            : remoteTasks;
+            : [];
+        const uploadedById = new Map(uploadedTasks.map((task) => [task.id, task]));
+        const nextTasks = merged.items.map((task) => uploadedById.get(task.id) ?? task);
 
         if (!active) return;
         remoteLoadedRef.current = true;

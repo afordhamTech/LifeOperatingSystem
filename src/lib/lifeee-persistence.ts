@@ -260,6 +260,7 @@ export type RelationshipEntry = {
   followUpNeeded: boolean;
   notes: string;
   created_at?: string;
+  updated_at?: string;
 };
 
 export type SubscriptionItem = {
@@ -1896,6 +1897,7 @@ export async function fetchRelationshipEntries(userId: string) {
     followUpNeeded: Boolean(row.follow_up_needed),
     notes: row.notes ?? "",
     created_at: row.created_at,
+    updated_at: row.updated_at,
   } satisfies RelationshipEntry));
 }
 
